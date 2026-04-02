@@ -34,6 +34,8 @@ exports.register = async (req, res) => {
         id: user.id,
         fullName: user.fullName,
         email: user.email,
+        role: user.role,
+        status: user.status,
       },
     });
   } catch (error) {
@@ -65,7 +67,7 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET || "SECRET_KEY",
       { expiresIn: "7d" }
     );
@@ -77,6 +79,8 @@ exports.login = async (req, res) => {
         id: user.id,
         fullName: user.fullName,
         email: user.email,
+        role: user.role,
+        status: user.status,
       },
     });
   } catch (error) {
