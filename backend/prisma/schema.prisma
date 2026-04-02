@@ -7,24 +7,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  ADMIN
-  STAFF
-}
-
-enum UserStatus {
-  ACTIVE
-  INACTIVE
-}
-
 model User {
-  id        Int        @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   fullName  String
-  email     String     @unique
+  email     String   @unique
   password  String
-  phone     String?
-  role      UserRole   @default(STAFF)
-  status    UserStatus @default(ACTIVE)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  role      String   @default("user")
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
+model Product {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  price       Float
+  stock       Int       @default(0)
+  imageUrl    String?
+  categoryId  Int
+  category    Category  @relation(fields: [categoryId], references: [id])
+  isAvailable Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
