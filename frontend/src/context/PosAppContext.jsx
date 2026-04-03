@@ -19,6 +19,11 @@ const PosAppContext = createContext(null);
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
+const isManagerRole = (role) => {
+  const normalized = normalizeRole(role);
+  return normalized === "admin" || normalized === "manager";
+};
+
 const buildNotice = (notice) => {
   if (!notice) {
     return null;
@@ -41,10 +46,15 @@ const buildNotice = (notice) => {
 
 const createInitialState = () => {
   const session = getStoredSession();
+  const initialScreen = session
+    ? isManagerRole(session.user?.role)
+      ? "manager"
+      : "tables"
+    : "login";
 
   return {
     session,
-    screen: session ? "tables" : "login",
+    screen: initialScreen,
     selectedTable: null,
     tablesRefreshToken: 0,
     notice: null,
@@ -57,7 +67,7 @@ const reducer = (state, action) => {
       return {
         ...state,
         session: action.payload,
-        screen: "tables",
+        screen: isManagerRole(action.payload?.user?.role) ? "manager" : "tables",
         selectedTable: null,
         notice: null,
       };

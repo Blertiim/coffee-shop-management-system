@@ -1,7 +1,8 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(
-  /\/$/,
-  ""
-);
+const API_BASE_URL = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "/api"
+).replace(/\/$/, "");
 
 const buildUrl = (path) => {
   if (path.startsWith("http://") || path.startsWith("https://")) {
@@ -10,6 +11,8 @@ const buildUrl = (path) => {
 
   return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 };
+
+export const buildApiUrl = (path) => buildUrl(path);
 
 const parseResponse = async (response) => {
   const contentType = response.headers.get("content-type") || "";

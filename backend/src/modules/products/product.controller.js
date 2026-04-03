@@ -347,3 +347,84 @@ exports.deleteProduct = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+exports.updateProductStock = async (req, res) => {
+  try {
+    const id = parseId(req.params.id);
+
+    if (!id) {
+      return res.status(400).json({ error: "Invalid product id" });
+    }
+
+    const { delta, stock } = req.body || {};
+
+    const existingProduct = await prisma.product.findUnique({
+      where: { id },
+    });
+
+    if (!existingProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    const hasDelta = delta !== undefined;
+    const hasStock = stock !== undefined;
+
+    if (!hasDelta && !hasStock) {
+      return res.status(400).json({
+        error: "Provide either delta (increase/decrease) or stock (absolute value)",
+      });
+    }
+
+    if (hasDelta && hasStock) {
+      return res.status(400).json({
+        error: "Provide only one: delta or stock",
+      });
+    }
+
+    let nextStock;
+
+    if (hasStock) {
+      const normalizedStock = parseStock(stock);
+
+      if (normalizedStock === null) {
+        return res.status(400).json({
+          error: "stock must be a whole number greater than or equal to 0",
+        });
+      }
+
+      nextStock = normalizedStock;
+    } else {
+      const normalizedDelta = Number(delta);
+
+      if (!Number.isInteger(normalizedDelta)) {
+        return res.status(400).json({
+          error: "delta must be a whole number",
+        });
+      }
+
+      nextStock = existingProduct.stock + normalizedDelta;
+    }
+
+    if (nextStock < 0) {
+      return res.status(400).json({
+        error: "Resulting stock cannot be negative",
+      });
+    }
+
+    const updatedProduct = await prisma.product.update({
+      where: { id },
+      data: {
+        stock: nextStock,
+      },
+      include: { category: true },
+    });
+
+    return res.status(200).json({
+      message: "Product stock updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error) {
+    console.error("Update product stock error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+};

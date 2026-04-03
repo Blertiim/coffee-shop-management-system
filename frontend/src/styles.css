@@ -16,23 +16,23 @@
   body {
     @apply m-0 font-sans text-pos-text antialiased;
     background:
-      radial-gradient(circle at 10% 0%, rgba(42, 182, 255, 0.14) 0%, transparent 28%),
-      radial-gradient(circle at 90% 100%, rgba(67, 211, 158, 0.12) 0%, transparent 30%),
-      linear-gradient(180deg, #060b16 0%, #050914 100%);
+      radial-gradient(circle at 8% 2%, rgba(31, 162, 255, 0.2) 0%, transparent 30%),
+      radial-gradient(circle at 92% 95%, rgba(44, 201, 167, 0.14) 0%, transparent 34%),
+      linear-gradient(180deg, #edf4fd 0%, #e6effb 100%);
   }
 }
 
 @layer components {
   .pos-shell {
-    @apply min-h-screen p-3 md:p-4;
+    @apply min-h-screen p-3 md:p-4 lg:p-5;
   }
 
   .pos-panel {
-    @apply rounded-pos border border-white/10 bg-pos-panel shadow-pos;
+    @apply rounded-pos border border-sky-200/20 bg-pos-panel shadow-pos;
   }
 
   .pos-panel-soft {
-    @apply rounded-pos border border-white/10 bg-pos-panelSoft shadow-pos;
+    @apply rounded-pos border border-sky-200/15 bg-pos-panelSoft shadow-pos;
   }
 
   .pos-badge {
@@ -40,7 +40,7 @@
   }
 
   .pos-button {
-    @apply inline-flex min-h-[52px] items-center justify-center rounded-xl px-4 text-sm font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-[56px] items-center justify-center rounded-xl px-4 text-sm font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .pos-button-primary {
@@ -56,7 +56,7 @@
   }
 
   .pos-title {
-    @apply m-0 text-[clamp(1.25rem,2.2vw,2rem)] font-bold leading-tight text-white;
+    @apply m-0 text-[clamp(1.35rem,2.4vw,2.05rem)] font-bold leading-tight text-white;
   }
 
   .pos-subtitle {
@@ -64,7 +64,7 @@
   }
 
   .touch-tile {
-    @apply min-h-[72px] rounded-xl px-4 py-3 text-left transition duration-150 active:scale-[0.99];
+    @apply min-h-[82px] rounded-xl px-4 py-3 text-left transition duration-150 active:scale-[0.99];
   }
 
   .scroll-y {

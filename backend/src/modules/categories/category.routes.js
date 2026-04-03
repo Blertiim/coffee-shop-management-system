@@ -3,16 +3,16 @@ const router = express.Router();
 
 const categoryController = require("./category.controller");
 const authMiddleware = require("../../middlewares/auth.middleware");
-const { adminOnly } = require("../../middlewares/role.middleware");
+const { adminOrManager } = require("../../middlewares/role.middleware");
 
 router.get("/", categoryController.getAllCategories);
 router.get("/:id", categoryController.getCategoryById);
-router.post("/", authMiddleware, adminOnly, categoryController.createCategory);
-router.put("/:id", authMiddleware, adminOnly, categoryController.updateCategory);
+router.post("/", authMiddleware, adminOrManager, categoryController.createCategory);
+router.put("/:id", authMiddleware, adminOrManager, categoryController.updateCategory);
 router.delete(
   "/:id",
   authMiddleware,
-  adminOnly,
+  adminOrManager,
   categoryController.deleteCategory
 );
 

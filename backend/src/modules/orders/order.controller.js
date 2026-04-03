@@ -1,3 +1,4 @@
+const PDFDocument = require("pdfkit");
 const prisma = require("../../config/prisma");
 const AppError = require("../../utils/app-error");
 const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
@@ -13,10 +14,19 @@ const {
 const ORDER_PROGRESS_FLOW = {
   pending: "preparing",
   preparing: "served",
-  served: "paid",
 };
 
-const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served"];
+const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
+const ITEM_EDITABLE_ORDER_STATUSES = ["pending", "preparing", "served"];
+const RECEIPT_READY_STATUSES = ["pending_payment", "paid"];
+const RECEIPT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+const MONEY_FORMATTER = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 const orderInclude = {
   user: {
@@ -48,7 +58,9 @@ const normalizeEmail = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const isAdmin = (req) => normalizeRole(req.user && req.user.role) === "admin";
+const isManager = (req) => normalizeRole(req.user && req.user.role) === "manager";
 const isWaiter = (req) => normalizeRole(req.user && req.user.role) === "waiter";
+const isAdminOrManager = (req) => isAdmin(req) || isManager(req);
 
 const isAssignedWaiter = (req, order) =>
   isWaiter(req) &&
@@ -63,7 +75,88 @@ const canAccessOrder = (req, order) => {
     return false;
   }
 
-  return isAdmin(req) || order.userId === userId || isAssignedWaiter(req, order);
+  return isAdminOrManager(req) || order.userId === userId || isAssignedWaiter(req, order);
+};
+
+const canManageOrderLifecycle = (req, order) => {
+  const userId = req.user && req.user.id;
+
+  if (!userId || !order) {
+    return false;
+  }
+
+  return isAdminOrManager(req) || isAssignedWaiter(req, order) || order.userId === userId;
+};
+
+const normalizeStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const formatMoney = (value) => MONEY_FORMATTER.format(Number(value || 0));
+
+const buildReceiptFileName = (order) =>
+  `coupon-order-${order.id}-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+const streamOrderReceiptPdf = (res, order) => {
+  const doc = new PDFDocument({
+    size: "A5",
+    margin: 28,
+  });
+
+  doc.pipe(res);
+
+  doc.fontSize(20).text("Cafe POS Coupon", { align: "center" });
+  doc.moveDown(0.3);
+  doc
+    .fontSize(10)
+    .fillColor("#555555")
+    .text(`Order #${order.id}`, { align: "center" })
+    .text(RECEIPT_DATE_FORMATTER.format(new Date(order.createdAt)), { align: "center" });
+
+  doc.moveDown(1);
+  doc.fillColor("#111111").fontSize(11);
+  doc.text(`Table: ${order.table ? order.table.number : "-"}`);
+  doc.text(
+    `Waiter: ${
+      order.employee
+        ? `${order.employee.firstName} ${order.employee.lastName}`
+        : order.user.fullName
+    }`
+  );
+  doc.text(`Status: ${order.status}`);
+  doc.text(`Payment: ${order.paymentMethod || "-"}`);
+  doc.moveDown(0.8);
+
+  doc.fontSize(10).text("Items", { underline: true });
+  doc.moveDown(0.3);
+
+  order.items.forEach((item, index) => {
+    const lineTotal = item.price * item.quantity;
+
+    doc
+      .fontSize(10)
+      .text(
+        `${index + 1}. ${item.product ? item.product.name : "Product"} x${
+          item.quantity
+        }`,
+        {
+          continued: true,
+        }
+      )
+      .text(` ${formatMoney(lineTotal)} EUR`, { align: "right" });
+  });
+
+  doc.moveDown(0.8);
+  doc
+    .fontSize(12)
+    .text(`TOTAL: ${formatMoney(order.total)} EUR`, { align: "right" });
+
+  doc.moveDown(1.2);
+  doc
+    .fontSize(9)
+    .fillColor("#444444")
+    .text("Thank you and enjoy your drinks.", { align: "center" });
+
+  doc.end();
 };
 
 const buildOrderItems = (products, normalizedItems) => {
@@ -135,6 +228,125 @@ const deductStockForOrderItems = async (tx, orderItems) => {
   }
 };
 
+const setTableStatusForOrder = async (tx, order, status) => {
+  if (!order.tableId) {
+    return;
+  }
+
+  await tx.table.update({
+    where: { id: order.tableId },
+    data: { status },
+  });
+};
+
+const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) => {
+  if (existingOrder.status === targetStatus) {
+    throw new AppError(`Order is already ${targetStatus}`);
+  }
+
+  if (targetStatus === "cancelled") {
+    if (!isAdminOrManager(req)) {
+      throw new AppError("Only admin or manager can cancel orders", 403);
+    }
+
+    await restoreStockForOrder(tx, existingOrder.items);
+    await setTableStatusForOrder(tx, existingOrder, "available");
+
+    return tx.order.update({
+      where: { id: existingOrder.id },
+      data: { status: "cancelled" },
+      include: orderInclude,
+    });
+  }
+
+  if (existingOrder.status === "cancelled") {
+    throw new AppError("Cancelled orders cannot change status");
+  }
+
+  if (existingOrder.status === "paid") {
+    throw new AppError("Paid orders cannot change status");
+  }
+
+  if (targetStatus === "pending_payment") {
+    if (!canManageOrderLifecycle(req, existingOrder)) {
+      throw new AppError(
+        "Only the assigned waiter or order owner can generate invoice",
+        403
+      );
+    }
+
+    if (!ITEM_EDITABLE_ORDER_STATUSES.includes(existingOrder.status)) {
+      throw new AppError("Invoice can only be generated for open orders");
+    }
+
+    await setTableStatusForOrder(tx, existingOrder, "pending_payment");
+
+    return tx.order.update({
+      where: { id: existingOrder.id },
+      data: { status: "pending_payment" },
+      include: orderInclude,
+    });
+  }
+
+  if (targetStatus === "paid") {
+    if (!canManageOrderLifecycle(req, existingOrder)) {
+      throw new AppError(
+        "Only the assigned waiter or order owner can complete payment",
+        403
+      );
+    }
+
+    if (existingOrder.status !== "pending_payment") {
+      throw new AppError(
+        "Payment can only be completed after invoice generation",
+        400
+      );
+    }
+
+    await setTableStatusForOrder(tx, existingOrder, "available");
+
+    return tx.order.update({
+      where: { id: existingOrder.id },
+      data: { status: "paid" },
+      include: orderInclude,
+    });
+  }
+
+  if (!canManageOrderLifecycle(req, existingOrder)) {
+    throw new AppError("Only the assigned waiter or order owner can update this order", 403);
+  }
+
+  const nextAllowedStatus = ORDER_PROGRESS_FLOW[existingOrder.status];
+
+  if (!nextAllowedStatus || targetStatus !== nextAllowedStatus) {
+    throw new AppError(
+      `Order status can only move from ${existingOrder.status} to ${nextAllowedStatus}`
+    );
+  }
+
+  await setTableStatusForOrder(tx, existingOrder, "occupied");
+
+  return tx.order.update({
+    where: { id: existingOrder.id },
+    data: { status: targetStatus },
+    include: orderInclude,
+  });
+};
+
+const runOrderStatusUpdate = async (req, id, targetStatus) =>
+  prisma.$transaction(async (tx) => {
+    const existingOrder = await tx.order.findUnique({
+      where: { id },
+      include: orderInclude,
+    });
+
+    if (!existingOrder) {
+      throw new AppError("Order not found", 404);
+    }
+
+    return applyOrderStatusTransition(tx, req, existingOrder, targetStatus);
+  });
+
 exports.createOrder = async (req, res) => {
   try {
     const userId = req.user && req.user.id;
@@ -143,16 +355,14 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 401, "Invalid authenticated user");
     }
 
-    const { items, tableId, employeeId, paymentMethod } =
-      validateCreateOrderPayload(req.body);
+    const { items, tableId, employeeId, paymentMethod } = validateCreateOrderPayload(
+      req.body
+    );
 
     const createdOrder = await prisma.$transaction(async (tx) => {
-      const [table, employee, products, activeOrderOnTable] = await Promise.all([
+      const [table, products, activeOrderOnTable] = await Promise.all([
         tx.table.findUnique({
           where: { id: tableId },
-        }),
-        tx.employee.findUnique({
-          where: { id: employeeId },
         }),
         tx.product.findMany({
           where: {
@@ -171,35 +381,24 @@ exports.createOrder = async (req, res) => {
         }),
       ]);
 
+      const employee = employeeId
+        ? await tx.employee.findUnique({
+            where: { id: employeeId },
+          })
+        : null;
+
       if (!table) {
         throw new AppError("Table not found", 404);
       }
 
-      if (table.status === "occupied" || activeOrderOnTable) {
+      const tableStatus = normalizeStatus(table.status);
+
+      if (tableStatus === "occupied" || tableStatus === "pending_payment" || activeOrderOnTable) {
         throw new AppError("Table is already occupied");
       }
 
-      if (!employee) {
-        throw new AppError("Assigned employee not found", 404);
-      }
-
-      if (employee.position !== "waiter") {
+      if (employee && employee.position !== "waiter") {
         throw new AppError("Orders can only be assigned to employees with waiter position");
-      }
-
-      const waiterUser = await tx.user.findFirst({
-        where: {
-          email: employee.email,
-          role: "waiter",
-          status: "active",
-        },
-        select: {
-          id: true,
-        },
-      });
-
-      if (!waiterUser) {
-        throw new AppError("Assigned waiter must have an active waiter user account");
       }
 
       const { orderItems, total } = buildOrderItems(products, items);
@@ -217,7 +416,7 @@ exports.createOrder = async (req, res) => {
         data: {
           userId,
           tableId,
-          employeeId,
+          employeeId: employee ? employee.id : null,
           paymentMethod,
           total,
           status: "pending",
@@ -305,8 +504,8 @@ exports.appendItemsToOrder = async (req, res) => {
         throw new AppError("Access denied", 403);
       }
 
-      if (existingOrder.status === "cancelled" || existingOrder.status === "paid") {
-        throw new AppError("Items cannot be added to this order");
+      if (!ITEM_EDITABLE_ORDER_STATUSES.includes(existingOrder.status)) {
+        throw new AppError("Items can only be added while the order is open");
       }
 
       const products = await tx.product.findMany({
@@ -366,6 +565,49 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
+exports.getTodayPaidTotals = async (req, res) => {
+  try {
+    const now = new Date();
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const aggregates = await prisma.order.aggregate({
+      where: {
+        status: "paid",
+        updatedAt: {
+          gte: dayStart,
+          lt: dayEnd,
+        },
+      },
+      _sum: {
+        total: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const payload = {
+      totalPaid: Number((aggregates._sum.total || 0).toFixed(2)),
+      paidOrders: aggregates._count.id || 0,
+      currency: "EUR",
+      date: dayStart.toISOString().slice(0, 10),
+    };
+
+    return sendSuccess(
+      res,
+      200,
+      "Today's paid totals retrieved successfully",
+      payload
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Get today's paid totals error");
+  }
+};
+
 exports.getOrderById = async (req, res) => {
   try {
     const id = validateOrderId(req.params.id);
@@ -394,87 +636,54 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
+exports.downloadOrderReceipt = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const userId = req.user && req.user.id;
+
+    if (!userId) {
+      return sendError(res, 401, "Invalid authenticated user");
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: orderInclude,
+    });
+
+    if (!order) {
+      return sendError(res, 404, "Order not found");
+    }
+
+    if (!canAccessOrder(req, order)) {
+      return sendError(res, 403, "Access denied");
+    }
+
+    if (!RECEIPT_READY_STATUSES.includes(order.status)) {
+      return sendError(
+        res,
+        400,
+        "Invoice is available only after the order is moved to pending payment"
+      );
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${buildReceiptFileName(order)}"`
+    );
+
+    streamOrderReceiptPdf(res, order);
+    return undefined;
+  } catch (error) {
+    return handleControllerError(res, error, "Download receipt error");
+  }
+};
+
 exports.updateOrderStatus = async (req, res) => {
   try {
     const id = validateOrderId(req.params.id);
     const { status } = validateOrderStatusUpdatePayload(req.body);
-
-    const updatedOrder = await prisma.$transaction(async (tx) => {
-      const existingOrder = await tx.order.findUnique({
-        where: { id },
-        include: orderInclude,
-      });
-
-      if (!existingOrder) {
-        throw new AppError("Order not found", 404);
-      }
-
-      if (existingOrder.status === status) {
-        throw new AppError(`Order is already ${status}`);
-      }
-
-      if (status === "cancelled") {
-        if (!isAdmin(req)) {
-          throw new AppError("Only admin can cancel orders", 403);
-        }
-
-        await restoreStockForOrder(tx, existingOrder.items);
-
-        if (existingOrder.tableId) {
-          await tx.table.update({
-            where: { id: existingOrder.tableId },
-            data: {
-              status: "available",
-            },
-          });
-        }
-
-        return tx.order.update({
-          where: { id },
-          data: {
-            status: "cancelled",
-          },
-          include: orderInclude,
-        });
-      }
-
-      if (existingOrder.status === "cancelled") {
-        throw new AppError("Cancelled orders cannot change status");
-      }
-
-      if (existingOrder.status === "paid") {
-        throw new AppError("Paid orders cannot change status");
-      }
-
-      if (!isAssignedWaiter(req, existingOrder)) {
-        throw new AppError("Only the assigned waiter can update this order", 403);
-      }
-
-      const nextAllowedStatus = ORDER_PROGRESS_FLOW[existingOrder.status];
-
-      if (!nextAllowedStatus || status !== nextAllowedStatus) {
-        throw new AppError(
-          `Order status can only move from ${existingOrder.status} to ${nextAllowedStatus}`
-        );
-      }
-
-      if (status === "paid" && existingOrder.tableId) {
-        await tx.table.update({
-          where: { id: existingOrder.tableId },
-          data: {
-            status: "available",
-          },
-        });
-      }
-
-      return tx.order.update({
-        where: { id },
-        data: {
-          status,
-        },
-        include: orderInclude,
-      });
-    });
+    const updatedOrder = await runOrderStatusUpdate(req, id, status);
 
     return sendSuccess(
       res,
@@ -484,5 +693,37 @@ exports.updateOrderStatus = async (req, res) => {
     );
   } catch (error) {
     return handleControllerError(res, error, "Update order status error");
+  }
+};
+
+exports.generateInvoice = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const updatedOrder = await runOrderStatusUpdate(req, id, "pending_payment");
+
+    return sendSuccess(
+      res,
+      200,
+      "Invoice generated. Order moved to pending payment",
+      updatedOrder
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Generate invoice error");
+  }
+};
+
+exports.completePayment = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const updatedOrder = await runOrderStatusUpdate(req, id, "paid");
+
+    return sendSuccess(
+      res,
+      200,
+      "Payment completed successfully",
+      updatedOrder
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Complete payment error");
   }
 };

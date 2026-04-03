@@ -23,6 +23,7 @@ export default function PosLoginScreen() {
     selectedStaffId,
     pin,
     error,
+    isLoadingProfiles,
     isSubmitting,
     selectStaff,
     appendDigit,
@@ -85,6 +86,7 @@ export default function PosLoginScreen() {
                   key={staff.id}
                   type="button"
                   onClick={() => selectStaff(staff.id)}
+                  disabled={isLoadingProfiles}
                   className={`touch-tile flex min-h-[84px] items-center gap-3 rounded-2xl border p-3 ${
                     isActive
                       ? "border-pos-accent bg-pos-accent/20"
@@ -131,8 +133,14 @@ export default function PosLoginScreen() {
           ) : null}
 
           <PosKeypad
-            disabled={isSubmitting}
-            confirmLabel={isSubmitting ? "Logging in..." : "Login"}
+            disabled={isSubmitting || isLoadingProfiles}
+            confirmLabel={
+              isLoadingProfiles
+                ? "Loading Staff..."
+                : isSubmitting
+                  ? "Logging in..."
+                  : "Login"
+            }
             onDigit={appendDigit}
             onBackspace={backspace}
             onClear={clearPin}

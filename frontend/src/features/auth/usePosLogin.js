@@ -1,17 +1,95 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { login } from "./authApi";
-import { POS_STAFF } from "./posStaff";
+import { getPosStaffProfiles, posLogin } from "./authApi";
+
+const normalizeRole = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const toRoleLabel = (role) => {
+  const normalized = normalizeRole(role);
+  if (normalized === "admin") {
+    return "Admin";
+  }
+  if (normalized === "manager") {
+    return "Manager";
+  }
+  if (normalized === "waiter") {
+    return "Waiter";
+  }
+  return "Staff";
+};
+
+const mapProfile = (profile) => ({
+  id: profile.id,
+  name: profile.name || profile.fullName || "Staff",
+  role: normalizeRole(profile.role),
+  roleLabel: toRoleLabel(profile.role),
+  status: profile.status || "active",
+});
 
 export default function usePosLogin(onLoginSuccess) {
-  const [selectedStaffId, setSelectedStaffId] = useState(POS_STAFF[0]?.id || "");
+  const [staffProfiles, setStaffProfiles] = useState([]);
+  const [selectedStaffId, setSelectedStaffId] = useState(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const loadProfiles = async () => {
+      setIsLoadingProfiles(true);
+      setError("");
+
+      try {
+        const response = await getPosStaffProfiles(controller.signal);
+        const profiles = Array.isArray(response) ? response.map(mapProfile) : [];
+
+        if (!isMounted) {
+          return;
+        }
+
+        setStaffProfiles(profiles);
+        setSelectedStaffId((current) => {
+          if (current && profiles.some((profile) => profile.id === current)) {
+            return current;
+          }
+
+          return profiles[0]?.id ?? null;
+        });
+
+        if (profiles.length === 0) {
+          setError("No active POS staff found. Create/enable a waiter first.");
+        }
+      } catch (requestError) {
+        if (!isMounted || requestError.name === "AbortError") {
+          return;
+        }
+
+        setError(requestError.message || "Cannot load POS staff profiles.");
+      } finally {
+        if (isMounted) {
+          setIsLoadingProfiles(false);
+        }
+      }
+    };
+
+    loadProfiles();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, []);
+
   const selectedStaff = useMemo(
-    () => POS_STAFF.find((staff) => staff.id === selectedStaffId) || POS_STAFF[0] || null,
-    [selectedStaffId]
+    () =>
+      staffProfiles.find((staff) => staff.id === selectedStaffId) ||
+      staffProfiles[0] ||
+      null,
+    [selectedStaffId, staffProfiles]
   );
 
   const selectStaff = (staffId) => {
@@ -21,7 +99,7 @@ export default function usePosLogin(onLoginSuccess) {
   };
 
   const appendDigit = (digit) => {
-    setPin((current) => `${current}${digit}`);
+    setPin((current) => (current.length >= 8 ? current : `${current}${digit}`));
     setError("");
   };
 
@@ -37,12 +115,12 @@ export default function usePosLogin(onLoginSuccess) {
 
   const submit = async () => {
     if (!selectedStaff) {
-      setError("No staff profile is configured for this POS.");
+      setError("Select a staff profile first.");
       return;
     }
 
-    if (!pin) {
-      setError("Enter the PIN to continue.");
+    if (!/^\d{4,8}$/.test(pin)) {
+      setError("Enter a valid PIN (4 to 8 digits).");
       return;
     }
 
@@ -50,9 +128,9 @@ export default function usePosLogin(onLoginSuccess) {
     setError("");
 
     try {
-      const response = await login({
-        email: selectedStaff.email,
-        password: pin,
+      const response = await posLogin({
+        userId: selectedStaff.id,
+        pin,
       });
 
       await onLoginSuccess(response, selectedStaff);
@@ -64,11 +142,12 @@ export default function usePosLogin(onLoginSuccess) {
   };
 
   return {
-    staffProfiles: POS_STAFF,
+    staffProfiles,
     selectedStaff,
     selectedStaffId,
     pin,
     error,
+    isLoadingProfiles,
     isSubmitting,
     selectStaff,
     appendDigit,

@@ -20,13 +20,19 @@ const authorizeRoles = (...allowedRoles) => {
 };
 
 const adminOnly = authorizeRoles("admin");
+const managerOnly = authorizeRoles("manager");
 const waiterOnly = authorizeRoles("waiter");
 const adminOrWaiter = authorizeRoles("admin", "waiter");
+const adminOrManager = authorizeRoles("admin", "manager");
+const adminManagerOrWaiter = authorizeRoles("admin", "manager", "waiter");
 
 module.exports = {
   normalizeRole,
   authorizeRoles,
   adminOnly,
+  managerOnly,
   waiterOnly,
   adminOrWaiter,
+  adminOrManager,
+  adminManagerOrWaiter,
 };

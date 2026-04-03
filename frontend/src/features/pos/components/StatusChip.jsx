@@ -4,7 +4,7 @@ const STATUS_MAP = {
     className: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
   },
   occupied: {
-    label: "Occupied",
+    label: "Open Order",
     className: "bg-amber-500/15 text-amber-300 border-amber-400/30",
   },
   reserved: {
@@ -12,19 +12,23 @@ const STATUS_MAP = {
     className: "bg-sky-500/15 text-sky-300 border-sky-400/30",
   },
   pending: {
-    label: "Pending",
+    label: "Open Order",
     className: "bg-amber-500/15 text-amber-300 border-amber-400/30",
   },
   preparing: {
-    label: "In Progress",
+    label: "Open Order",
     className: "bg-sky-500/15 text-sky-300 border-sky-400/30",
   },
   served: {
-    label: "Served",
+    label: "Open Order",
     className: "bg-indigo-500/15 text-indigo-300 border-indigo-400/30",
   },
+  pending_payment: {
+    label: "Pending Payment",
+    className: "bg-orange-500/15 text-orange-300 border-orange-400/30",
+  },
   paid: {
-    label: "Completed",
+    label: "Paid",
     className: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
   },
   cancelled: {

@@ -10,6 +10,7 @@ const VALID_ORDER_STATUSES = [
   "pending",
   "preparing",
   "served",
+  "pending_payment",
   "paid",
   "cancelled",
 ];
@@ -45,10 +46,15 @@ const validateCreateOrderPayload = (body) => {
     throw new AppError("New orders must start with pending status");
   }
 
+  const hasEmployeeId =
+    body.employeeId !== undefined &&
+    body.employeeId !== null &&
+    String(body.employeeId).trim() !== "";
+
   return {
     items: normalizeOrderItems(body.items),
     tableId: ensureId(body.tableId, "Table id"),
-    employeeId: ensureId(body.employeeId, "Employee id"),
+    employeeId: hasEmployeeId ? ensureId(body.employeeId, "Employee id") : null,
     paymentMethod: ensureEnumValue(
       body.paymentMethod,
       "Payment method",

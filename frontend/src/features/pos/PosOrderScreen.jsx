@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import PosScreenLoader from "../../components/PosScreenLoader";
 import { usePosApp } from "../../context/PosAppContext";
@@ -9,65 +9,14 @@ import ProductTile from "./components/ProductTile";
 import StatusChip from "./components/StatusChip";
 import {
   appendItemsToOrder,
+  completeOrderPayment,
   createOrder,
+  downloadOrderReceipt,
+  generateOrderInvoice,
   getCategories,
   getProducts,
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
-
-const SIMPLE_CATEGORIES = [
-  {
-    key: "kafe",
-    label: "Kafe",
-    keywords: [
-      "kafe",
-      "coffee",
-      "espresso",
-      "machiato",
-      "latte",
-      "cappuccino",
-      "americano",
-    ],
-  },
-  {
-    key: "birra",
-    label: "Birra",
-    keywords: ["birra", "beer", "heineken", "peja", "corona", "stella"],
-  },
-  {
-    key: "pije",
-    label: "Pije",
-    keywords: [
-      "pije",
-      "drink",
-      "juice",
-      "cola",
-      "fanta",
-      "water",
-      "tea",
-      "red bull",
-    ],
-  },
-  {
-    key: "alkool",
-    label: "Alkool",
-    keywords: [
-      "alkool",
-      "alcohol",
-      "vodka",
-      "whiskey",
-      "whisky",
-      "rak",
-      "wine",
-      "gin",
-    ],
-  },
-  {
-    key: "akullore",
-    label: "Akullore",
-    keywords: ["akullore", "ice cream", "gelato"],
-  },
-];
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
@@ -80,32 +29,48 @@ const QUICK_ACTIONS = [
   { key: "notes", label: "Notes", enabled: false },
 ];
 
+const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
+
 const formatPrice = (value) =>
   new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value || 0);
 
-const matchesSimpleCategory = (product, backendCategories, categoryConfig) => {
-  const backendCategory = backendCategories.find(
-    (category) => category.id === product.categoryId
-  );
+const normalizeStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
-  const haystack = [product.name, backendCategory?.name, product.category?.name]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+const getUiStatusLabel = (status) => {
+  const normalized = normalizeStatus(status);
 
-  return categoryConfig.keywords.some((keyword) => haystack.includes(keyword));
+  if (normalized === "pending_payment") {
+    return "Pending Payment";
+  }
+
+  if (normalized === "paid") {
+    return "Paid";
+  }
+
+  if (["pending", "preparing", "served", "occupied"].includes(normalized)) {
+    return "Open Order";
+  }
+
+  if (normalized === "available") {
+    return "Available";
+  }
+
+  return "Open Order";
 };
 
 export default function PosOrderScreen() {
   const { session, selectedTable: table, logout, returnToTables, showNotice } = usePosApp();
-  const [selectedCategoryKey, setSelectedCategoryKey] = useState(
-    SIMPLE_CATEGORIES[0].key
-  );
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0].value);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
+  const [isCompletingPayment, setIsCompletingPayment] = useState(false);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const {
     cart,
@@ -116,6 +81,11 @@ export default function PosOrderScreen() {
     removeProduct,
     clearCart,
   } = useOrderCart();
+
+  useEffect(() => {
+    setCurrentOrder(table?.activeOrder || null);
+    setSubmitError("");
+  }, [table]);
 
   const loadMenu = useCallback(
     async (signal) => {
@@ -147,67 +117,203 @@ export default function PosOrderScreen() {
 
   const backendCategories = menuData?.categories || [];
   const products = menuData?.products || [];
-  const activeOrder = table?.activeOrder || null;
-  const isResumeMode = Boolean(activeOrder);
   const employeeId =
     session.staffProfile?.employeeId || session.user?.employee?.id || null;
   const waiterName = session.staffProfile?.name || session.user?.fullName || "Waiter";
 
-  const visibleProducts = useMemo(() => {
-    const categoryConfig = SIMPLE_CATEGORIES.find(
-      (category) => category.key === selectedCategoryKey
+  useEffect(() => {
+    if (!backendCategories.length) {
+      setSelectedCategoryId("");
+      return;
+    }
+
+    setSelectedCategoryId((current) => {
+      if (current && backendCategories.some((category) => String(category.id) === current)) {
+        return current;
+      }
+
+      return String(backendCategories[0].id);
+    });
+  }, [backendCategories]);
+
+  const hasActiveOrder = Boolean(currentOrder);
+  const orderStatus = normalizeStatus(currentOrder?.status);
+  const canEditOrderItems = !hasActiveOrder || ORDER_EDITABLE_STATUSES.has(orderStatus);
+  const canGenerateInvoice = hasActiveOrder && ORDER_EDITABLE_STATUSES.has(orderStatus);
+  const canCompletePayment = hasActiveOrder && orderStatus === "pending_payment";
+  const canDownloadInvoice =
+    hasActiveOrder && (orderStatus === "pending_payment" || orderStatus === "paid");
+  const isBusy =
+    isSavingOrder || isGeneratingInvoice || isCompletingPayment || isDownloadingInvoice;
+
+  const categoryRailItems = useMemo(
+    () =>
+      backendCategories.map((category) => ({
+        key: String(category.id),
+        label: category.name,
+      })),
+    [backendCategories]
+  );
+
+  const selectedCategoryName = useMemo(() => {
+    const selectedCategory = backendCategories.find(
+      (category) => String(category.id) === selectedCategoryId
     );
 
-    if (!categoryConfig) {
+    return selectedCategory?.name || "Menu";
+  }, [backendCategories, selectedCategoryId]);
+
+  const visibleProducts = useMemo(() => {
+    if (!selectedCategoryId) {
       return [];
     }
 
     return products
       .filter((product) => product.isAvailable && product.stock > 0)
-      .filter((product) =>
-        matchesSimpleCategory(product, backendCategories, categoryConfig)
-      )
+      .filter((product) => String(product.categoryId) === selectedCategoryId)
       .sort((left, right) => left.name.localeCompare(right.name));
-  }, [backendCategories, products, selectedCategoryKey]);
+  }, [products, selectedCategoryId]);
 
-  const handleSubmitOrder = async () => {
-    if (!employeeId) {
-      setSubmitError("This waiter is not linked to an employee profile.");
-      return;
+  const submitItemsToOrder = async () => {
+    if (!canEditOrderItems) {
+      throw new Error("This order is in payment phase. Create a new order after payment.");
     }
 
     if (cart.length === 0) {
-      setSubmitError("Add products before sending the order.");
-      return;
+      throw new Error("Add products before saving order.");
     }
 
-    setIsSubmitting(true);
+    const payloadItems = cart.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+    }));
+
+    const order = hasActiveOrder
+      ? await appendItemsToOrder(session.token, currentOrder.id, {
+          items: payloadItems,
+        })
+      : await createOrder(session.token, {
+          tableId: table.id,
+          paymentMethod,
+          items: payloadItems,
+          ...(employeeId ? { employeeId } : {}),
+        });
+
+    setCurrentOrder(order);
+    clearCart();
+    return order;
+  };
+
+  const handleSaveOrder = async () => {
+    setIsSavingOrder(true);
     setSubmitError("");
 
     try {
-      const payloadItems = cart.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-      }));
-      const order = isResumeMode
-        ? await appendItemsToOrder(session.token, activeOrder.id, {
-            items: payloadItems,
-          })
-        : await createOrder(session.token, {
-            tableId: table.id,
-            employeeId,
-            paymentMethod,
-            items: payloadItems,
-          });
+      const order = await submitItemsToOrder();
+      showNotice({
+        type: "success",
+        message: hasActiveOrder
+          ? `Items added to Order #${order.id}. Order stays open.`
+          : `Order #${order.id} saved and kept open.`,
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
 
-      clearCart();
+      setSubmitError(requestError.message || "Cannot save order.");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  const handleGenerateInvoice = async () => {
+    setIsGeneratingInvoice(true);
+    setSubmitError("");
+
+    try {
+      if (!currentOrder) {
+        throw new Error("No active order found.");
+      }
+
+      if (cart.length > 0) {
+        throw new Error("Save order items first, then generate invoice.");
+      }
+
+      const invoicedOrder = await generateOrderInvoice(session.token, currentOrder.id);
+      setCurrentOrder(invoicedOrder);
+      await downloadOrderReceipt(session.token, invoicedOrder.id);
+
+      showNotice({
+        type: "success",
+        message: `Invoice generated for Order #${invoicedOrder.id}. Table is pending payment.`,
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
+
+      setSubmitError(requestError.message || "Cannot generate invoice.");
+    } finally {
+      setIsGeneratingInvoice(false);
+    }
+  };
+
+  const handleDownloadInvoice = async () => {
+    setIsDownloadingInvoice(true);
+    setSubmitError("");
+
+    try {
+      if (!currentOrder) {
+        throw new Error("No order selected for invoice download.");
+      }
+
+      await downloadOrderReceipt(session.token, currentOrder.id);
+      showNotice({
+        type: "success",
+        message: `Invoice downloaded for Order #${currentOrder.id}.`,
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
+
+      setSubmitError(requestError.message || "Cannot download invoice.");
+    } finally {
+      setIsDownloadingInvoice(false);
+    }
+  };
+
+  const handleCompletePayment = async () => {
+    setIsCompletingPayment(true);
+    setSubmitError("");
+
+    try {
+      if (!currentOrder) {
+        throw new Error("No active order found.");
+      }
+
+      if (cart.length > 0) {
+        throw new Error("Clear pending cart items before completing payment.");
+      }
+
+      if (normalizeStatus(currentOrder.status) !== "pending_payment") {
+        throw new Error("Generate invoice first before completing payment.");
+      }
+
+      const paidOrder = await completeOrderPayment(session.token, currentOrder.id);
+      setCurrentOrder(paidOrder);
+
       returnToTables({
         refresh: true,
         notice: {
           type: "success",
-          message: isResumeMode
-            ? `Items added to Order #${order.id} on Table ${table.number}.`
-            : `Order #${order.id} sent for Table ${table.number}.`,
+          message: `Payment completed (${formatPrice(
+            paidOrder.total
+          )} EUR) for Order #${paidOrder.id}. Table ${table.number} is available.`,
         },
       });
     } catch (requestError) {
@@ -216,9 +322,9 @@ export default function PosOrderScreen() {
         return;
       }
 
-      setSubmitError(requestError.message || "Cannot send order.");
+      setSubmitError(requestError.message || "Cannot complete payment.");
     } finally {
-      setIsSubmitting(false);
+      setIsCompletingPayment(false);
     }
   };
 
@@ -241,7 +347,9 @@ export default function PosOrderScreen() {
             </h1>
             <p className="pos-subtitle mt-2">
               {itemCount} new items in cart |{" "}
-              {isResumeMode ? "Resume active order" : `${paymentMethod.toUpperCase()} payment`}
+              {hasActiveOrder
+                ? `Order #${currentOrder.id} (${getUiStatusLabel(orderStatus)})`
+                : `${paymentMethod.toUpperCase()} payment`}
             </p>
           </div>
 
@@ -293,17 +401,14 @@ export default function PosOrderScreen() {
 
         <section className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(140px,14%)_minmax(0,58%)_minmax(300px,28%)]">
           <CategoryRail
-            categories={SIMPLE_CATEGORIES}
-            selectedCategoryKey={selectedCategoryKey}
-            onSelectCategory={setSelectedCategoryKey}
+            categories={categoryRailItems}
+            selectedCategoryKey={selectedCategoryId}
+            onSelectCategory={setSelectedCategoryId}
           />
 
           <section className="pos-panel-soft flex min-h-0 flex-col p-3">
             <div className="mb-3 flex items-center justify-between">
-              <span className="pos-badge">
-                {SIMPLE_CATEGORIES.find((category) => category.key === selectedCategoryKey)
-                  ?.label || "Menu"}
-              </span>
+              <span className="pos-badge">{selectedCategoryName}</span>
               <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">
                 {visibleProducts.length} products
               </p>
@@ -311,12 +416,23 @@ export default function PosOrderScreen() {
 
             {isLoading ? (
               <PosScreenLoader label="Loading menu..." />
+            ) : categoryRailItems.length === 0 ? (
+              <div className="pos-panel flex min-h-[280px] flex-1 items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/20 p-6 text-center">
+                <div>
+                  <p className="m-0 text-base font-semibold text-white">
+                    No categories available
+                  </p>
+                  <p className="mt-2 text-sm text-pos-muted">
+                    Manager should add categories first.
+                  </p>
+                </div>
+              </div>
             ) : visibleProducts.length === 0 ? (
               <div className="pos-panel flex min-h-[280px] flex-1 items-center justify-center rounded-2xl border border-dashed border-white/20 bg-black/20 p-6 text-center">
                 <div>
                   <p className="m-0 text-base font-semibold text-white">No products found</p>
                   <p className="mt-2 text-sm text-pos-muted">
-                    This category is empty or products are out of stock.
+                    This category is empty or all products are out of stock.
                   </p>
                 </div>
               </div>
@@ -326,7 +442,15 @@ export default function PosOrderScreen() {
                   <ProductTile
                     key={product.id}
                     product={product}
+                    disabled={!canEditOrderItems || isBusy}
                     onAdd={(value) => {
+                      if (!canEditOrderItems) {
+                        setSubmitError(
+                          "Order is pending payment. Complete payment before adding new items."
+                        );
+                        return;
+                      }
+
                       addProduct(value);
                       setSubmitError("");
                     }}
@@ -336,18 +460,22 @@ export default function PosOrderScreen() {
             )}
           </section>
 
-          <aside className="pos-panel flex min-h-0 flex-col p-3">
+          <aside className="pos-panel flex min-h-0 flex-col p-3 xl:sticky xl:top-3 xl:h-[calc(100vh-40px)]">
             <div className="mb-3 rounded-xl border border-white/10 bg-pos-panelSoft p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">Order</p>
                 <p className="m-0 text-xs font-semibold text-pos-muted">{table.location}</p>
               </div>
-              {isResumeMode ? (
+              {hasActiveOrder ? (
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="m-0 text-sm font-semibold text-white">Order #{activeOrder.id}</p>
-                  <StatusChip status={activeOrder.status} />
+                  <p className="m-0 text-sm font-semibold text-white">Order #{currentOrder.id}</p>
+                  <StatusChip status={currentOrder.status} />
                 </div>
-              ) : null}
+              ) : (
+                <div className="mb-2">
+                  <p className="m-0 text-sm font-semibold text-white">No active order yet</p>
+                </div>
+              )}
               <div className="flex items-end justify-between gap-2">
                 <p className="m-0 text-sm font-semibold text-white">
                   {itemCount} new items selected
@@ -358,16 +486,18 @@ export default function PosOrderScreen() {
               </div>
             </div>
 
-            {isResumeMode ? (
+            {hasActiveOrder ? (
               <div className="mb-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                 <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">
                   Active ticket total
                 </p>
                 <p className="m-0 mt-1 text-lg font-semibold text-white">
-                  {formatPrice(activeOrder.total)} EUR
+                  {formatPrice(currentOrder.total)} EUR
                 </p>
                 <p className="m-0 mt-1 text-xs text-pos-muted">
-                  You are adding new items to this order.
+                  {orderStatus === "pending_payment"
+                    ? "Invoice generated. Awaiting payment confirmation."
+                    : "Order remains open. You can add more items anytime."}
                 </p>
               </div>
             ) : (
@@ -393,18 +523,21 @@ export default function PosOrderScreen() {
               type="button"
               className="pos-button pos-button-muted mb-3 min-h-[44px] rounded-xl text-xs uppercase tracking-wide"
               onClick={clearCart}
+              disabled={isBusy || cart.length === 0}
             >
               Clear Cart
             </button>
 
             <div className="scroll-y min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-              {isResumeMode && Array.isArray(activeOrder.items) && activeOrder.items.length > 0 ? (
+              {hasActiveOrder &&
+              Array.isArray(currentOrder.items) &&
+              currentOrder.items.length > 0 ? (
                 <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                   <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">
                     Existing items
                   </p>
                   <div className="mt-2 space-y-1">
-                    {activeOrder.items.slice(0, 6).map((item) => (
+                    {currentOrder.items.slice(0, 6).map((item) => (
                       <div
                         key={item.id}
                         className="flex items-center justify-between text-xs text-pos-muted"
@@ -413,9 +546,9 @@ export default function PosOrderScreen() {
                         <span>{formatPrice(item.price * item.quantity)} EUR</span>
                       </div>
                     ))}
-                    {activeOrder.items.length > 6 ? (
+                    {currentOrder.items.length > 6 ? (
                       <p className="m-0 text-xs text-pos-muted">
-                        +{activeOrder.items.length - 6} more item lines
+                        +{currentOrder.items.length - 6} more item lines
                       </p>
                     ) : null}
                   </div>
@@ -444,7 +577,7 @@ export default function PosOrderScreen() {
             <div className="mt-3 space-y-2">
               <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-pos-muted">Total</span>
+                  <span className="text-sm text-pos-muted">New Items Total</span>
                   <strong className="text-2xl font-bold text-white">
                     {formatPrice(total)} EUR
                   </strong>
@@ -453,20 +586,49 @@ export default function PosOrderScreen() {
 
               <button
                 type="button"
-                className="pos-button pos-button-primary w-full min-h-[64px] rounded-xl text-base font-bold"
-                disabled={isSubmitting || cart.length === 0}
-                onClick={handleSubmitOrder}
+                className="pos-button pos-button-primary w-full min-h-[62px] rounded-xl text-base font-bold"
+                disabled={isBusy || !canEditOrderItems || cart.length === 0}
+                onClick={handleSaveOrder}
               >
-                {isSubmitting
-                  ? isResumeMode
-                    ? "Updating..."
-                    : "Sending..."
-                  : isResumeMode
+                {isSavingOrder
+                  ? "Saving..."
+                  : hasActiveOrder
                     ? "Add Items"
-                    : paymentMethod === "card"
-                      ? "Pay Now"
-                      : "Send Order"}
+                    : "Save Order"}
               </button>
+
+              {canGenerateInvoice || isGeneratingInvoice ? (
+                <button
+                  type="button"
+                  className="pos-button w-full min-h-[56px] rounded-xl bg-pos-warn text-slate-950 text-sm font-semibold hover:bg-amber-300 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isBusy || cart.length > 0}
+                  onClick={handleGenerateInvoice}
+                >
+                  {isGeneratingInvoice ? "Generating Invoice..." : "Generate Invoice"}
+                </button>
+              ) : null}
+
+              {canDownloadInvoice || isDownloadingInvoice ? (
+                <button
+                  type="button"
+                  className="pos-button pos-button-muted w-full min-h-[52px] rounded-xl text-sm font-semibold"
+                  disabled={isBusy}
+                  onClick={handleDownloadInvoice}
+                >
+                  {isDownloadingInvoice ? "Downloading..." : "Invoice PDF"}
+                </button>
+              ) : null}
+
+              {canCompletePayment || isCompletingPayment ? (
+                <button
+                  type="button"
+                  className="pos-button w-full min-h-[58px] rounded-xl bg-emerald-500 text-slate-950 text-sm font-bold hover:bg-emerald-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isBusy}
+                  onClick={handleCompletePayment}
+                >
+                  {isCompletingPayment ? "Completing Payment..." : "Complete Payment"}
+                </button>
+              ) : null}
             </div>
           </aside>
         </section>
