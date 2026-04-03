@@ -1,22 +1,28 @@
-import { apiRequest } from "../../lib/api";
+import { apiRequest, unwrapApiData } from "../../lib/api";
 
-export const getDashboardStats = (token, signal) =>
-  apiRequest("/dashboard/stats", {
-    method: "GET",
-    token,
-    signal,
-  });
+export const getDashboardStats = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/dashboard/stats", {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
 
-export const getTopProducts = (token, signal) =>
-  apiRequest("/dashboard/top-products", {
-    method: "GET",
-    token,
-    signal,
-  });
+export const getTopProducts = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/dashboard/top-products", {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
 
-export const getRecentOrders = (token, signal) =>
-  apiRequest("/dashboard/recent-orders", {
-    method: "GET",
-    token,
-    signal,
-  });
+export const getRecentOrders = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/dashboard/recent-orders", {
+      method: "GET",
+      token,
+      signal,
+    })
+  );

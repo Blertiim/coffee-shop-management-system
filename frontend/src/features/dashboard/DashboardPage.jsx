@@ -60,9 +60,9 @@ export default function DashboardPage({ session, onLogout }) {
           return;
         }
 
-        setStats(statsResponse.stats);
-        setTopProducts(topProductsResponse.topProducts || []);
-        setRecentOrders(recentOrdersResponse.recentOrders || []);
+        setStats(statsResponse || null);
+        setTopProducts(topProductsResponse || []);
+        setRecentOrders(recentOrdersResponse || []);
       } catch (requestError) {
         if (!isMounted || requestError.name === "AbortError") {
           return;

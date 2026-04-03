@@ -1,37 +1,39 @@
-import { useState } from "react";
-import LoginForm from "./features/auth/LoginForm";
-import DashboardPage from "./features/dashboard/DashboardPage";
-import {
-  clearStoredSession,
-  getStoredSession,
-  saveStoredSession,
-} from "./lib/authStorage";
+import { Suspense, lazy } from "react";
 
-export default function App() {
-  const [session, setSession] = useState(() => getStoredSession());
+import PosScreenLoader from "./components/PosScreenLoader";
+import PosToast from "./components/PosToast";
+import { PosAppProvider, usePosApp } from "./context/PosAppContext";
 
-  const handleLoginSuccess = (loginResponse) => {
-    const nextSession = {
-      token: loginResponse.token,
-      user: loginResponse.user,
-    };
+const PosLoginScreen = lazy(() => import("./features/auth/PosLoginScreen"));
+const PosOrderScreen = lazy(() => import("./features/pos/PosOrderScreen"));
+const TableSelectionScreen = lazy(() =>
+  import("./features/pos/TableSelectionScreen")
+);
 
-    saveStoredSession(nextSession);
-    setSession(nextSession);
-  };
-
-  const handleLogout = () => {
-    clearStoredSession();
-    setSession(null);
-  };
+function PosAppShell() {
+  const { session, screen, selectedTable, notice, dismissNotice } = usePosApp();
 
   return (
     <div className="app-root">
-      {session ? (
-        <DashboardPage session={session} onLogout={handleLogout} />
-      ) : (
-        <LoginForm onLoginSuccess={handleLoginSuccess} />
-      )}
+      <Suspense fallback={<PosScreenLoader label="Preparing your POS workspace..." />}>
+        {!session || screen === "login" ? (
+          <PosLoginScreen />
+        ) : screen === "order" && selectedTable ? (
+          <PosOrderScreen />
+        ) : (
+          <TableSelectionScreen />
+        )}
+      </Suspense>
+
+      <PosToast notice={notice} onDismiss={dismissNotice} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <PosAppProvider>
+      <PosAppShell />
+    </PosAppProvider>
   );
 }

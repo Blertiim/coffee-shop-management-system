@@ -1,7 +1,9 @@
-import { apiRequest } from "../../lib/api";
+import { apiRequest, unwrapApiData } from "../../lib/api";
 
-export const login = (credentials) =>
-  apiRequest("/auth/login", {
-    method: "POST",
-    body: credentials,
-  });
+export const login = async (credentials) =>
+  unwrapApiData(
+    await apiRequest("/auth/login", {
+      method: "POST",
+      body: credentials,
+    })
+  );

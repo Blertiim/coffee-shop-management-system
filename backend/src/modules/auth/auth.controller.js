@@ -2,6 +2,30 @@ const prisma = require("../../config/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
+const buildUserPayload = async (user) => {
+  const employee = await prisma.employee.findFirst({
+    where: {
+      email: user.email,
+    },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      position: true,
+      shift: true,
+    },
+  });
+
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    employee,
+  };
+};
+
 exports.register = async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
@@ -30,13 +54,7 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       message: "User registered successfully",
-      user: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-      },
+      user: await buildUserPayload(user),
     });
   } catch (error) {
     console.error("Register error:", error);
@@ -75,13 +93,7 @@ exports.login = async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token,
-      user: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        status: user.status,
-      },
+      user: await buildUserPayload(user),
     });
   } catch (error) {
     console.error("Login error:", error);

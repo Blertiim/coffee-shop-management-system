@@ -1,12 +1,11 @@
-const AUTH_STORAGE_KEY = "coffee-shop-dashboard-session";
+const AUTH_STORAGE_KEY = "coffee-shop-pos-session";
 
 export const getStoredSession = () => {
   try {
-    const storedValue = localStorage.getItem(AUTH_STORAGE_KEY);
-
-    return storedValue ? JSON.parse(storedValue) : null;
+    const rawValue = localStorage.getItem(AUTH_STORAGE_KEY);
+    return rawValue ? JSON.parse(rawValue) : null;
   } catch (error) {
-    console.error("Failed to read stored session:", error);
+    console.error("Failed to read stored POS session:", error);
     return null;
   }
 };

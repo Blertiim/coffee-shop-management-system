@@ -1,4 +1,5 @@
 const prisma = require("../../config/prisma");
+const { handleControllerError, sendSuccess } = require("../../utils/response");
 
 const recentOrderInclude = {
   user: {
@@ -10,6 +11,8 @@ const recentOrderInclude = {
       status: true,
     },
   },
+  table: true,
+  employee: true,
   items: {
     include: {
       product: {
@@ -39,33 +42,35 @@ exports.getDashboardStats = async (req, res) => {
         where: { status: "pending" },
       }),
       prisma.order.count({
-        where: { status: "completed" },
+        where: { status: "paid" },
       }),
       prisma.order.aggregate({
-        where: { status: "completed" },
+        where: { status: "paid" },
         _sum: { total: true },
       }),
     ]);
 
-    res.status(200).json({
-      stats: {
+    return sendSuccess(res, 200, "Dashboard statistics retrieved successfully", {
         totalProducts,
         totalCategories,
         totalOrders,
         totalRevenue: Number((revenueAggregation._sum.total || 0).toFixed(2)),
         totalPendingOrders,
         totalCompletedOrders,
-      },
     });
   } catch (error) {
-    console.error("Get dashboard stats error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get dashboard stats error");
   }
 };
 
 exports.getTopProducts = async (req, res) => {
   try {
     const groupedItems = await prisma.orderItem.groupBy({
+      where: {
+        order: {
+          status: "paid",
+        },
+      },
       by: ["productId"],
       _sum: {
         quantity: true,
@@ -79,7 +84,7 @@ exports.getTopProducts = async (req, res) => {
     });
 
     if (groupedItems.length === 0) {
-      return res.status(200).json({ topProducts: [] });
+      return sendSuccess(res, 200, "Top products retrieved successfully", []);
     }
 
     const products = await prisma.product.findMany({
@@ -110,10 +115,9 @@ exports.getTopProducts = async (req, res) => {
       })
       .filter(Boolean);
 
-    res.status(200).json({ topProducts });
+    return sendSuccess(res, 200, "Top products retrieved successfully", topProducts);
   } catch (error) {
-    console.error("Get top products error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get top products error");
   }
 };
 
@@ -125,9 +129,8 @@ exports.getRecentOrders = async (req, res) => {
       take: 5,
     });
 
-    res.status(200).json({ recentOrders });
+    return sendSuccess(res, 200, "Recent orders retrieved successfully", recentOrders);
   } catch (error) {
-    console.error("Get recent orders error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get recent orders error");
   }
 };

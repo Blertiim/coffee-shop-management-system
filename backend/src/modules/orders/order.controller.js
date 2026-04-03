@@ -1,6 +1,22 @@
 const prisma = require("../../config/prisma");
+const AppError = require("../../utils/app-error");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
+const { normalizeRole } = require("../../middlewares/role.middleware");
+const {
+  validateCreateOrderPayload,
+  validateAppendOrderItemsPayload,
+  validateOrderId,
+  validateTableId,
+  validateOrderStatusUpdatePayload,
+} = require("./order.validation");
 
-const VALID_ORDER_STATUSES = new Set(["pending", "completed", "cancelled"]);
+const ORDER_PROGRESS_FLOW = {
+  pending: "preparing",
+  preparing: "served",
+  served: "paid",
+};
+
+const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served"];
 
 const orderInclude = {
   user: {
@@ -12,118 +28,61 @@ const orderInclude = {
       status: true,
     },
   },
+  table: true,
+  employee: true,
   items: {
     include: {
       product: {
-        include: { category: true },
+        include: {
+          category: true,
+        },
       },
     },
-    orderBy: { id: "asc" },
+    orderBy: {
+      id: "asc",
+    },
   },
 };
 
-class OrderValidationError extends Error {
-  constructor(message, statusCode = 400) {
-    super(message);
-    this.name = "OrderValidationError";
-    this.statusCode = statusCode;
+const normalizeEmail = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const isAdmin = (req) => normalizeRole(req.user && req.user.role) === "admin";
+const isWaiter = (req) => normalizeRole(req.user && req.user.role) === "waiter";
+
+const isAssignedWaiter = (req, order) =>
+  isWaiter(req) &&
+  order &&
+  order.employee &&
+  normalizeEmail(order.employee.email) === normalizeEmail(req.user && req.user.email);
+
+const canAccessOrder = (req, order) => {
+  const userId = req.user && req.user.id;
+
+  if (!userId || !order) {
+    return false;
   }
-}
 
-const parseId = (value) => {
-  const id = Number(value);
-
-  if (!Number.isInteger(id) || id <= 0) {
-    return null;
-  }
-
-  return id;
+  return isAdmin(req) || order.userId === userId || isAssignedWaiter(req, order);
 };
 
-const parseQuantity = (value) => {
-  const quantity = Number(value);
-
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    return null;
-  }
-
-  return quantity;
-};
-
-const normalizeStatus = (value) => {
-  if (value === undefined) {
-    return "pending";
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalizedValue = value.trim().toLowerCase();
-
-  if (!normalizedValue || !VALID_ORDER_STATUSES.has(normalizedValue)) {
-    return null;
-  }
-
-  return normalizedValue;
-};
-
-const normalizeItems = (items) => {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new OrderValidationError("Order items are required");
-  }
-
-  const normalizedItems = items.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      throw new OrderValidationError(
-        `Order item at position ${index + 1} must be an object`
-      );
-    }
-
-    const productId = parseId(item.productId);
-    const quantity = parseQuantity(item.quantity);
-
-    if (!productId || !quantity) {
-      throw new OrderValidationError(
-        `Order item at position ${index + 1} must include a valid productId and quantity`
-      );
-    }
-
-    return { productId, quantity };
-  });
-
-  const uniqueProductIds = new Set(normalizedItems.map((item) => item.productId));
-
-  if (uniqueProductIds.size !== normalizedItems.length) {
-    throw new OrderValidationError("Each product can only appear once per order");
-  }
-
-  return normalizedItems;
-};
-
-const mapOrderData = (productsById, items) => {
+const buildOrderItems = (products, normalizedItems) => {
+  const productsById = new Map(products.map((product) => [product.id, product]));
   let total = 0;
 
-  const orderItems = items.map((item) => {
+  const orderItems = normalizedItems.map((item) => {
     const product = productsById.get(item.productId);
 
     if (!product) {
-      throw new OrderValidationError(
-        `Product with id ${item.productId} was not found`,
-        404
-      );
+      throw new AppError(`Product with id ${item.productId} was not found`, 404);
     }
 
     if (!product.isAvailable) {
-      throw new OrderValidationError(
-        `Product "${product.name}" is not available for ordering`
-      );
+      throw new AppError(`Product "${product.name}" is not available for ordering`);
     }
 
     if (product.stock < item.quantity) {
-      throw new OrderValidationError(
-        `Not enough stock for product "${product.name}"`
-      );
+      throw new AppError(`Not enough stock for product "${product.name}"`);
     }
 
     total += product.price * item.quantity;
@@ -141,71 +100,127 @@ const mapOrderData = (productsById, items) => {
   };
 };
 
-const getAuthenticatedUserId = (req) => parseId(req.user && req.user.id);
-const isAdminUser = (req) =>
-  req.user &&
-  typeof req.user.role === "string" &&
-  req.user.role.trim().toLowerCase() === "admin";
+const restoreStockForOrder = async (tx, items) => {
+  for (const item of items) {
+    await tx.product.update({
+      where: { id: item.productId },
+      data: {
+        stock: {
+          increment: item.quantity,
+        },
+      },
+    });
+  }
+};
+
+const deductStockForOrderItems = async (tx, orderItems) => {
+  for (const item of orderItems) {
+    const updatedProduct = await tx.product.updateMany({
+      where: {
+        id: item.productId,
+        stock: {
+          gte: item.quantity,
+        },
+      },
+      data: {
+        stock: {
+          decrement: item.quantity,
+        },
+      },
+    });
+
+    if (updatedProduct.count === 0) {
+      throw new AppError("Stock changed while creating the order. Please try again.");
+    }
+  }
+};
 
 exports.createOrder = async (req, res) => {
   try {
-    const userId = getAuthenticatedUserId(req);
-    const items = normalizeItems(req.body.items);
-    const status = normalizeStatus(req.body.status);
+    const userId = req.user && req.user.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Invalid authenticated user" });
+      return sendError(res, 401, "Invalid authenticated user");
     }
 
-    if (!status) {
-      return res.status(400).json({
-        error: "Status must be one of: pending, completed, cancelled",
-      });
-    }
+    const { items, tableId, employeeId, paymentMethod } =
+      validateCreateOrderPayload(req.body);
 
     const createdOrder = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({
-        where: { id: userId },
-      });
+      const [table, employee, products, activeOrderOnTable] = await Promise.all([
+        tx.table.findUnique({
+          where: { id: tableId },
+        }),
+        tx.employee.findUnique({
+          where: { id: employeeId },
+        }),
+        tx.product.findMany({
+          where: {
+            id: {
+              in: items.map((item) => item.productId),
+            },
+          },
+        }),
+        tx.order.findFirst({
+          where: {
+            tableId,
+            status: {
+              in: ACTIVE_ORDER_STATUSES,
+            },
+          },
+        }),
+      ]);
 
-      if (!user) {
-        throw new OrderValidationError("Authenticated user not found", 404);
+      if (!table) {
+        throw new AppError("Table not found", 404);
       }
 
-      const products = await tx.product.findMany({
+      if (table.status === "occupied" || activeOrderOnTable) {
+        throw new AppError("Table is already occupied");
+      }
+
+      if (!employee) {
+        throw new AppError("Assigned employee not found", 404);
+      }
+
+      if (employee.position !== "waiter") {
+        throw new AppError("Orders can only be assigned to employees with waiter position");
+      }
+
+      const waiterUser = await tx.user.findFirst({
         where: {
-          id: { in: items.map((item) => item.productId) },
+          email: employee.email,
+          role: "waiter",
+          status: "active",
+        },
+        select: {
+          id: true,
         },
       });
 
-      const productsById = new Map(products.map((product) => [product.id, product]));
-      const { orderItems, total } = mapOrderData(productsById, items);
-
-      for (const item of orderItems) {
-        const updatedProduct = await tx.product.updateMany({
-          where: {
-            id: item.productId,
-            stock: { gte: item.quantity },
-          },
-          data: {
-            stock: { decrement: item.quantity },
-          },
-        });
-
-        if (updatedProduct.count === 0) {
-          const product = productsById.get(item.productId);
-
-          throw new OrderValidationError(
-            `Not enough stock for product "${product.name}"`
-          );
-        }
+      if (!waiterUser) {
+        throw new AppError("Assigned waiter must have an active waiter user account");
       }
+
+      const { orderItems, total } = buildOrderItems(products, items);
+
+      await deductStockForOrderItems(tx, orderItems);
+
+      await tx.table.update({
+        where: { id: tableId },
+        data: {
+          status: "occupied",
+        },
+      });
 
       return tx.order.create({
         data: {
           userId,
+          tableId,
+          employeeId,
+          paymentMethod,
           total,
-          status,
+          status: "pending",
           items: {
             create: orderItems,
           },
@@ -214,17 +229,9 @@ exports.createOrder = async (req, res) => {
       });
     });
 
-    res.status(201).json({
-      message: "Order created successfully",
-      order: createdOrder,
-    });
+    return sendSuccess(res, 201, "Order created successfully", createdOrder);
   } catch (error) {
-    if (error instanceof OrderValidationError) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-
-    console.error("Create order error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Create order error");
   }
 };
 
@@ -232,48 +239,140 @@ exports.getAllOrders = async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
       include: orderInclude,
-      orderBy: { createdAt: "desc" },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
 
-    res.status(200).json(orders);
+    return sendSuccess(res, 200, "Orders retrieved successfully", orders);
   } catch (error) {
-    console.error("Get all orders error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get all orders error");
+  }
+};
+
+exports.getActiveOrderByTable = async (req, res) => {
+  try {
+    const tableId = validateTableId(req.params.tableId);
+    const userId = req.user && req.user.id;
+
+    if (!userId) {
+      return sendError(res, 401, "Invalid authenticated user");
+    }
+
+    const activeOrder = await prisma.order.findFirst({
+      where: {
+        tableId,
+        status: {
+          in: ACTIVE_ORDER_STATUSES,
+        },
+      },
+      include: orderInclude,
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    if (!activeOrder) {
+      return sendError(res, 404, "No active order found for this table");
+    }
+
+    if (!canAccessOrder(req, activeOrder)) {
+      return sendError(res, 403, "Access denied");
+    }
+
+    return sendSuccess(res, 200, "Active order retrieved successfully", activeOrder);
+  } catch (error) {
+    return handleControllerError(res, error, "Get active order by table error");
+  }
+};
+
+exports.appendItemsToOrder = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const { items } = validateAppendOrderItemsPayload(req.body);
+
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: orderInclude,
+      });
+
+      if (!existingOrder) {
+        throw new AppError("Order not found", 404);
+      }
+
+      if (!canAccessOrder(req, existingOrder)) {
+        throw new AppError("Access denied", 403);
+      }
+
+      if (existingOrder.status === "cancelled" || existingOrder.status === "paid") {
+        throw new AppError("Items cannot be added to this order");
+      }
+
+      const products = await tx.product.findMany({
+        where: {
+          id: {
+            in: items.map((item) => item.productId),
+          },
+        },
+      });
+
+      const { orderItems, total } = buildOrderItems(products, items);
+      await deductStockForOrderItems(tx, orderItems);
+
+      await tx.orderItem.createMany({
+        data: orderItems.map((item) => ({
+          orderId: existingOrder.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+      });
+
+      return tx.order.update({
+        where: { id: existingOrder.id },
+        data: {
+          total: Number((existingOrder.total + total).toFixed(2)),
+        },
+        include: orderInclude,
+      });
+    });
+
+    return sendSuccess(res, 200, "Items added to order successfully", updatedOrder);
+  } catch (error) {
+    return handleControllerError(res, error, "Append order items error");
   }
 };
 
 exports.getMyOrders = async (req, res) => {
   try {
-    const userId = getAuthenticatedUserId(req);
+    const userId = req.user && req.user.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Invalid authenticated user" });
+      return sendError(res, 401, "Invalid authenticated user");
     }
 
     const orders = await prisma.order.findMany({
       where: { userId },
       include: orderInclude,
-      orderBy: { createdAt: "desc" },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
 
-    res.status(200).json(orders);
+    return sendSuccess(res, 200, "Orders retrieved successfully", orders);
   } catch (error) {
-    console.error("Get my orders error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get my orders error");
   }
 };
 
 exports.getOrderById = async (req, res) => {
   try {
-    const id = parseId(req.params.id);
-    const userId = getAuthenticatedUserId(req);
-
-    if (!id) {
-      return res.status(400).json({ error: "Invalid order id" });
-    }
+    const id = validateOrderId(req.params.id);
+    const userId = req.user && req.user.id;
 
     if (!userId) {
-      return res.status(401).json({ error: "Invalid authenticated user" });
+      return sendError(res, 401, "Invalid authenticated user");
     }
 
     const order = await prisma.order.findUnique({
@@ -282,81 +381,108 @@ exports.getOrderById = async (req, res) => {
     });
 
     if (!order) {
-      return res.status(404).json({ error: "Order not found" });
+      return sendError(res, 404, "Order not found");
     }
 
-    if (!isAdminUser(req) && order.userId !== userId) {
-      return res.status(403).json({ error: "Access denied" });
+    if (!canAccessOrder(req, order)) {
+      return sendError(res, 403, "Access denied");
     }
 
-    res.status(200).json(order);
+    return sendSuccess(res, 200, "Order retrieved successfully", order);
   } catch (error) {
-    console.error("Get order by id error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get order by id error");
   }
 };
 
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const id = parseId(req.params.id);
-    const status = normalizeStatus(req.body.status);
-
-    if (!id) {
-      return res.status(400).json({ error: "Invalid order id" });
-    }
-
-    if (!status) {
-      return res.status(400).json({
-        error: "Status must be one of: pending, completed, cancelled",
-      });
-    }
+    const id = validateOrderId(req.params.id);
+    const { status } = validateOrderStatusUpdatePayload(req.body);
 
     const updatedOrder = await prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { id },
-        include: {
-          items: true,
-        },
+        include: orderInclude,
       });
 
       if (!existingOrder) {
-        throw new OrderValidationError("Order not found", 404);
+        throw new AppError("Order not found", 404);
       }
 
-      if (existingOrder.status === "cancelled" && status !== "cancelled") {
-        throw new OrderValidationError(
-          "Cancelled orders cannot change status"
-        );
+      if (existingOrder.status === status) {
+        throw new AppError(`Order is already ${status}`);
       }
 
-      if (existingOrder.status !== "cancelled" && status === "cancelled") {
-        for (const item of existingOrder.items) {
-          await tx.product.update({
-            where: { id: item.productId },
+      if (status === "cancelled") {
+        if (!isAdmin(req)) {
+          throw new AppError("Only admin can cancel orders", 403);
+        }
+
+        await restoreStockForOrder(tx, existingOrder.items);
+
+        if (existingOrder.tableId) {
+          await tx.table.update({
+            where: { id: existingOrder.tableId },
             data: {
-              stock: { increment: item.quantity },
+              status: "available",
             },
           });
         }
+
+        return tx.order.update({
+          where: { id },
+          data: {
+            status: "cancelled",
+          },
+          include: orderInclude,
+        });
+      }
+
+      if (existingOrder.status === "cancelled") {
+        throw new AppError("Cancelled orders cannot change status");
+      }
+
+      if (existingOrder.status === "paid") {
+        throw new AppError("Paid orders cannot change status");
+      }
+
+      if (!isAssignedWaiter(req, existingOrder)) {
+        throw new AppError("Only the assigned waiter can update this order", 403);
+      }
+
+      const nextAllowedStatus = ORDER_PROGRESS_FLOW[existingOrder.status];
+
+      if (!nextAllowedStatus || status !== nextAllowedStatus) {
+        throw new AppError(
+          `Order status can only move from ${existingOrder.status} to ${nextAllowedStatus}`
+        );
+      }
+
+      if (status === "paid" && existingOrder.tableId) {
+        await tx.table.update({
+          where: { id: existingOrder.tableId },
+          data: {
+            status: "available",
+          },
+        });
       }
 
       return tx.order.update({
         where: { id },
-        data: { status },
+        data: {
+          status,
+        },
         include: orderInclude,
       });
     });
 
-    res.status(200).json({
-      message: "Order status updated successfully",
-      order: updatedOrder,
-    });
+    return sendSuccess(
+      res,
+      200,
+      "Order status updated successfully",
+      updatedOrder
+    );
   } catch (error) {
-    if (error instanceof OrderValidationError) {
-      return res.status(error.statusCode).json({ error: error.message });
-    }
-
-    console.error("Update order status error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Update order status error");
   }
 };

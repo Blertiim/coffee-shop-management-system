@@ -33,6 +33,8 @@ const parseResponse = async (response) => {
   return payload;
 };
 
+export const unwrapApiData = (payload) => payload?.data ?? payload;
+
 export const apiRequest = async (path, options = {}) => {
   const { token, headers, body, ...rest } = options;
   const resolvedHeaders = new Headers(headers || {});
