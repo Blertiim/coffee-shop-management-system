@@ -39,7 +39,7 @@ export default function PosLoginScreen() {
 
   return (
     <main className="pos-shell">
-      <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.95fr]">
+      <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.95fr]">
         <article className="pos-panel relative hidden overflow-hidden p-8 lg:flex lg:flex-col lg:justify-between">
           <div className="absolute -left-10 -top-8 h-48 w-48 rounded-full bg-pos-accent/20 blur-2xl" />
           <div className="absolute -bottom-10 right-10 h-44 w-44 rounded-full bg-pos-accentSoft/20 blur-2xl" />
@@ -68,7 +68,7 @@ export default function PosLoginScreen() {
           </div>
         </article>
 
-        <article className="pos-panel flex flex-col p-4 sm:p-6 lg:p-7">
+        <article className="pos-panel flex flex-col p-4 sm:p-6 lg:p-6 xl:p-7">
           <div className="mb-5">
             <span className="pos-badge">Staff Login</span>
             <h2 className="pos-title mt-3">PIN Access</h2>

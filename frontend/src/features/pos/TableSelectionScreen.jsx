@@ -3,15 +3,8 @@ import { useCallback, useMemo, useState } from "react";
 import PosScreenLoader from "../../components/PosScreenLoader";
 import { usePosApp } from "../../context/PosAppContext";
 import useApiResource from "../../hooks/useApiResource";
-import TableTile from "./components/TableTile";
-import {
-  completeOrderPayment,
-  downloadOrderReceipt,
-  generateOrderInvoice,
-  getActiveOrderByTable,
-  getTables,
-  getTodayPaidTotals,
-} from "./posApi";
+import FloorLayoutBoard from "./components/FloorLayoutBoard";
+import { getActiveOrderByTable, getTables, getTodayPaidTotals } from "./posApi";
 
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -74,13 +67,9 @@ export default function TableSelectionScreen() {
     selectTable,
     showNotice,
     tablesRefreshToken,
-    returnToTables,
   } = usePosApp();
   const [selectedLocation, setSelectedLocation] = useState("all");
-  const [tableActionState, setTableActionState] = useState({
-    tableId: null,
-    action: null,
-  });
+  const [openingTableId, setOpeningTableId] = useState(null);
 
   const loadTables = useCallback(
     async (signal) => {
@@ -150,95 +139,58 @@ export default function TableSelectionScreen() {
 
   const summary = useMemo(() => buildTableSummary(visibleTables), [visibleTables]);
 
-  const withTableAction = async (table, action, runner) => {
-    setTableActionState({ tableId: table.id, action });
-
-    try {
-      await runner();
-    } catch (requestError) {
-      if (requestError.status === 401) {
-        logout();
-        return;
-      }
-
-      showNotice({
-        type: "error",
-        message:
-          requestError.message ||
-          `Unable to process action for Table ${table.number}.`,
-      });
-    } finally {
-      setTableActionState({ tableId: null, action: null });
-    }
-  };
-
-  const getActiveOrder = useCallback(
-    async (tableId) => getActiveOrderByTable(session.token, tableId),
-    [session.token]
+  const openOrderStatuses = useMemo(
+    () => new Set(["occupied", "pending", "preparing", "served", "pending_payment"]),
+    []
   );
 
-  const handlePrimaryAction = async (table, action) =>
-    withTableAction(table, action, async () => {
-      if (action === "open") {
+  const handleTableSelect = useCallback(
+    async (table) => {
+      const tableStatus = normalizeStatus(table.status);
+      setOpeningTableId(table.id);
+
+      try {
+        if (openOrderStatuses.has(tableStatus)) {
+          const activeOrder = await getActiveOrderByTable(session.token, table.id);
+
+          selectTable({
+            ...table,
+            activeOrder,
+          });
+          return;
+        }
+
         selectTable(table);
-        return;
-      }
+      } catch (requestError) {
+        if (requestError.status === 401) {
+          logout();
+          return;
+        }
 
-      if (action === "resume") {
-        const activeOrder = await getActiveOrder(table.id);
-        selectTable({
-          ...table,
-          activeOrder,
-        });
-        return;
-      }
-
-      if (action === "complete_payment") {
-        const activeOrder = await getActiveOrder(table.id);
-        await completeOrderPayment(session.token, activeOrder.id);
-
-        returnToTables({
-          refresh: true,
-          notice: {
-            type: "success",
-            message: `Payment completed (${formatPrice(
-              activeOrder.total
-            )} EUR). Table ${table.number} is now Available.`,
-          },
-        });
-      }
-    });
-
-  const handleSecondaryAction = async (table, action) =>
-    withTableAction(table, action, async () => {
-      if (action === "generate_invoice") {
-        const activeOrder = await getActiveOrder(table.id);
-        await generateOrderInvoice(session.token, activeOrder.id);
-
-        returnToTables({
-          refresh: true,
-          notice: {
-            type: "success",
-            message: `Invoice generated for Table ${table.number}.`,
-          },
-        });
-        return;
-      }
-
-      if (action === "invoice_pdf") {
-        const activeOrder = await getActiveOrder(table.id);
-        await downloadOrderReceipt(session.token, activeOrder.id);
+        if (requestError.status === 404 && openOrderStatuses.has(tableStatus)) {
+          showNotice({
+            type: "error",
+            message: `No active order found for Table ${table.number}.`,
+          });
+          return;
+        }
 
         showNotice({
-          type: "success",
-          message: `Invoice PDF downloaded for Table ${table.number}.`,
+          type: "error",
+          message:
+            requestError.message ||
+            `Unable to open table ${table.number}. Please try again.`,
         });
+      } finally {
+        setOpeningTableId(null);
       }
-    });
+    },
+    [logout, openOrderStatuses, selectTable, session.token, showNotice]
+  );
 
   return (
     <main className="pos-shell">
-      <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 xl:grid-cols-[1fr_280px]">
+      <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
         <div className="flex min-h-0 flex-col gap-4">
           <header className="pos-panel flex flex-wrap items-start justify-between gap-4 px-4 py-4">
             <div>
@@ -249,7 +201,7 @@ export default function TableSelectionScreen() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
               <div className={quickStatClass}>
                 <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">Assigned</p>
                 <p className="m-0 mt-1 text-lg font-semibold text-white">
@@ -304,7 +256,7 @@ export default function TableSelectionScreen() {
             </div>
           ) : null}
 
-          <section className="pos-panel min-h-0 flex-1 p-3 sm:p-4">
+          <section className="pos-panel min-h-0 flex-1 p-3 sm:p-4 lg:h-[calc(100vh-230px)]">
             {isLoading ? (
               <PosScreenLoader label="Loading assigned tables..." />
             ) : filteredTables.length === 0 ? (
@@ -314,19 +266,12 @@ export default function TableSelectionScreen() {
                 </p>
               </div>
             ) : (
-              <div className="scroll-y grid max-h-[calc(100vh-240px)] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
-                {filteredTables.map((table) => (
-                  <TableTile
-                    key={table.id}
-                    table={table}
-                    actionState={
-                      tableActionState.tableId === table.id ? tableActionState.action : null
-                    }
-                    onPrimaryAction={handlePrimaryAction}
-                    onSecondaryAction={handleSecondaryAction}
-                  />
-                ))}
-              </div>
+              <FloorLayoutBoard
+                tables={filteredTables}
+                selectedLocation={selectedLocation}
+                openingTableId={openingTableId}
+                onTableSelect={handleTableSelect}
+              />
             )}
           </section>
         </div>
@@ -369,10 +314,10 @@ export default function TableSelectionScreen() {
           <div className="mt-auto rounded-2xl border border-white/10 bg-black/20 p-4">
             <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">Shift note</p>
             <p className="mt-2 text-sm text-pos-muted">
-              Open Order tables support Resume Order and Generate Invoice.
+              Tap any table directly on the floor layout to open its POS order screen.
             </p>
             <p className="mt-1 text-sm text-pos-muted">
-              Pending Payment tables support Complete Payment and Invoice PDF.
+              Colors show real-time status: Available, Open Order, and Pending Payment.
             </p>
           </div>
         </aside>

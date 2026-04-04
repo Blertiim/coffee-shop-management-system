@@ -4,7 +4,7 @@ export default function CategoryRail({
   onSelectCategory,
 }) {
   return (
-    <aside className="pos-panel-soft flex h-full flex-col p-3">
+    <aside className="pos-panel-soft flex h-full flex-col p-3 lg:h-[calc(100vh-210px)]">
       <div className="mb-3">
         <span className="pos-badge">Categories</span>
       </div>

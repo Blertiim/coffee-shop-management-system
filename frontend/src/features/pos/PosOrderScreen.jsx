@@ -399,14 +399,14 @@ export default function PosOrderScreen() {
           </div>
         ) : null}
 
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(140px,14%)_minmax(0,58%)_minmax(300px,28%)]">
+        <section className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[120px_minmax(0,1fr)_330px] xl:grid-cols-[140px_minmax(0,58%)_minmax(320px,28%)]">
           <CategoryRail
             categories={categoryRailItems}
             selectedCategoryKey={selectedCategoryId}
             onSelectCategory={setSelectedCategoryId}
           />
 
-          <section className="pos-panel-soft flex min-h-0 flex-col p-3">
+          <section className="pos-panel-soft flex min-h-0 flex-col p-3 lg:h-[calc(100vh-210px)]">
             <div className="mb-3 flex items-center justify-between">
               <span className="pos-badge">{selectedCategoryName}</span>
               <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">
@@ -437,7 +437,7 @@ export default function PosOrderScreen() {
                 </div>
               </div>
             ) : (
-              <div className="scroll-y grid max-h-[calc(100vh-280px)] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
+              <div className="scroll-y grid max-h-[calc(100vh-300px)] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
                 {visibleProducts.map((product) => (
                   <ProductTile
                     key={product.id}
@@ -460,7 +460,7 @@ export default function PosOrderScreen() {
             )}
           </section>
 
-          <aside className="pos-panel flex min-h-0 flex-col p-3 xl:sticky xl:top-3 xl:h-[calc(100vh-40px)]">
+          <aside className="pos-panel flex min-h-0 flex-col p-3 lg:sticky lg:top-3 lg:h-[calc(100vh-40px)]">
             <div className="mb-3 rounded-xl border border-white/10 bg-pos-panelSoft p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="m-0 text-xs uppercase tracking-[0.14em] text-pos-muted">Order</p>
