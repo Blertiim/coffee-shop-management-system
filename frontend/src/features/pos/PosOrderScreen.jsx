@@ -40,6 +40,26 @@ const formatPrice = (value) =>
 const normalizeStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
+const TABLES_PATH = "/tables";
+
+const buildTablePath = (visualTableId, fallbackTableNumber) => {
+  const parsedVisualId = Number(visualTableId);
+
+  if (Number.isFinite(parsedVisualId) && parsedVisualId > 0) {
+    return `/table/${parsedVisualId}`;
+  }
+
+  return `/table/${fallbackTableNumber}`;
+};
+
+const replacePathname = (pathname) => {
+  if (typeof window === "undefined" || window.location.pathname === pathname) {
+    return;
+  }
+
+  window.history.replaceState({}, "", pathname);
+};
+
 const getUiStatusLabel = (status) => {
   const normalized = normalizeStatus(status);
 
@@ -86,6 +106,40 @@ export default function PosOrderScreen() {
     setCurrentOrder(table?.activeOrder || null);
     setSubmitError("");
   }, [table]);
+
+  useEffect(() => {
+    if (!table) {
+      return;
+    }
+
+    replacePathname(buildTablePath(table.visualId, table.number));
+  }, [table]);
+
+  const handleReturnToTables = useCallback(
+    (options = {}) => {
+      replacePathname(TABLES_PATH);
+      returnToTables(options);
+    },
+    [returnToTables]
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const handlePopState = () => {
+      if (window.location.pathname === TABLES_PATH) {
+        returnToTables();
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [returnToTables]);
 
   const loadMenu = useCallback(
     async (signal) => {
@@ -307,7 +361,7 @@ export default function PosOrderScreen() {
       const paidOrder = await completeOrderPayment(session.token, currentOrder.id);
       setCurrentOrder(paidOrder);
 
-      returnToTables({
+      handleReturnToTables({
         refresh: true,
         notice: {
           type: "success",
@@ -374,7 +428,7 @@ export default function PosOrderScreen() {
             <button
               type="button"
               className="pos-button pos-button-muted min-h-[52px] rounded-xl px-4"
-              onClick={() => returnToTables()}
+              onClick={() => handleReturnToTables()}
             >
               Tables
             </button>

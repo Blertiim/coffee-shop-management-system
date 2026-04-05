@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import { getPosStaffProfiles, posLogin } from "./authApi";
 
+const POS_PROFILE_ROLES = new Set(["waiter", "manager"]);
+const PIN_LENGTH = 4;
+
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
@@ -45,7 +48,11 @@ export default function usePosLogin(onLoginSuccess) {
 
       try {
         const response = await getPosStaffProfiles(controller.signal);
-        const profiles = Array.isArray(response) ? response.map(mapProfile) : [];
+        const profiles = Array.isArray(response)
+          ? response
+              .map(mapProfile)
+              .filter((profile) => POS_PROFILE_ROLES.has(profile.role))
+          : [];
 
         if (!isMounted) {
           return;
@@ -61,7 +68,7 @@ export default function usePosLogin(onLoginSuccess) {
         });
 
         if (profiles.length === 0) {
-          setError("No active POS staff found. Create/enable a waiter first.");
+          setError("No active waiter or manager found. Create/enable staff first.");
         }
       } catch (requestError) {
         if (!isMounted || requestError.name === "AbortError") {
@@ -99,7 +106,7 @@ export default function usePosLogin(onLoginSuccess) {
   };
 
   const appendDigit = (digit) => {
-    setPin((current) => (current.length >= 8 ? current : `${current}${digit}`));
+    setPin((current) => (current.length >= PIN_LENGTH ? current : `${current}${digit}`));
     setError("");
   };
 
@@ -119,8 +126,8 @@ export default function usePosLogin(onLoginSuccess) {
       return;
     }
 
-    if (!/^\d{4,8}$/.test(pin)) {
-      setError("Enter a valid PIN (4 to 8 digits).");
+    if (!new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin)) {
+      setError("Enter a valid 4-digit PIN.");
       return;
     }
 

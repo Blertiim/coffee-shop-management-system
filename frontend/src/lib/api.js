@@ -1,8 +1,23 @@
-const API_BASE_URL = (
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_API_BASE_URL ||
-  "/api"
-).replace(/\/$/, "");
+const resolveAutoApiBaseUrl = () => {
+  const apiPort = String(import.meta.env.VITE_API_PORT || "5000").trim() || "5000";
+
+  if (typeof window === "undefined") {
+    return `http://localhost:${apiPort}/api`;
+  }
+
+  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+  const hostname = window.location.hostname || "localhost";
+
+  return `${protocol}//${hostname}:${apiPort}/api`;
+};
+
+const rawApiBaseUrl =
+  import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto";
+
+const API_BASE_URL =
+  rawApiBaseUrl.trim().toLowerCase() === "auto"
+    ? resolveAutoApiBaseUrl()
+    : rawApiBaseUrl.replace(/\/$/, "");
 
 const buildUrl = (path) => {
   if (path.startsWith("http://") || path.startsWith("https://")) {

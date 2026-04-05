@@ -1,0 +1,13 @@
+Place your floor image here with one of these filenames:
+
+floor-plan-removebg.png
+floor-plan-removebg.webp
+floor-plan-removebg.jpg
+floor-plan-removebg.jpeg
+floor-plan.jpg
+floor-plan.jpeg
+floor-plan.png
+floor-plan.jfif
+
+Example path:
+frontend/public/floor-plan-removebg.png
