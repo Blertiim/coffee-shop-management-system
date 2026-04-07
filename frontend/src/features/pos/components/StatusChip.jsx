@@ -1,39 +1,39 @@
 const STATUS_MAP = {
   available: {
     label: "Available",
-    className: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
+    className: "border-[#4ca59e]/40 bg-[#163736]/78 text-[#9ce7d4]",
   },
   occupied: {
     label: "Open Order",
-    className: "bg-amber-500/15 text-amber-300 border-amber-400/30",
+    className: "border-[#b58a4b]/40 bg-[#322512]/78 text-[#f0d6a2]",
   },
   reserved: {
     label: "Reserved",
-    className: "bg-sky-500/15 text-sky-300 border-sky-400/30",
+    className: "border-[#7a67af]/40 bg-[#241c39]/78 text-[#d9d0f8]",
   },
   pending: {
     label: "Open Order",
-    className: "bg-amber-500/15 text-amber-300 border-amber-400/30",
+    className: "border-[#b58a4b]/40 bg-[#322512]/78 text-[#f0d6a2]",
   },
   preparing: {
     label: "Open Order",
-    className: "bg-sky-500/15 text-sky-300 border-sky-400/30",
+    className: "border-[#5489a5]/40 bg-[#162d3b]/78 text-[#c9e6f4]",
   },
   served: {
     label: "Open Order",
-    className: "bg-indigo-500/15 text-indigo-300 border-indigo-400/30",
+    className: "border-[#5f7fb6]/40 bg-[#1b2943]/78 text-[#d5e0fb]",
   },
   pending_payment: {
     label: "Pending Payment",
-    className: "bg-orange-500/15 text-orange-300 border-orange-400/30",
+    className: "border-[#c0794e]/40 bg-[#392116]/78 text-[#ffd9bb]",
   },
   paid: {
     label: "Paid",
-    className: "bg-emerald-500/15 text-emerald-300 border-emerald-400/30",
+    className: "border-[#67b26f]/40 bg-[#16311b]/78 text-[#d5f3d8]",
   },
   cancelled: {
     label: "Cancelled",
-    className: "bg-red-500/15 text-red-300 border-red-400/30",
+    className: "border-[#a95d72]/40 bg-[#33171f]/78 text-[#ffd7de]",
   },
 };
 
@@ -46,7 +46,7 @@ export default function StatusChip({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${config.className}`}
+      className={`inline-flex items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${config.className}`}
     >
       {config.label}
     </span>

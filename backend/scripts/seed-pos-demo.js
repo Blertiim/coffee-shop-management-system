@@ -8,35 +8,29 @@ const DEFAULT_WAITER_PIN = "1234";
 
 const STAFF_PROFILES = [
   {
-    fullName: "Egzon Manager",
-    email: "egzon.manager@pos.local",
+    fullName: "Meti Manager",
+    email: "meti.manager@pos.local",
     role: "manager",
     pin: DEFAULT_MANAGER_PIN,
   },
   {
-    fullName: "Lisa Waiter",
-    email: "lisa.waiter@pos.local",
+    fullName: "Mili Waiter",
+    email: "mili.waiter@pos.local",
     role: "waiter",
     pin: DEFAULT_WAITER_PIN,
   },
   {
-    fullName: "Genti Waiter",
-    email: "genti.waiter@pos.local",
-    role: "waiter",
-    pin: DEFAULT_WAITER_PIN,
-  },
-  {
-    fullName: "Arta Waiter",
-    email: "arta.waiter@pos.local",
+    fullName: "Egzon Waiter",
+    email: "egzon.waiter@pos.local",
     role: "waiter",
     pin: DEFAULT_WAITER_PIN,
   },
 ];
 
 const TABLE_LOCATIONS = [
-  { label: "Main Hall", numbers: [1, 2, 3, 4, 5, 6, 7, 8] },
-  { label: "Terrace 1", numbers: [9, 10, 11, 12, 13, 14] },
-  { label: "Terrace 2", numbers: [15, 16, 17, 18] },
+  { label: "Main Hall", numbers: [1, 2, 3, 4, 5, 6, 7, 8, 19, 20] },
+  { label: "Terrace 1", numbers: [9, 10, 11, 12, 13, 14, 21, 22] },
+  { label: "Terrace 2", numbers: [15, 16, 17, 18, 23, 24] },
 ];
 
 const CATALOG = [
@@ -167,7 +161,7 @@ const ensureTables = async () => {
         await prisma.table.create({
           data: {
             number,
-            capacity: number <= 12 ? 4 : 6,
+            capacity: location.label === "Terrace 2" ? 6 : 4,
             location: location.label,
             status: "available",
           },
@@ -176,7 +170,7 @@ const ensureTables = async () => {
         await prisma.table.update({
           where: { number },
           data: {
-            capacity: number <= 12 ? 4 : 6,
+            capacity: location.label === "Terrace 2" ? 6 : 4,
             location: location.label,
           },
         });

@@ -61,6 +61,7 @@ const isAdmin = (req) => normalizeRole(req.user && req.user.role) === "admin";
 const isManager = (req) => normalizeRole(req.user && req.user.role) === "manager";
 const isWaiter = (req) => normalizeRole(req.user && req.user.role) === "waiter";
 const isAdminOrManager = (req) => isAdmin(req) || isManager(req);
+const isPosStaff = (req) => isAdminOrManager(req) || isWaiter(req);
 
 const isAssignedWaiter = (req, order) =>
   isWaiter(req) &&
@@ -75,7 +76,7 @@ const canAccessOrder = (req, order) => {
     return false;
   }
 
-  return isAdminOrManager(req) || order.userId === userId || isAssignedWaiter(req, order);
+  return isPosStaff(req) || order.userId === userId || isAssignedWaiter(req, order);
 };
 
 const canManageOrderLifecycle = (req, order) => {
@@ -85,7 +86,7 @@ const canManageOrderLifecycle = (req, order) => {
     return false;
   }
 
-  return isAdminOrManager(req) || isAssignedWaiter(req, order) || order.userId === userId;
+  return isPosStaff(req) || isAssignedWaiter(req, order) || order.userId === userId;
 };
 
 const normalizeStatus = (value) =>
@@ -269,10 +270,7 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) 
 
   if (targetStatus === "pending_payment") {
     if (!canManageOrderLifecycle(req, existingOrder)) {
-      throw new AppError(
-        "Only the assigned waiter or order owner can generate invoice",
-        403
-      );
+      throw new AppError("Only POS staff or order owner can generate invoice", 403);
     }
 
     if (!ITEM_EDITABLE_ORDER_STATUSES.includes(existingOrder.status)) {
@@ -290,10 +288,7 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) 
 
   if (targetStatus === "paid") {
     if (!canManageOrderLifecycle(req, existingOrder)) {
-      throw new AppError(
-        "Only the assigned waiter or order owner can complete payment",
-        403
-      );
+      throw new AppError("Only POS staff or order owner can complete payment", 403);
     }
 
     if (existingOrder.status !== "pending_payment") {
@@ -313,7 +308,7 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) 
   }
 
   if (!canManageOrderLifecycle(req, existingOrder)) {
-    throw new AppError("Only the assigned waiter or order owner can update this order", 403);
+    throw new AppError("Only POS staff or order owner can update this order", 403);
   }
 
   const nextAllowedStatus = ORDER_PROGRESS_FLOW[existingOrder.status];

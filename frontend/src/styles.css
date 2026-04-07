@@ -11,14 +11,15 @@
   body,
   #root {
     @apply min-h-screen;
+    min-height: 100dvh;
   }
 
   body {
     @apply m-0 font-sans text-pos-text antialiased;
     background:
-      radial-gradient(circle at 8% 2%, rgba(31, 162, 255, 0.2) 0%, transparent 30%),
-      radial-gradient(circle at 92% 95%, rgba(44, 201, 167, 0.14) 0%, transparent 34%),
-      linear-gradient(180deg, #edf4fd 0%, #e6effb 100%);
+      radial-gradient(circle at 8% 2%, rgba(177, 126, 60, 0.12) 0%, transparent 30%),
+      radial-gradient(circle at 92% 95%, rgba(48, 112, 99, 0.12) 0%, transparent 34%),
+      linear-gradient(180deg, #090705 0%, #110d0a 48%, #16110d 100%);
   }
 }
 

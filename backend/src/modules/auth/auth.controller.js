@@ -2,7 +2,7 @@ const prisma = require("../../config/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-const POS_LOGIN_ROLES = new Set(["waiter", "manager", "admin"]);
+const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
 
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";

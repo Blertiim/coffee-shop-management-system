@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { usePosApp } from "../../context/PosAppContext";
 import PosKeypad from "../pos/components/PosKeypad";
@@ -35,6 +35,7 @@ function SelectArrowIcon() {
 
 export default function PosLoginScreen() {
   const { loginSuccess } = usePosApp();
+  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const {
     staffProfiles,
     selectedStaff,
@@ -50,11 +51,39 @@ export default function PosLoginScreen() {
     submit,
   } = usePosLogin(loginSuccess);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const updateClock = () => {
+      setCurrentDateTime(new Date());
+    };
+
+    updateClock();
+
+    const intervalId = window.setInterval(updateClock, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const selectedRole = useMemo(
     () => selectedStaff?.roleLabel || "Cafe staff",
     [selectedStaff]
   );
   const pinSlots = useMemo(() => buildPinSlots(pin), [pin]);
+  const formattedDateTime = useMemo(() => {
+    const year = currentDateTime.getFullYear();
+    const month = String(currentDateTime.getMonth() + 1).padStart(2, "0");
+    const day = String(currentDateTime.getDate()).padStart(2, "0");
+    const hours = String(currentDateTime.getHours()).padStart(2, "0");
+    const minutes = String(currentDateTime.getMinutes()).padStart(2, "0");
+    const seconds = String(currentDateTime.getSeconds()).padStart(2, "0");
+
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  }, [currentDateTime]);
 
   return (
     <main className="pos-shell">
@@ -70,7 +99,7 @@ export default function PosLoginScreen() {
                 shanku
               </h1>
               <p className="m-0 mt-2 text-xs font-bold uppercase tracking-[0.34em] text-[#7d93bb]">
-                # POS Terminal
+                # ROSIT BAR
               </p>
             </div>
           </article>
@@ -166,6 +195,12 @@ export default function PosLoginScreen() {
               onConfirm={submit}
             />
           </article>
+
+          <div className="pointer-events-none absolute bottom-4 right-4 z-10 sm:bottom-5 sm:right-5">
+            <p className="m-0 font-mono text-[11px] font-medium tracking-[0.12em] text-[#94a3bf]">
+              {formattedDateTime}
+            </p>
+          </div>
         </div>
       </section>
     </main>
