@@ -3,25 +3,33 @@ import { useEffect, useMemo, useState } from "react";
 import PosScreenLoader from "../../components/PosScreenLoader";
 import {
   assignTableToWaiter,
+  buildRealtimeStreamUrl,
   createCategory,
   createProduct,
   createWaiter,
   deleteCategory,
   deleteProduct,
   deleteWaiter,
+  downloadAdvancedReportCsv,
+  downloadAdvancedReportPdf,
   downloadInvoicePdf,
+  getAdvancedReport,
+  getAuditLogs,
   getCategories,
   getDailySummary,
   getDashboardInvoices,
   getDashboardOrders,
+  getGuestQrAccess,
   getLowStockProducts,
   getManagerStats,
   getProducts,
+  getSystemAlerts,
   getTables,
   getTopProducts,
   getRevenueTrend,
   getWaiters,
   getWaiterPerformance,
+  rotateGuestQrAccess,
   setWaiterTableAssignments,
   updateCategory,
   updateProduct,
@@ -92,7 +100,20 @@ const formatDateTime = (value) =>
     timeStyle: "short",
   }).format(new Date(value));
 
+const formatDate = (value) =>
+  new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+  }).format(new Date(value));
+
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
+
+const buildGuestOrderUrl = (token) => {
+  if (!token || typeof window === "undefined") {
+    return "";
+  }
+
+  return `${window.location.origin}/guest/table/${token}`;
+};
 
 const statusClass = (status) => {
   const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
@@ -155,12 +176,19 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [invoicesData, setInvoicesData] = useState({ invoices: [], count: 0 });
   const [dailySummary, setDailySummary] = useState(null);
   const [lowStock, setLowStock] = useState({ products: [], threshold: 5 });
+  const [advancedReport, setAdvancedReport] = useState(null);
+  const [systemAlerts, setSystemAlerts] = useState({ alerts: [], count: 0 });
+  const [auditTrail, setAuditTrail] = useState({ logs: [], count: 0 });
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [waiters, setWaiters] = useState([]);
   const [tables, setTables] = useState([]);
   const [selectedWaiterForTables, setSelectedWaiterForTables] = useState(null);
   const [assignedTableIds, setAssignedTableIds] = useState([]);
+  const [selectedQrTableId, setSelectedQrTableId] = useState(null);
+  const [guestAccess, setGuestAccess] = useState(null);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [isQrLoading, setIsQrLoading] = useState(false);
 
   const [editingProductId, setEditingProductId] = useState(null);
   const [productForm, setProductForm] = useState(defaultProductForm);
@@ -208,6 +236,9 @@ export default function ManagerDashboard({ session, onLogout }) {
           nextInvoices,
           nextSummary,
           nextLowStock,
+          nextAdvancedReport,
+          nextAlerts,
+          nextAuditTrail,
           nextProducts,
           nextCategories,
           nextWaiters,
@@ -221,6 +252,9 @@ export default function ManagerDashboard({ session, onLogout }) {
           getDashboardInvoices(session.token, { ...filters, limit: 120 }, controller.signal),
           getDailySummary(session.token, { date: filters.from }, controller.signal),
           getLowStockProducts(session.token, { threshold: 5 }, controller.signal),
+          getAdvancedReport(session.token, filters, controller.signal),
+          getSystemAlerts(session.token, { status: "open", limit: 20 }, controller.signal),
+          getAuditLogs(session.token, { limit: 16 }, controller.signal),
           getProducts(session.token, controller.signal),
           getCategories(session.token, controller.signal),
           getWaiters(session.token, controller.signal),
@@ -245,6 +279,9 @@ export default function ManagerDashboard({ session, onLogout }) {
         });
         setDailySummary(nextSummary || null);
         setLowStock(nextLowStock || { products: [], threshold: 5 });
+        setAdvancedReport(nextAdvancedReport || null);
+        setSystemAlerts(nextAlerts || { alerts: [], count: 0 });
+        setAuditTrail(nextAuditTrail || { logs: [], count: 0 });
         setProducts(ensureArray(nextProducts));
         setCategories(ensureArray(nextCategories));
         setWaiters(ensureArray(nextWaiters));
@@ -280,8 +317,10 @@ export default function ManagerDashboard({ session, onLogout }) {
       { label: "Avg Order", value: `${formatMoney(stats?.averageOrderValue)} EUR` },
       { label: "Open Orders", value: stats?.totalPendingOrders || 0 },
       { label: "Active Tables", value: stats?.activeTables || 0 },
+      { label: "Open Alerts", value: systemAlerts?.count || 0 },
+      { label: "Realtime", value: isRealtimeConnected ? "Live" : "Offline" },
     ],
-    [stats]
+    [isRealtimeConnected, stats, systemAlerts?.count]
   );
 
   const productCountByCategoryId = useMemo(() => {
@@ -318,6 +357,16 @@ export default function ManagerDashboard({ session, onLogout }) {
     return byWaiter;
   }, [tables]);
 
+  const selectedQrTable = useMemo(
+    () => tables.find((table) => table.id === selectedQrTableId) || null,
+    [selectedQrTableId, tables]
+  );
+
+  const guestOrderUrl = useMemo(
+    () => buildGuestOrderUrl(guestAccess?.token),
+    [guestAccess]
+  );
+
   useEffect(() => {
     if (!waiters.length) {
       setSelectedWaiterForTables(null);
@@ -342,6 +391,91 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     setAssignedTableIds(tablesByWaiter.get(selectedWaiterForTables) || []);
   }, [selectedWaiterForTables, tablesByWaiter]);
+
+  useEffect(() => {
+    if (!tables.length) {
+      setSelectedQrTableId(null);
+      setGuestAccess(null);
+      return;
+    }
+
+    setSelectedQrTableId((current) => {
+      if (current && tables.some((table) => table.id === current)) {
+        return current;
+      }
+
+      return tables[0].id;
+    });
+  }, [tables]);
+
+  useEffect(() => {
+    if (!selectedQrTableId) {
+      setGuestAccess(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsQrLoading(true);
+
+    getGuestQrAccess(session.token, selectedQrTableId)
+      .then((payload) => {
+        if (!cancelled) {
+          setGuestAccess(payload);
+        }
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          if (requestError.status === 401 || requestError.status === 403) {
+            onLogout();
+            return;
+          }
+
+          setError(requestError.message || "Failed to prepare guest QR access.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsQrLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLogout, selectedQrTableId, session.token]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !session?.token) {
+      return undefined;
+    }
+
+    const source = new EventSource(
+      buildRealtimeStreamUrl(session.token, ["dashboard", "orders", "alerts", "tables", "inventory"])
+    );
+    let refreshTimeout = 0;
+
+    source.addEventListener("connected", () => {
+      setIsRealtimeConnected(true);
+    });
+
+    source.addEventListener("update", () => {
+      setIsRealtimeConnected(true);
+      window.clearTimeout(refreshTimeout);
+      refreshTimeout = window.setTimeout(() => {
+        refreshAll();
+      }, 250);
+    });
+
+    source.onerror = () => {
+      setIsRealtimeConnected(false);
+    };
+
+    return () => {
+      window.clearTimeout(refreshTimeout);
+      source.close();
+      setIsRealtimeConnected(false);
+    };
+  }, [session?.token]);
 
   const onSelectReportPreset = (presetKey) => {
     const preset = REPORT_FILTER_PRESETS.find((item) => item.key === presetKey);
@@ -503,6 +637,46 @@ export default function ManagerDashboard({ session, onLogout }) {
     );
   };
 
+  const handleDownloadReportCsv = async () => {
+    await runAction(
+      () => downloadAdvancedReportCsv(session.token, filters),
+      "Advanced report CSV downloaded."
+    );
+  };
+
+  const handleDownloadReportPdf = async () => {
+    await runAction(
+      () => downloadAdvancedReportPdf(session.token, filters),
+      "Advanced report PDF downloaded."
+    );
+  };
+
+  const handleRotateGuestQr = async () => {
+    if (!selectedQrTableId) {
+      setError("Select a table first.");
+      return;
+    }
+
+    await runAction(async () => {
+      const payload = await rotateGuestQrAccess(session.token, selectedQrTableId);
+      setGuestAccess(payload);
+    }, "Guest QR token rotated.");
+  };
+
+  const handleCopyGuestUrl = async () => {
+    if (!guestOrderUrl) {
+      setError("Guest QR link is not ready yet.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(guestOrderUrl);
+      setFeedback("Guest ordering link copied.");
+    } catch (copyError) {
+      setError("Unable to copy the guest ordering link.");
+    }
+  };
+
   const startAddProductFromCategory = (categoryId) => {
     setActiveSection("products");
     setEditingProductId(null);
@@ -643,7 +817,7 @@ export default function ManagerDashboard({ session, onLogout }) {
 
           {activeSection === "overview" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {overviewCards.map((card) => (
                   <article key={card.label} className="pos-panel rounded-xl p-4">
                     <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
@@ -705,6 +879,98 @@ export default function ManagerDashboard({ session, onLogout }) {
                       ))}
                     </div>
                   )}
+                </article>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                <article className="pos-panel rounded-xl p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-semibold text-white">System Alerts</h3>
+                      <p className="mb-3 mt-1 text-xs text-pos-muted">
+                        Automatic inventory alerts when stock drops below minimum.
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs ${
+                        (systemAlerts?.count || 0) > 0
+                          ? "border-orange-400/30 bg-orange-500/15 text-orange-300"
+                          : "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                      }`}
+                    >
+                      {systemAlerts?.count || 0} open
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {ensureArray(systemAlerts?.alerts).length === 0 ? (
+                      <p className="text-sm text-pos-muted">No active system alerts.</p>
+                    ) : (
+                      ensureArray(systemAlerts?.alerts).slice(0, 6).map((alert) => (
+                        <div
+                          key={alert.id}
+                          className="rounded-xl border border-orange-300/25 bg-orange-500/10 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="m-0 text-sm font-semibold text-white">{alert.title}</p>
+                            <span className="text-xs uppercase tracking-wide text-orange-200">
+                              {alert.severity}
+                            </span>
+                          </div>
+                          <p className="m-0 mt-1 text-xs text-orange-100/85">{alert.message}</p>
+                          <p className="m-0 mt-2 text-[11px] text-orange-100/70">
+                            {formatDateTime(alert.createdAt)}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-semibold text-white">Audit Trail</h3>
+                      <p className="mb-3 mt-1 text-xs text-pos-muted">
+                        Secure log of staff actions, edits, and POS activity.
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs ${
+                        isRealtimeConnected
+                          ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                          : "border-slate-400/30 bg-slate-500/15 text-slate-300"
+                      }`}
+                    >
+                      {isRealtimeConnected ? "Live" : "Waiting"}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {ensureArray(auditTrail?.logs).length === 0 ? (
+                      <p className="text-sm text-pos-muted">No audit events captured yet.</p>
+                    ) : (
+                      ensureArray(auditTrail?.logs).slice(0, 8).map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="rounded-xl border border-white/10 bg-black/20 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="m-0 text-sm font-semibold text-white">
+                              {entry.actorName || "System"}
+                            </p>
+                            <span className="text-[11px] uppercase tracking-wide text-pos-muted">
+                              {entry.statusCode}
+                            </span>
+                          </div>
+                          <p className="m-0 mt-1 text-xs text-pos-muted">{entry.action}</p>
+                          <p className="m-0 mt-2 text-[11px] text-pos-muted">
+                            {formatDateTime(entry.createdAt)}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </article>
               </div>
             </section>
@@ -1119,8 +1385,21 @@ export default function ManagerDashboard({ session, onLogout }) {
                   Low Stock Alerts ({"<="} {lowStock.threshold})
                 </h3>
                 <div className="mt-3 space-y-2">
-                  {ensureArray(lowStock.products).length === 0 ? (
-                    <p className="text-sm text-pos-muted">No low-stock products.</p>
+                  {ensureArray(lowStock.inventoryAlerts).length > 0 ? (
+                    ensureArray(lowStock.inventoryAlerts).map((alert) => (
+                      <div
+                        key={`inventory-${alert.id}`}
+                        className="rounded-xl border border-orange-400/30 bg-orange-500/10 p-3"
+                      >
+                        <p className="m-0 text-sm font-semibold text-orange-100">{alert.title}</p>
+                        <p className="m-0 mt-1 text-xs text-orange-100/85">{alert.message}</p>
+                      </div>
+                    ))
+                  ) : null}
+
+                  {ensureArray(lowStock.products).length === 0 &&
+                  ensureArray(lowStock.inventoryAlerts).length === 0 ? (
+                    <p className="text-sm text-pos-muted">No low-stock alerts right now.</p>
                   ) : (
                     ensureArray(lowStock.products).map((product) => (
                       <div
@@ -1405,6 +1684,124 @@ export default function ManagerDashboard({ session, onLogout }) {
                       ))}
                   </div>
                 </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        Customer QR Ordering
+                      </h3>
+                      <p className="mt-1 text-xs text-pos-muted">
+                        Generate a guest order link and QR code for any table.
+                      </p>
+                    </div>
+                    <div className="inline-flex gap-2">
+                      <button
+                        type="button"
+                        className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
+                        onClick={handleCopyGuestUrl}
+                        disabled={!guestOrderUrl || isQrLoading}
+                      >
+                        Copy Link
+                      </button>
+                      <button
+                        type="button"
+                        className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                        onClick={handleRotateGuestQr}
+                        disabled={!selectedQrTableId || isSaving || isQrLoading}
+                      >
+                        Rotate QR
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
+                    <div className="space-y-2">
+                      <label className="block text-xs uppercase tracking-wide text-pos-muted">
+                        Table
+                      </label>
+                      <select
+                        value={selectedQrTableId || ""}
+                        onChange={(event) => setSelectedQrTableId(Number(event.target.value))}
+                        className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      >
+                        {tables
+                          .slice()
+                          .sort((left, right) => left.number - right.number)
+                          .map((table) => (
+                            <option key={`qr-${table.id}`} value={table.id}>
+                              Table {table.number} - {table.location}
+                            </option>
+                          ))}
+                      </select>
+
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                        <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                          Selected Table
+                        </p>
+                        <p className="m-0 mt-2 text-lg font-semibold text-white">
+                          {selectedQrTable ? `Table ${selectedQrTable.number}` : "No table"}
+                        </p>
+                        <p className="m-0 mt-1 text-xs text-pos-muted">
+                          {selectedQrTable?.location || "Select a table to prepare guest ordering."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                      <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
+                        {guestOrderUrl ? (
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                              guestOrderUrl
+                            )}`}
+                            alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
+                            className="h-[180px] w-[180px] rounded-lg bg-white p-2"
+                          />
+                        ) : (
+                          <p className="text-sm text-pos-muted">
+                            {isQrLoading ? "Preparing QR..." : "QR link not ready."}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                        <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                          Guest Ordering URL
+                        </p>
+                        <p className="m-0 mt-3 break-all text-sm text-white">
+                          {guestOrderUrl || "Preparing guest ordering link..."}
+                        </p>
+                        <p className="m-0 mt-3 text-xs text-pos-muted">
+                          Guests can scan the QR code, browse ready-to-order products, and append
+                          items directly to the table ticket without staff refreshing the page.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                            onClick={() => {
+                              if (guestOrderUrl) {
+                                window.open(guestOrderUrl, "_blank", "noopener,noreferrer");
+                              }
+                            }}
+                            disabled={!guestOrderUrl}
+                          >
+                            Open Guest Page
+                          </button>
+                          <a
+                            href="/api/system/docs"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                          >
+                            API Docs
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
               </div>
             </section>
           ) : null}
@@ -1475,7 +1872,39 @@ export default function ManagerDashboard({ session, onLogout }) {
           ) : null}
 
           {activeSection === "reports" ? (
-            <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+            <section className="grid min-h-0 grid-cols-1 gap-4">
+              <article className="pos-panel rounded-xl p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Advanced Reports
+                    </h3>
+                    <p className="mt-1 text-xs text-pos-muted">
+                      Daily, monthly, product, and employee sales analytics with export support.
+                    </p>
+                  </div>
+                  <div className="inline-flex gap-2">
+                    <button
+                      type="button"
+                      className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
+                      onClick={handleDownloadReportCsv}
+                      disabled={isSaving}
+                    >
+                      Export Excel CSV
+                    </button>
+                    <button
+                      type="button"
+                      className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                      onClick={handleDownloadReportPdf}
+                      disabled={isSaving}
+                    >
+                      Export PDF
+                    </button>
+                  </div>
+                </div>
+              </article>
+
+              <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
               <article className="pos-panel rounded-xl p-4">
                 <h3 className="m-0 text-base font-semibold text-white">Daily Summary</h3>
                 <div className="mt-3 grid grid-cols-2 gap-3">
@@ -1543,6 +1972,46 @@ export default function ManagerDashboard({ session, onLogout }) {
                   ))}
                 </div>
               </article>
+
+              <article className="pos-panel rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">Monthly Sales</h3>
+                <p className="mb-3 mt-1 text-xs text-pos-muted">
+                  Rolling monthly performance for the selected date range.
+                </p>
+                <BarRows
+                  rows={ensureArray(advancedReport?.monthlySales || [])}
+                  labelKey="month"
+                  valueKey="revenue"
+                  colorClass="bg-amber-400"
+                />
+              </article>
+
+              <article className="pos-panel rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">Sales By Product</h3>
+                <p className="mb-3 mt-1 text-xs text-pos-muted">
+                  Best-performing products in the current report window.
+                </p>
+                <BarRows
+                  rows={ensureArray(advancedReport?.salesByProduct || []).slice(0, 8)}
+                  labelKey="productName"
+                  valueKey="revenue"
+                  colorClass="bg-cyan-400"
+                />
+              </article>
+
+              <article className="pos-panel rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">Sales By Employee</h3>
+                <p className="mb-3 mt-1 text-xs text-pos-muted">
+                  Paid order performance by staff member.
+                </p>
+                <BarRows
+                  rows={ensureArray(advancedReport?.salesByEmployee || []).slice(0, 8)}
+                  labelKey="employeeName"
+                  valueKey="totalSales"
+                  colorClass="bg-emerald-400"
+                />
+              </article>
+              </section>
             </section>
           ) : null}
         </section>

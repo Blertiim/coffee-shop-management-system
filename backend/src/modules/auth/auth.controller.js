@@ -1,6 +1,8 @@
 const prisma = require("../../config/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { getJwtSecret } = require("../../config/security");
+const { logManualAuditEvent } = require("../../services/audit.service");
 
 const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
 
@@ -18,6 +20,21 @@ const mapPosProfile = (user) => ({
   name: user.fullName,
   role: user.role,
   status: user.status,
+});
+
+const resolveIpAddress = (req) => {
+  const forwardedFor = req.headers?.["x-forwarded-for"];
+
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return req.ip || req.socket?.remoteAddress || null;
+};
+
+const getAuditContext = (req) => ({
+  ipAddress: resolveIpAddress(req),
+  userAgent: req.headers?.["user-agent"] || null,
 });
 
 const buildUserPayload = async (user) => {
@@ -70,6 +87,19 @@ exports.register = async (req, res) => {
       },
     });
 
+    await logManualAuditEvent({
+      actorId: req.user?.id || null,
+      actorName: req.user?.fullName || null,
+      actorRole: req.user?.role || null,
+      action: "auth.register",
+      entityType: "user",
+      entityId: user.id,
+      statusCode: 201,
+      summary: `User account created for ${email}`,
+      payload: { email, fullName },
+      ...getAuditContext(req),
+    });
+
     res.status(201).json({
       message: "User registered successfully",
       user: await buildUserPayload(user),
@@ -93,20 +123,69 @@ exports.login = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      await logManualAuditEvent({
+        action: "auth.login.failed",
+        entityType: "auth",
+        statusCode: 401,
+        summary: `Failed login for ${email}`,
+        payload: { email },
+        ...getAuditContext(req),
+      });
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      return res.status(400).json({ error: "Wrong password" });
+      await logManualAuditEvent({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: "auth.login.failed",
+        entityType: "auth",
+        entityId: user.id,
+        statusCode: 401,
+        summary: `Failed login for ${user.email}`,
+        payload: { email },
+        ...getAuditContext(req),
+      });
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    if (!isActiveStatus(user.status)) {
+      await logManualAuditEvent({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: "auth.login.blocked",
+        entityType: "auth",
+        entityId: user.id,
+        statusCode: 403,
+        summary: `Inactive account login blocked for ${user.email}`,
+        payload: { email },
+        ...getAuditContext(req),
+      });
+      return res.status(403).json({ error: "User account is not active" });
     }
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || "SECRET_KEY",
+      getJwtSecret(),
       { expiresIn: "7d" }
     );
+
+    await logManualAuditEvent({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: "auth.login.success",
+      entityType: "auth",
+      entityId: user.id,
+      statusCode: 200,
+      summary: `Login successful for ${user.email}`,
+      payload: { email },
+      ...getAuditContext(req),
+    });
 
     res.status(200).json({
       message: "Login successful",
@@ -168,24 +247,69 @@ exports.posLogin = async (req, res) => {
     });
 
     if (!user || !POS_LOGIN_ROLES.has(normalizeRole(user.role))) {
-      return res.status(404).json({ error: "POS user not found" });
+      await logManualAuditEvent({
+        action: "auth.pos.failed",
+        entityType: "auth",
+        statusCode: 401,
+        summary: `Failed POS login for user ${userId}`,
+        payload: { userId },
+        ...getAuditContext(req),
+      });
+      return res.status(401).json({ error: "Invalid user or PIN" });
     }
 
     if (!isActiveStatus(user.status)) {
+      await logManualAuditEvent({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: "auth.pos.blocked",
+        entityType: "auth",
+        entityId: user.id,
+        statusCode: 403,
+        summary: `Inactive POS login blocked for ${user.fullName}`,
+        payload: { userId },
+        ...getAuditContext(req),
+      });
       return res.status(403).json({ error: "User account is not active" });
     }
 
     const isMatch = await bcrypt.compare(pin, user.password);
 
     if (!isMatch) {
-      return res.status(400).json({ error: "Wrong PIN" });
+      await logManualAuditEvent({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: "auth.pos.failed",
+        entityType: "auth",
+        entityId: user.id,
+        statusCode: 401,
+        summary: `Failed POS login for ${user.fullName}`,
+        payload: { userId },
+        ...getAuditContext(req),
+      });
+      return res.status(401).json({ error: "Invalid user or PIN" });
     }
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || "SECRET_KEY",
+      getJwtSecret(),
       { expiresIn: "7d" }
     );
+
+    await logManualAuditEvent({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: "auth.pos.success",
+      entityType: "auth",
+      entityId: user.id,
+      statusCode: 200,
+      summary: `POS login successful for ${user.fullName}`,
+      payload: { userId },
+      ...getAuditContext(req),
+    });
 
     return res.status(200).json({
       message: "POS login successful",

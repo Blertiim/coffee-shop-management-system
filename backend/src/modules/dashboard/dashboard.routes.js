@@ -17,5 +17,8 @@ router.get("/waiter-performance", dashboardController.getWaiterPerformance);
 router.get("/revenue-trend", dashboardController.getRevenueTrend);
 router.get("/daily-summary", dashboardController.getDailySummary);
 router.get("/stock-alerts", dashboardController.getLowStockProducts);
+router.get("/advanced-report", dashboardController.getAdvancedReport);
+router.get("/export/report.csv", dashboardController.exportAdvancedReportCsv);
+router.get("/export/report.pdf", dashboardController.exportAdvancedReportPdf);
 
 module.exports = router;

@@ -13,6 +13,7 @@ export const getPosStaffProfiles = async (signal) =>
     await apiRequest("/auth/pos-staff", {
       method: "GET",
       signal,
+      timeoutMs: 6000,
     })
   );
 

@@ -1,6 +1,7 @@
 const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
+const { syncInventoryAlert } = require("../../services/alert.service");
 const {
   handleControllerError,
   sendError,
@@ -78,6 +79,8 @@ exports.createInventoryItem = async (req, res) => {
       },
     });
 
+    await syncInventoryAlert(inventoryItem);
+
     return sendSuccess(
       res,
       201,
@@ -121,6 +124,8 @@ exports.updateInventoryItem = async (req, res) => {
       },
     });
 
+    await syncInventoryAlert(inventoryItem);
+
     return sendSuccess(
       res,
       200,
@@ -146,6 +151,19 @@ exports.deleteInventoryItem = async (req, res) => {
 
     await prisma.inventory.delete({
       where: { id },
+    });
+
+    await prisma.systemAlert.updateMany({
+      where: {
+        type: "inventory.low",
+        entityType: "inventory",
+        entityId: String(id),
+        status: "open",
+      },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date(),
+      },
     });
 
     return sendSuccess(res, 200, "Inventory item deleted successfully", null);

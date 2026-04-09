@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 
 const prisma = require("../config/prisma");
+const { getJwtSecret } = require("../config/security");
 const { sendError } = require("../utils/response");
 
 const authenticate = async (req, res, next) => {
@@ -17,7 +18,7 @@ const authenticate = async (req, res, next) => {
       return sendError(res, 401, "Invalid authorization format");
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "SECRET_KEY");
+    const decoded = jwt.verify(token, getJwtSecret());
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },

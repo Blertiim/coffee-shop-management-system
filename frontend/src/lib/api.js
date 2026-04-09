@@ -54,9 +54,13 @@ const parseResponse = async (response) => {
 export const unwrapApiData = (payload) => payload?.data ?? payload;
 
 export const apiRequest = async (path, options = {}) => {
-  const { token, headers, body, ...rest } = options;
+  const { token, headers, body, signal, timeoutMs = 10000, ...rest } = options;
   const resolvedHeaders = new Headers(headers || {});
   let resolvedBody = body;
+  const abortController = new AbortController();
+  let didTimeout = false;
+  let externalAbortHandler = null;
+  let timeoutId = 0;
 
   if (token) {
     resolvedHeaders.set("Authorization", `Bearer ${token}`);
@@ -72,11 +76,49 @@ export const apiRequest = async (path, options = {}) => {
     resolvedBody = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path), {
-    ...rest,
-    headers: resolvedHeaders,
-    body: resolvedBody,
-  });
+  if (signal) {
+    if (signal.aborted) {
+      abortController.abort(signal.reason);
+    } else {
+      externalAbortHandler = () => abortController.abort(signal.reason);
+      signal.addEventListener("abort", externalAbortHandler, { once: true });
+    }
+  }
 
-  return parseResponse(response);
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      abortController.abort("timeout");
+    }, timeoutMs);
+  }
+
+  try {
+    const response = await fetch(buildUrl(path), {
+      ...rest,
+      headers: resolvedHeaders,
+      body: resolvedBody,
+      signal: abortController.signal,
+    });
+
+    return parseResponse(response);
+  } catch (error) {
+    if (didTimeout) {
+      const timeoutError = new Error(
+        "Request timed out. Check that the backend server is running."
+      );
+      timeoutError.name = "TimeoutError";
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
+
+    throw error;
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+
+    if (signal && externalAbortHandler) {
+      signal.removeEventListener("abort", externalAbortHandler);
+    }
+  }
 };

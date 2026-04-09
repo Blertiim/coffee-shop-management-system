@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "seed:pos": "node scripts/seed-pos-demo.js"
+    "seed:pos": "node scripts/seed-pos-demo.js",
+    "backup:snapshot": "node scripts/backup-system-snapshot.js",
+    "report:daily": "node scripts/export-daily-sales.js"
   },
   "keywords": [],
   "author": "",
