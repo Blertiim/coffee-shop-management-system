@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { getJwtSecret } = require("../../config/security");
 const { logManualAuditEvent } = require("../../services/audit.service");
+const { isDatabaseUnavailableError } = require("../../services/alert.service");
 
 const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
 
@@ -106,6 +107,11 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error("Register error:", error);
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        error: "Database unavailable. Start MySQL and try again.",
+      });
+    }
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -194,6 +200,11 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        error: "Database unavailable. Start MySQL and try again.",
+      });
+    }
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -222,6 +233,11 @@ exports.getPosStaffProfiles = async (req, res) => {
     });
   } catch (error) {
     console.error("Get POS staff profiles error:", error);
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        error: "Database unavailable. Start MySQL and reload the POS.",
+      });
+    }
     return res.status(500).json({ error: "Server error" });
   }
 };
@@ -318,6 +334,11 @@ exports.posLogin = async (req, res) => {
     });
   } catch (error) {
     console.error("POS login error:", error);
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        error: "Database unavailable. Start MySQL and try again.",
+      });
+    }
     return res.status(500).json({ error: "Server error" });
   }
 };

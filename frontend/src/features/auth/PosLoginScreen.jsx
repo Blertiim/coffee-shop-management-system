@@ -84,6 +84,11 @@ export default function PosLoginScreen() {
 
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }, [currentDateTime]);
+  const emptyStaffLabel = isLoadingProfiles
+    ? "Loading staff..."
+    : error
+      ? "Cannot load staff"
+      : "No staff available";
 
   return (
     <main className="pos-shell">
@@ -136,7 +141,7 @@ export default function PosLoginScreen() {
                     className="w-full appearance-none rounded-[14px] border border-[#485262] bg-[#1a202a] px-4 py-3 pr-11 text-sm font-semibold text-white outline-none transition hover:border-[#6d7990] focus:border-[#9aa4b5] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {staffProfiles.length === 0 ? (
-                      <option value="">No staff available</option>
+                      <option value="">{emptyStaffLabel}</option>
                     ) : null}
 
                     {staffProfiles.map((staff) => (

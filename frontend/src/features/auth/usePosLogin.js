@@ -30,6 +30,18 @@ const mapProfile = (profile) => ({
   status: profile.status || "active",
 });
 
+const toFriendlyLoginError = (requestError) => {
+  if (requestError?.status === 503) {
+    return "Database is offline. Start MySQL in XAMPP or Windows Services, then refresh the POS.";
+  }
+
+  if (requestError?.name === "TimeoutError") {
+    return "Backend is not responding. Check that the POS server is running.";
+  }
+
+  return requestError?.message || "Cannot load POS staff profiles.";
+};
+
 export default function usePosLogin(onLoginSuccess) {
   const [staffProfiles, setStaffProfiles] = useState([]);
   const [selectedStaffId, setSelectedStaffId] = useState(null);
@@ -75,7 +87,7 @@ export default function usePosLogin(onLoginSuccess) {
           return;
         }
 
-        setError(requestError.message || "Cannot load POS staff profiles.");
+        setError(toFriendlyLoginError(requestError));
       } finally {
         if (isMounted) {
           setIsLoadingProfiles(false);
@@ -142,7 +154,7 @@ export default function usePosLogin(onLoginSuccess) {
 
       await onLoginSuccess(response, selectedStaff);
     } catch (requestError) {
-      setError(requestError.message || "Wrong PIN. Try again.");
+      setError(toFriendlyLoginError(requestError));
     } finally {
       setIsSubmitting(false);
     }

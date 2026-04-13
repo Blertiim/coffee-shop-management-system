@@ -36,7 +36,7 @@ const frontendDistPath = path.resolve(
   process.env.FRONTEND_DIST_PATH || path.resolve(__dirname, "../../frontend/dist")
 );
 const frontendIndexPath = path.join(frontendDistPath, "index.html");
-const shouldServeFrontendDist =
+const isFrontendDistAvailable = () =>
   process.env.SERVE_FRONTEND_DIST === "true" || fs.existsSync(frontendIndexPath);
 
 app.use(
@@ -57,12 +57,10 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(requestActivityMiddleware);
 
-if (shouldServeFrontendDist) {
-  app.use(express.static(frontendDistPath));
-}
+app.use(express.static(frontendDistPath));
 
 app.get("/", (req, res) => {
-  if (shouldServeFrontendDist) {
+  if (isFrontendDistAvailable()) {
     return res.sendFile(frontendIndexPath);
   }
 
@@ -73,7 +71,7 @@ app.get("/api/health", (req, res) => {
   return sendSuccess(res, 200, "POS backend is healthy", {
     service: "coffee-shop-pos-backend",
     status: "ok",
-    mode: shouldServeFrontendDist ? "desktop" : "api",
+    mode: isFrontendDistAvailable() ? "desktop" : "api",
     timestamp: new Date().toISOString(),
   });
 });
@@ -101,11 +99,13 @@ app.get("/api/test", authMiddleware, (req, res) => {
   });
 });
 
-if (shouldServeFrontendDist) {
-  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
+app.get(/^\/(?!api(?:\/|$)).*/, (req, res, next) => {
+  if (isFrontendDistAvailable()) {
     return res.sendFile(frontendIndexPath);
-  });
-}
+  }
+
+  return next();
+});
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler);

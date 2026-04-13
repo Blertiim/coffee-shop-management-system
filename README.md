@@ -29,8 +29,9 @@ This flow:
 
 1. builds `frontend/dist`
 2. starts the Express backend automatically inside Electron
-3. serves the built frontend through Express
-4. opens the POS window at `http://localhost:5000`
+3. tries to start XAMPP MySQL automatically if the database is offline
+4. serves the built frontend through Express
+5. opens the POS window at `http://localhost:5000`
 
 ### Important local requirement
 
@@ -40,6 +41,19 @@ MySQL still needs to be available locally for Prisma. For café-style desktop us
 - or XAMPP MySQL configured to start automatically with Windows
 
 The Electron app now removes the need to run the frontend dev server or `npm run dev` manually, but it cannot replace the database service itself.
+
+### XAMPP auto-start
+
+The Electron launcher will try to start XAMPP MySQL automatically before the POS opens.
+
+Optional backend env settings:
+
+```env
+AUTO_START_XAMPP_MYSQL="true"
+XAMPP_PATH="C:\\xampp"
+```
+
+If your XAMPP is installed somewhere else, set `XAMPP_PATH` in [backend/.env.example](C:/Users/blert/OneDrive/Documents/GitHub/coffee-shop-management-system/backend/.env.example) style inside your real `backend/.env`.
 
 ## Tablet Access
 

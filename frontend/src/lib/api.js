@@ -4,11 +4,13 @@ const resolveAutoApiBaseUrl = () => {
   if (typeof window === "undefined") {
     return `http://localhost:${apiPort}/api`;
   }
+  const currentOrigin = window.location.origin;
 
-  const protocol = window.location.protocol === "https:" ? "https:" : "http:";
-  const hostname = window.location.hostname || "localhost";
+  if (currentOrigin && currentOrigin !== "null") {
+    return `${currentOrigin.replace(/\/$/, "")}/api`;
+  }
 
-  return `${protocol}//${hostname}:${apiPort}/api`;
+  return `http://localhost:${apiPort}/api`;
 };
 
 const rawApiBaseUrl =
