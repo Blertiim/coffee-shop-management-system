@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const fs = require("fs");
+const path = require("path");
 
 const authRoutes = require("./modules/auth/auth.routes");
 const categoryRoutes = require("./modules/categories/category.routes");
@@ -30,6 +32,12 @@ const { buildCorsOriginChecker } = require("./config/security");
 
 const app = express();
 const corsOriginChecker = buildCorsOriginChecker();
+const frontendDistPath = path.resolve(
+  process.env.FRONTEND_DIST_PATH || path.resolve(__dirname, "../../frontend/dist")
+);
+const frontendIndexPath = path.join(frontendDistPath, "index.html");
+const shouldServeFrontendDist =
+  process.env.SERVE_FRONTEND_DIST === "true" || fs.existsSync(frontendIndexPath);
 
 app.use(
   cors({
@@ -49,8 +57,25 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(requestActivityMiddleware);
 
+if (shouldServeFrontendDist) {
+  app.use(express.static(frontendDistPath));
+}
+
 app.get("/", (req, res) => {
+  if (shouldServeFrontendDist) {
+    return res.sendFile(frontendIndexPath);
+  }
+
   return sendSuccess(res, 200, "API is running", null);
+});
+
+app.get("/api/health", (req, res) => {
+  return sendSuccess(res, 200, "POS backend is healthy", {
+    service: "coffee-shop-pos-backend",
+    status: "ok",
+    mode: shouldServeFrontendDist ? "desktop" : "api",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.use("/api/auth", authRoutes);
@@ -75,6 +100,12 @@ app.get("/api/test", authMiddleware, (req, res) => {
     user: req.user,
   });
 });
+
+if (shouldServeFrontendDist) {
+  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
+    return res.sendFile(frontendIndexPath);
+  });
+}
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler);

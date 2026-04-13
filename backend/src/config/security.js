@@ -18,6 +18,18 @@ const getNodeEnv = () => (process.env.NODE_ENV || "development").trim().toLowerC
 
 const isProductionEnv = () => getNodeEnv() === "production";
 
+const buildSelfOrigins = () => {
+  const port = String(process.env.PORT || "5000").trim() || "5000";
+  const host = (process.env.HOST || "0.0.0.0").trim().toLowerCase();
+  const origins = new Set([`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+
+  if (host && !["0.0.0.0", "::", "::1"].includes(host)) {
+    origins.add(`http://${host}:${port}`);
+  }
+
+  return origins;
+};
+
 const getJwtSecret = () => {
   const secret = (process.env.JWT_SECRET || "").trim();
 
@@ -48,6 +60,12 @@ const parseCorsOrigins = () => {
 const buildCorsOriginChecker = () => {
   const rawOrigins = (process.env.CORS_ORIGINS || "").trim();
   const allowedOrigins = parseCorsOrigins();
+  const selfOrigins = buildSelfOrigins();
+
+  const isKnownAllowedOrigin = (origin) =>
+    !origin ||
+    selfOrigins.has(origin) ||
+    (allowedOrigins ? allowedOrigins.has(origin) : false);
 
   if (rawOrigins === "*") {
     if (isProductionEnv()) {
@@ -55,8 +73,9 @@ const buildCorsOriginChecker = () => {
     }
 
     return {
-      description: "local/private-network development origins",
-      isOriginAllowed: (origin) => !origin || PRIVATE_DEV_ORIGIN_PATTERN.test(origin),
+      description: "local/private-network development origins and app server origins",
+      isOriginAllowed: (origin) =>
+        isKnownAllowedOrigin(origin) || PRIVATE_DEV_ORIGIN_PATTERN.test(origin),
     };
   }
 
@@ -66,14 +85,15 @@ const buildCorsOriginChecker = () => {
     }
 
     return {
-      description: "local/private-network development origins",
-      isOriginAllowed: (origin) => !origin || PRIVATE_DEV_ORIGIN_PATTERN.test(origin),
+      description: "local/private-network development origins and app server origins",
+      isOriginAllowed: (origin) =>
+        isKnownAllowedOrigin(origin) || PRIVATE_DEV_ORIGIN_PATTERN.test(origin),
     };
   }
 
   return {
-    description: Array.from(allowedOrigins).join(", "),
-    isOriginAllowed: (origin) => !origin || allowedOrigins.has(origin),
+    description: Array.from(new Set([...allowedOrigins, ...selfOrigins])).join(", "),
+    isOriginAllowed: (origin) => isKnownAllowedOrigin(origin),
   };
 };
 
