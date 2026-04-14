@@ -89,11 +89,21 @@ export const generateOrderInvoice = async (token, orderId) =>
     })
   );
 
-export const completeOrderPayment = async (token, orderId) =>
+export const transferOrderToTable = async (token, orderId, tableId) =>
+  unwrapApiData(
+    await apiRequest(`/orders/${orderId}/transfer-table`, {
+      method: "PATCH",
+      token,
+      body: { tableId },
+    })
+  );
+
+export const completeOrderPayment = async (token, orderId, paymentMethod) =>
   unwrapApiData(
     await apiRequest(`/orders/${orderId}/complete-payment`, {
       method: "PATCH",
       token,
+      body: paymentMethod ? { paymentMethod } : undefined,
     })
   );
 

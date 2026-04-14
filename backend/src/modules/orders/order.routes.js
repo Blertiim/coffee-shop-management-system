@@ -28,6 +28,11 @@ router.patch(
   orderController.generateInvoice
 );
 router.patch(
+  "/orders/:id/transfer-table",
+  authMiddleware,
+  orderController.transferOrderToTable
+);
+router.patch(
   "/orders/:id/complete-payment",
   authMiddleware,
   orderController.completePayment

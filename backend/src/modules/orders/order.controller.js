@@ -6,9 +6,11 @@ const { normalizeRole } = require("../../middlewares/role.middleware");
 const {
   validateCreateOrderPayload,
   validateAppendOrderItemsPayload,
+  validateCompletePaymentPayload,
   validateOrderId,
   validateTableId,
   validateOrderStatusUpdatePayload,
+  validateTransferOrderPayload,
 } = require("./order.validation");
 
 const ORDER_PROGRESS_FLOW = {
@@ -62,6 +64,11 @@ const isManager = (req) => normalizeRole(req.user && req.user.role) === "manager
 const isWaiter = (req) => normalizeRole(req.user && req.user.role) === "waiter";
 const isAdminOrManager = (req) => isAdmin(req) || isManager(req);
 const isPosStaff = (req) => isAdminOrManager(req) || isWaiter(req);
+const isTableAssignedToCurrentWaiter = (req, table) =>
+  isWaiter(req) &&
+  table &&
+  table.assignedWaiterId &&
+  table.assignedWaiterId !== (req.user && req.user.id);
 
 const isAssignedWaiter = (req, order) =>
   isWaiter(req) &&
@@ -240,7 +247,13 @@ const setTableStatusForOrder = async (tx, order, status) => {
   });
 };
 
-const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) => {
+const applyOrderStatusTransition = async (
+  tx,
+  req,
+  existingOrder,
+  targetStatus,
+  options = {}
+) => {
   if (existingOrder.status === targetStatus) {
     throw new AppError(`Order is already ${targetStatus}`);
   }
@@ -300,9 +313,15 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) 
 
     await setTableStatusForOrder(tx, existingOrder, "available");
 
+    const nextPaymentMethod =
+      options.paymentMethod || existingOrder.paymentMethod || null;
+
     return tx.order.update({
       where: { id: existingOrder.id },
-      data: { status: "paid" },
+      data: {
+        status: "paid",
+        paymentMethod: nextPaymentMethod,
+      },
       include: orderInclude,
     });
   }
@@ -328,7 +347,7 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus) 
   });
 };
 
-const runOrderStatusUpdate = async (req, id, targetStatus) =>
+const runOrderStatusUpdate = async (req, id, targetStatus, options = {}) =>
   prisma.$transaction(async (tx) => {
     const existingOrder = await tx.order.findUnique({
       where: { id },
@@ -339,7 +358,7 @@ const runOrderStatusUpdate = async (req, id, targetStatus) =>
       throw new AppError("Order not found", 404);
     }
 
-    return applyOrderStatusTransition(tx, req, existingOrder, targetStatus);
+    return applyOrderStatusTransition(tx, req, existingOrder, targetStatus, options);
   });
 
 exports.createOrder = async (req, res) => {
@@ -707,10 +726,106 @@ exports.generateInvoice = async (req, res) => {
   }
 };
 
+exports.transferOrderToTable = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const { tableId } = validateTransferOrderPayload(req.body);
+
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: orderInclude,
+      });
+
+      if (!existingOrder) {
+        throw new AppError("Order not found", 404);
+      }
+
+      if (!canManageOrderLifecycle(req, existingOrder)) {
+        throw new AppError("Only POS staff or order owner can transfer this order", 403);
+      }
+
+      if (!existingOrder.tableId) {
+        throw new AppError("Only table orders can be transferred");
+      }
+
+      if (!ACTIVE_ORDER_STATUSES.includes(existingOrder.status)) {
+        throw new AppError("Only active orders can be transferred");
+      }
+
+      if (existingOrder.tableId === tableId) {
+        throw new AppError("Choose a different table for the transfer");
+      }
+
+      const [targetTable, activeOrderOnTarget] = await Promise.all([
+        tx.table.findUnique({
+          where: { id: tableId },
+        }),
+        tx.order.findFirst({
+          where: {
+            tableId,
+            status: {
+              in: ACTIVE_ORDER_STATUSES,
+            },
+            id: {
+              not: existingOrder.id,
+            },
+          },
+        }),
+      ]);
+
+      if (!targetTable) {
+        throw new AppError("Target table not found", 404);
+      }
+
+      if (isTableAssignedToCurrentWaiter(req, targetTable)) {
+        throw new AppError("You can only transfer orders to your assigned tables", 403);
+      }
+
+      if (targetTable.status !== "available" || activeOrderOnTarget) {
+        throw new AppError("Target table is not available for transfer");
+      }
+
+      const nextTableStatus =
+        existingOrder.status === "pending_payment" ? "pending_payment" : "occupied";
+
+      await tx.table.update({
+        where: { id: existingOrder.tableId },
+        data: { status: "available" },
+      });
+
+      await tx.table.update({
+        where: { id: targetTable.id },
+        data: { status: nextTableStatus },
+      });
+
+      return tx.order.update({
+        where: { id: existingOrder.id },
+        data: {
+          tableId: targetTable.id,
+        },
+        include: orderInclude,
+      });
+    });
+
+    return sendSuccess(
+      res,
+      200,
+      "Order transferred successfully",
+      updatedOrder
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Transfer order error");
+  }
+};
+
 exports.completePayment = async (req, res) => {
   try {
     const id = validateOrderId(req.params.id);
-    const updatedOrder = await runOrderStatusUpdate(req, id, "paid");
+    const { paymentMethod } = validateCompletePaymentPayload(req.body);
+    const updatedOrder = await runOrderStatusUpdate(req, id, "paid", {
+      paymentMethod,
+    });
 
     return sendSuccess(
       res,

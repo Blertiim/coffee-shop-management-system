@@ -74,6 +74,17 @@ const validateAppendOrderItemsPayload = (body) => ({
   items: normalizeOrderItems(body.items),
 });
 
+const validateCompletePaymentPayload = (body = {}) => ({
+  paymentMethod:
+    body.paymentMethod !== undefined && body.paymentMethod !== null
+      ? ensureEnumValue(body.paymentMethod, "Payment method", VALID_PAYMENT_METHODS)
+      : null,
+});
+
+const validateTransferOrderPayload = (body = {}) => ({
+  tableId: ensureId(body.tableId, "Target table id"),
+});
+
 module.exports = {
   VALID_ORDER_STATUSES,
   VALID_PAYMENT_METHODS,
@@ -82,4 +93,6 @@ module.exports = {
   validateTableId,
   validateOrderStatusUpdatePayload,
   validateAppendOrderItemsPayload,
+  validateCompletePaymentPayload,
+  validateTransferOrderPayload,
 };

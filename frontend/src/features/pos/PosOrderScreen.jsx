@@ -15,10 +15,45 @@ import {
   generateOrderInvoice,
   getCategories,
   getProducts,
+  getTables,
+  transferOrderToTable,
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
 
 const DEFAULT_PAYMENT_METHOD = "cash";
+const PAYMENT_METHOD_OPTIONS = [
+  {
+    key: "cash",
+    label: "Cash",
+    className:
+      "border-[#46c46f] bg-[linear-gradient(180deg,rgba(41,129,68,0.98)_0%,rgba(28,94,49,0.99)_100%)] text-white hover:brightness-105",
+    activeClassName:
+      "border-[#6ef39a] bg-[linear-gradient(180deg,rgba(61,161,92,0.98)_0%,rgba(37,118,67,0.99)_100%)] text-white shadow-[0_12px_24px_rgba(18,82,39,0.32)]",
+  },
+  {
+    key: "card",
+    label: "Card",
+    className:
+      "border-[#3d8ccf] bg-[linear-gradient(180deg,rgba(31,93,154,0.98)_0%,rgba(22,66,111,0.99)_100%)] text-white hover:brightness-105",
+    activeClassName:
+      "border-[#70bcff] bg-[linear-gradient(180deg,rgba(43,117,190,0.98)_0%,rgba(27,82,140,0.99)_100%)] text-white shadow-[0_12px_24px_rgba(17,54,92,0.34)]",
+  },
+];
+
+const PAYMENT_METHOD_LABELS = PAYMENT_METHOD_OPTIONS.reduce((accumulator, option) => {
+  accumulator[option.key] = option.label;
+  return accumulator;
+}, {});
+
+const VALID_PAYMENT_METHODS = new Set(PAYMENT_METHOD_OPTIONS.map((option) => option.key));
+const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
+const TRANSFERABLE_ORDER_STATUSES = new Set([
+  "pending",
+  "preparing",
+  "served",
+  "pending_payment",
+]);
+const TABLES_PATH = "/tables";
 
 const isHiddenPosCategory = (name) => {
   const normalizedName =
@@ -31,8 +66,6 @@ const isHiddenPosCategory = (name) => {
   );
 };
 
-const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
-
 const formatPrice = (value) =>
   new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
@@ -42,7 +75,12 @@ const formatPrice = (value) =>
 const normalizeStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
-const TABLES_PATH = "/tables";
+const normalizePaymentMethod = (value) => {
+  const normalized = normalizeStatus(value);
+  return VALID_PAYMENT_METHODS.has(normalized)
+    ? normalized
+    : DEFAULT_PAYMENT_METHOD;
+};
 
 const buildTablePath = (visualTableId, fallbackTableNumber) => {
   const parsedVisualId = Number(visualTableId);
@@ -83,17 +121,94 @@ const getUiStatusLabel = (status) => {
     return "Available";
   }
 
-  return "Open Order";
+  return "Ready";
+};
+
+const buildTicketSummaryItems = (items) => {
+  const groupedItems = new Map();
+
+  items.forEach((item, index) => {
+    const productId = item.productId || item.product?.id || `ticket-item-${index}`;
+    const quantity = Number(item.quantity || 0);
+    const price = Number(item.price || 0);
+    const key = `${productId}:${price}`;
+    const lineTotal = Number((price * quantity).toFixed(2));
+    const existingItem = groupedItems.get(key);
+
+    if (existingItem) {
+      existingItem.quantity += quantity;
+      existingItem.lineTotal = Number((existingItem.lineTotal + lineTotal).toFixed(2));
+      return;
+    }
+
+    groupedItems.set(key, {
+      key,
+      productId,
+      name: item.product?.name || "Product",
+      quantity,
+      price,
+      lineTotal,
+    });
+  });
+
+  return Array.from(groupedItems.values()).sort((left, right) =>
+    left.name.localeCompare(right.name)
+  );
+};
+
+const getFlowHint = ({
+  canCompletePayment,
+  canGenerateInvoice,
+  cartCount,
+  hasActiveOrder,
+  isToGo,
+  paymentMethodLabel,
+}) => {
+  if (canCompletePayment) {
+    return `Choose ${paymentMethodLabel} to close this ticket.`;
+  }
+
+  if (canGenerateInvoice) {
+    if (cartCount > 0) {
+      return "Confirm the pending items before sending the order to payment.";
+    }
+
+    return "Send the ticket to payment when the guest is ready.";
+  }
+
+  if (cartCount > 0) {
+    return hasActiveOrder
+      ? "Confirm the pending items to append them to the open ticket."
+      : `Confirm the order to open a ${isToGo ? "to-go" : "table"} ticket.`;
+  }
+
+  return "Tap products to build the order.";
 };
 
 export default function PosOrderScreen() {
-  const { session, selectedTable: table, logout, returnToTables, showNotice } = usePosApp();
+  const {
+    session,
+    selectedTable: table,
+    logout,
+    returnToTables,
+    selectTable,
+    showNotice,
+  } = usePosApp();
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
+    normalizePaymentMethod(table?.activeOrder?.paymentMethod)
+  );
+  const [selectedCartProductId, setSelectedCartProductId] = useState(null);
+  const [isToGo, setIsToGo] = useState(false);
+  const [hasDiscountRequest, setHasDiscountRequest] = useState(false);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [isCompletingPayment, setIsCompletingPayment] = useState(false);
   const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [selectedTransferTableId, setSelectedTransferTableId] = useState(null);
+  const [isTransferringOrder, setIsTransferringOrder] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const {
     cart,
@@ -107,8 +222,25 @@ export default function PosOrderScreen() {
 
   useEffect(() => {
     setCurrentOrder(table?.activeOrder || null);
+    setSelectedPaymentMethod(normalizePaymentMethod(table?.activeOrder?.paymentMethod));
+    setSelectedCartProductId(null);
+    setIsToGo(false);
+    setHasDiscountRequest(false);
+    setIsTransferDialogOpen(false);
+    setSelectedTransferTableId(null);
     setSubmitError("");
   }, [table]);
+
+  useEffect(() => {
+    if (!cart.length) {
+      setSelectedCartProductId(null);
+      return;
+    }
+
+    setSelectedCartProductId((current) =>
+      cart.some((item) => item.productId === current) ? current : cart[0].productId
+    );
+  }, [cart]);
 
   useEffect(() => {
     if (!table) {
@@ -172,8 +304,26 @@ export default function PosOrderScreen() {
     onUnauthorized: logout,
   });
 
+  const loadTransferTables = useCallback(
+    async (signal) => getTables(session.token, signal),
+    [session.token]
+  );
+
+  const {
+    data: transferTablesData,
+    isLoading: isLoadingTransferTables,
+    error: transferTablesError,
+    reload: reloadTransferTables,
+  } = useApiResource(loadTransferTables, {
+    deps: [table?.id],
+    initialData: [],
+    errorMessage: "Cannot load tables for transfer.",
+    onUnauthorized: logout,
+  });
+
   const backendCategories = menuData?.categories || [];
   const products = menuData?.products || [];
+  const transferTables = Array.isArray(transferTablesData) ? transferTablesData : [];
   const employeeId =
     session.staffProfile?.employeeId || session.user?.employee?.id || null;
   const waiterName = session.staffProfile?.name || session.user?.fullName || "Waiter";
@@ -184,6 +334,7 @@ export default function PosOrderScreen() {
         .sort((left, right) => left.name.localeCompare(right.name)),
     [products]
   );
+
   const categoryCounts = useMemo(() => {
     const counts = new Map();
 
@@ -194,6 +345,7 @@ export default function PosOrderScreen() {
 
     return counts;
   }, [orderableProducts]);
+
   const menuCategories = useMemo(
     () =>
       backendCategories
@@ -218,15 +370,43 @@ export default function PosOrderScreen() {
     });
   }, [menuCategories]);
 
+  const sortedTransferTables = useMemo(
+    () => [...transferTables].sort((left, right) => left.number - right.number),
+    [transferTables]
+  );
+
+  const tableVisualIdsById = useMemo(
+    () =>
+      new Map(
+        sortedTransferTables.map((transferTable, index) => [transferTable.id, index + 1])
+      ),
+    [sortedTransferTables]
+  );
+
+  const transferCandidates = useMemo(
+    () =>
+      sortedTransferTables.filter(
+        (transferTable) =>
+          transferTable.id !== table?.id &&
+          normalizeStatus(transferTable.status) === "available"
+      ),
+    [sortedTransferTables, table]
+  );
+
   const hasActiveOrder = Boolean(currentOrder);
   const orderStatus = normalizeStatus(currentOrder?.status);
   const canEditOrderItems = !hasActiveOrder || ORDER_EDITABLE_STATUSES.has(orderStatus);
   const canGenerateInvoice = hasActiveOrder && ORDER_EDITABLE_STATUSES.has(orderStatus);
   const canCompletePayment = hasActiveOrder && orderStatus === "pending_payment";
+  const canTransferOrder = hasActiveOrder && TRANSFERABLE_ORDER_STATUSES.has(orderStatus);
   const canDownloadInvoice =
     hasActiveOrder && (orderStatus === "pending_payment" || orderStatus === "paid");
   const isBusy =
-    isSavingOrder || isGeneratingInvoice || isCompletingPayment || isDownloadingInvoice;
+    isSavingOrder ||
+    isGeneratingInvoice ||
+    isCompletingPayment ||
+    isDownloadingInvoice ||
+    isTransferringOrder;
 
   const categoryRailItems = useMemo(
     () =>
@@ -265,18 +445,50 @@ export default function PosOrderScreen() {
       return productCategoryId === selectedCategoryId;
     });
   }, [menuCategories, orderableProducts, selectedCategoryId]);
-  const activeOrderItemCount = useMemo(
-    () =>
-      Array.isArray(currentOrder?.items)
-        ? currentOrder.items.reduce((sum, item) => sum + item.quantity, 0)
-        : 0,
+
+  const ticketItems = useMemo(
+    () => buildTicketSummaryItems(Array.isArray(currentOrder?.items) ? currentOrder.items : []),
     [currentOrder]
   );
+
+  const activeOrderItemCount = useMemo(
+    () => ticketItems.reduce((sum, item) => sum + item.quantity, 0),
+    [ticketItems]
+  );
+
   const displayLocation = table?.location || "Floor";
   const selectedMenuHint =
     categoryRailItems.length > 0
-      ? "Only categories with ready-to-order products are shown."
+      ? "Tap a category once, then hit products as fast as the guest calls them."
       : "No ready-to-order products are available right now.";
+  const projectedTotal = Number(((currentOrder?.total || 0) + total).toFixed(2));
+  const selectedPaymentLabel =
+    PAYMENT_METHOD_LABELS[selectedPaymentMethod] || PAYMENT_METHOD_LABELS.cash;
+  const serviceLabel = isToGo ? "To Go" : "Table Service";
+  const selectedCartItem =
+    cart.find((item) => item.productId === selectedCartProductId) || null;
+  const flowHint = getFlowHint({
+    canCompletePayment,
+    canGenerateInvoice,
+    cartCount: cart.length,
+    hasActiveOrder,
+    isToGo,
+    paymentMethodLabel: selectedPaymentLabel,
+  });
+
+  useEffect(() => {
+    if (!isTransferDialogOpen) {
+      return;
+    }
+
+    setSelectedTransferTableId((current) => {
+      if (current && transferCandidates.some((candidate) => candidate.id === current)) {
+        return current;
+      }
+
+      return transferCandidates[0]?.id || null;
+    });
+  }, [isTransferDialogOpen, transferCandidates]);
 
   const submitItemsToOrder = async () => {
     if (!canEditOrderItems) {
@@ -284,7 +496,7 @@ export default function PosOrderScreen() {
     }
 
     if (cart.length === 0) {
-      throw new Error("Add products before saving order.");
+      throw new Error("Add products before confirming the order.");
     }
 
     const payloadItems = cart.map((item) => ({
@@ -298,12 +510,13 @@ export default function PosOrderScreen() {
         })
       : await createOrder(session.token, {
           tableId: table.id,
-          paymentMethod: DEFAULT_PAYMENT_METHOD,
+          paymentMethod: selectedPaymentMethod,
           items: payloadItems,
           ...(employeeId ? { employeeId } : {}),
         });
 
     setCurrentOrder(order);
+    setSelectedPaymentMethod(normalizePaymentMethod(order.paymentMethod || selectedPaymentMethod));
     clearCart();
     return order;
   };
@@ -317,8 +530,8 @@ export default function PosOrderScreen() {
       showNotice({
         type: "success",
         message: hasActiveOrder
-          ? `Items added to Order #${order.id}. Order stays open.`
-          : `Order #${order.id} saved and kept open.`,
+          ? `Items added to Order #${order.id}.`
+          : `Order #${order.id} opened as ${serviceLabel.toLowerCase()}.`,
       });
     } catch (requestError) {
       if (requestError.status === 401) {
@@ -326,7 +539,7 @@ export default function PosOrderScreen() {
         return;
       }
 
-      setSubmitError(requestError.message || "Cannot save order.");
+      setSubmitError(requestError.message || "Cannot confirm order.");
     } finally {
       setIsSavingOrder(false);
     }
@@ -342,7 +555,7 @@ export default function PosOrderScreen() {
       }
 
       if (cart.length > 0) {
-        throw new Error("Save order items first, then generate invoice.");
+        throw new Error("Confirm pending items first, then move the ticket to payment.");
       }
 
       const invoicedOrder = await generateOrderInvoice(session.token, currentOrder.id);
@@ -351,7 +564,7 @@ export default function PosOrderScreen() {
 
       showNotice({
         type: "success",
-        message: `Invoice generated for Order #${invoicedOrder.id}. Table is pending payment.`,
+        message: `Order #${invoicedOrder.id} is ready for payment.`,
       });
     } catch (requestError) {
       if (requestError.status === 401) {
@@ -359,7 +572,7 @@ export default function PosOrderScreen() {
         return;
       }
 
-      setSubmitError(requestError.message || "Cannot generate invoice.");
+      setSubmitError(requestError.message || "Cannot move ticket to payment.");
     } finally {
       setIsGeneratingInvoice(false);
     }
@@ -371,13 +584,13 @@ export default function PosOrderScreen() {
 
     try {
       if (!currentOrder) {
-        throw new Error("No order selected for invoice download.");
+        throw new Error("No order selected for receipt download.");
       }
 
       await downloadOrderReceipt(session.token, currentOrder.id);
       showNotice({
         type: "success",
-        message: `Invoice downloaded for Order #${currentOrder.id}.`,
+        message: `Receipt downloaded for Order #${currentOrder.id}.`,
       });
     } catch (requestError) {
       if (requestError.status === 401) {
@@ -385,14 +598,15 @@ export default function PosOrderScreen() {
         return;
       }
 
-      setSubmitError(requestError.message || "Cannot download invoice.");
+      setSubmitError(requestError.message || "Cannot download receipt.");
     } finally {
       setIsDownloadingInvoice(false);
     }
   };
 
-  const handleCompletePayment = async () => {
+  const handleCompletePayment = async (paymentMethod) => {
     setIsCompletingPayment(true);
+    setSelectedPaymentMethod(paymentMethod);
     setSubmitError("");
 
     try {
@@ -405,17 +619,26 @@ export default function PosOrderScreen() {
       }
 
       if (normalizeStatus(currentOrder.status) !== "pending_payment") {
-        throw new Error("Generate invoice first before completing payment.");
+        throw new Error("Send the ticket to payment before choosing Cash or Card.");
       }
 
-      const paidOrder = await completeOrderPayment(session.token, currentOrder.id);
+      const paidOrder = await completeOrderPayment(
+        session.token,
+        currentOrder.id,
+        paymentMethod
+      );
+      const paidMethodLabel =
+        PAYMENT_METHOD_LABELS[
+          normalizePaymentMethod(paidOrder.paymentMethod || paymentMethod)
+        ] || PAYMENT_METHOD_LABELS.cash;
+
       setCurrentOrder(paidOrder);
 
       handleReturnToTables({
         refresh: true,
         notice: {
           type: "success",
-          message: `Payment completed (${formatPrice(
+          message: `${paidMethodLabel} payment completed (${formatPrice(
             paidOrder.total
           )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(
             table
@@ -434,6 +657,155 @@ export default function PosOrderScreen() {
     }
   };
 
+  const handleAddProduct = (product) => {
+    if (!canEditOrderItems) {
+      setSubmitError(
+        "This ticket is waiting for payment. Complete payment before adding new items."
+      );
+      return;
+    }
+
+    addProduct(product);
+    setSelectedCartProductId(product.id);
+    setSubmitError("");
+  };
+
+  const handleDeleteSelectedItem = () => {
+    if (!selectedCartItem) {
+      setSubmitError("Tap a pending item in the order panel first.");
+      return;
+    }
+
+    removeProduct(selectedCartItem.productId);
+    setSubmitError("");
+  };
+
+  const handleDiscountToggle = () => {
+    setHasDiscountRequest((current) => {
+      const next = !current;
+
+      showNotice({
+        type: "info",
+        message: next
+          ? "Discount or coupon flagged for checkout review."
+          : "Discount or coupon flag cleared.",
+      });
+
+      return next;
+    });
+  };
+
+  const handleOpenTransferDialog = () => {
+    if (!canTransferOrder || !currentOrder) {
+      setSubmitError("Only active table orders can be transferred.");
+      return;
+    }
+
+    if (cart.length > 0) {
+      setSubmitError("Confirm or clear pending cart items before transferring the order.");
+      return;
+    }
+
+    setIsTransferDialogOpen(true);
+    setSubmitError("");
+  };
+
+  const handleTransferOrder = async () => {
+    if (!currentOrder) {
+      setSubmitError("No active order found.");
+      return;
+    }
+
+    if (!selectedTransferTableId) {
+      setSubmitError("Choose a destination table first.");
+      return;
+    }
+
+    setIsTransferringOrder(true);
+    setSubmitError("");
+
+    try {
+      const transferredOrder = await transferOrderToTable(
+        session.token,
+        currentOrder.id,
+        selectedTransferTableId
+      );
+      const transferredTableId = transferredOrder.tableId || transferredOrder.table?.id;
+      const transferredTable =
+        sortedTransferTables.find((candidate) => candidate.id === transferredTableId) ||
+        transferredOrder.table;
+      const nextVisualId =
+        tableVisualIdsById.get(transferredTableId) ||
+        transferredTable?.visualId ||
+        transferredTable?.number;
+
+      if (!transferredTable || !nextVisualId) {
+        throw new Error("Order moved, but the new table could not be opened.");
+      }
+
+      setIsTransferDialogOpen(false);
+      setSelectedTransferTableId(null);
+      setCurrentOrder(transferredOrder);
+      reloadTransferTables();
+
+      selectTable({
+        ...transferredTable,
+        ...transferredOrder.table,
+        activeOrder: transferredOrder,
+        visualId: nextVisualId,
+      });
+
+      showNotice({
+        type: "success",
+        message: `Order #${transferredOrder.id} moved to Table ${nextVisualId}.`,
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
+
+      setSubmitError(requestError.message || "Cannot transfer order.");
+    } finally {
+      setIsTransferringOrder(false);
+    }
+  };
+
+  const handleFutureAction = (label) => {
+    showNotice({
+      type: "info",
+      message: `${label} is staged in the POS flow and ready for backend wiring.`,
+    });
+  };
+
+  const headerStats = [
+    { label: "Categories", value: categoryRailItems.length, accent: "text-[#eff8f6]" },
+    { label: "Products Ready", value: visibleProducts.length, accent: "text-[#eff8f6]" },
+    { label: "Pending Cart", value: itemCount, accent: "text-[#eff8f6]" },
+    {
+      label: "Ticket Status",
+      value: hasActiveOrder ? getUiStatusLabel(orderStatus) : "Ready",
+      accent: "text-[#eff8f6]",
+    },
+  ];
+
+  const orderStats = [
+    { label: "Pending", value: itemCount, accent: "text-[#eff8f6]" },
+    {
+      label: "Pending Total",
+      value: `${formatPrice(total)} EUR`,
+      accent: "text-[#d8ffe3]",
+      align: "text-right",
+    },
+    { label: "Ticket Items", value: activeOrderItemCount, accent: "text-[#eff8f6]" },
+    {
+      label: "Projected Total",
+      value: `${formatPrice(projectedTotal)} EUR`,
+      accent: "text-[#eff8f6]",
+      align: "text-right",
+    },
+  ];
+
   if (!table) {
     return (
       <main className="pos-shell">
@@ -443,124 +815,108 @@ export default function PosOrderScreen() {
   }
 
   return (
-    <main className="pos-shell">
+    <main className="pos-shell bg-[radial-gradient(circle_at_top_left,rgba(39,102,95,0.16)_0%,transparent_26%),radial-gradient(circle_at_bottom_right,rgba(22,116,176,0.16)_0%,transparent_30%),linear-gradient(180deg,#051217_0%,#061920_52%,#08151a_100%)]">
       <section className="flex min-h-[calc(100vh-24px)] flex-col gap-4">
-        <header className="relative overflow-hidden rounded-[28px] border border-[#2b4151] bg-[linear-gradient(135deg,rgba(10,16,25,0.98)_0%,rgba(17,30,44,0.98)_52%,rgba(14,53,58,0.96)_100%)] px-4 py-4 shadow-[0_26px_60px_rgba(0,0,0,0.28)] sm:px-5 sm:py-5">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(207,166,109,0.14)_0%,transparent_26%),radial-gradient(circle_at_88%_24%,rgba(91,177,167,0.16)_0%,transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.03)_0%,transparent_42%)]" />
-
-          <div className="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <header className="rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(8,29,35,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.28)]">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center rounded-full border border-[#4ca59e]/45 bg-[#163736]/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#9ce7d4]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d7f4e7]">
                   Table {getDisplayTableId(table)}
                 </span>
-                <span className="inline-flex items-center rounded-full border border-[#82643d]/55 bg-[#2a2116]/75 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f0d6a2]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d7eef3]">
                   {displayLocation}
                 </span>
-                <span className="inline-flex items-center rounded-full border border-[#3e516b]/75 bg-[#182230]/82 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#c9d4e4]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#dce7ea]">
                   {waiterName}
+                </span>
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#a6e8c3]">
+                  {serviceLabel}
                 </span>
               </div>
 
-              <h1 className="m-0 mt-4 text-[clamp(1.75rem,4vw,2.7rem)] font-semibold tracking-[-0.05em] text-[#f7f3ea]">
-                Order Terminal
-              </h1>
-              <p className="m-0 mt-2 max-w-3xl text-sm text-[#b9c5d3] sm:text-[15px]">
-                Add products fast, keep the ticket clean, and move this table from
-                ordering to payment without the old admin-screen clutter.
-              </p>
-
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-[18px] border border-[#33485f] bg-[rgba(12,20,31,0.55)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8395aa]">
-                    Cart Items
-                  </p>
-                  <p className="m-0 mt-2 text-xl font-semibold text-[#f6f1e8]">
-                    {itemCount}
-                  </p>
-                </div>
-                <div className="rounded-[18px] border border-[#33485f] bg-[rgba(12,20,31,0.55)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8395aa]">
-                    Menu Groups
-                  </p>
-                  <p className="m-0 mt-2 text-xl font-semibold text-[#f6f1e8]">
-                    {categoryRailItems.length}
-                  </p>
-                </div>
-                <div className="rounded-[18px] border border-[#33485f] bg-[rgba(12,20,31,0.55)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8395aa]">
-                    Ticket Status
-                  </p>
-                  <p className="m-0 mt-2 text-base font-semibold text-[#f6f1e8]">
-                    {hasActiveOrder ? getUiStatusLabel(orderStatus) : "Ready to start"}
-                  </p>
-                </div>
-                <div className="rounded-[18px] border border-[#33485f] bg-[rgba(12,20,31,0.55)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8395aa]">
-                    Service
-                  </p>
-                  <p className="m-0 mt-2 text-base font-semibold text-[#f6f1e8]">
-                    Table Order
-                  </p>
-                </div>
+              <div className="mt-4">
+                <h1 className="m-0 text-[clamp(1.6rem,3.4vw,2.35rem)] font-semibold tracking-[-0.03em] text-[#eff8f6]">
+                  Order Terminal
+                </h1>
+                <p className="m-0 mt-2 max-w-3xl text-sm text-[#95b0b4] sm:text-[15px]">
+                  Categories on the left, products in the middle, checkout on the
+                  right.
+                </p>
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-2 xl:justify-end">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
               <button
                 type="button"
-                className="inline-flex min-h-[52px] items-center justify-center rounded-[18px] border border-[#39526a] bg-[rgba(16,26,39,0.84)] px-4 text-sm font-semibold text-[#d3deec] transition hover:border-[#5d798f] hover:bg-[rgba(22,36,53,0.92)] active:scale-[0.99]"
+                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] hover:text-white active:scale-[0.99]"
                 onClick={() => handleReturnToTables()}
               >
                 Back To Tables
               </button>
               <button
                 type="button"
-                className="inline-flex min-h-[52px] items-center justify-center rounded-[18px] border border-[#7c4154] bg-[linear-gradient(180deg,rgba(126,49,70,0.96)_0%,rgba(82,28,44,0.98)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
+                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#7b4255] bg-[linear-gradient(180deg,rgba(118,47,69,0.96)_0%,rgba(80,29,45,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
                 onClick={logout}
               >
                 Logout
               </button>
             </div>
           </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {headerStats.map((item) => (
+              <div
+                key={item.label}
+                className="rounded-[8px] border border-[#284952] bg-[#0a1a20] px-3 py-3"
+              >
+                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                  {item.label}
+                </p>
+                <p className={`m-0 mt-2 text-xl font-semibold ${item.accent}`}>
+                  {item.value}
+                </p>
+              </div>
+            ))}
+          </div>
         </header>
 
         {error ? (
-          <div className="rounded-[18px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+          <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
             {error}
           </div>
         ) : null}
         {submitError ? (
-          <div className="rounded-[18px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+          <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
             {submitError}
           </div>
         ) : null}
 
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:h-[calc(100vh-232px)] lg:grid-cols-[188px_minmax(0,1fr)_380px] 2xl:grid-cols-[204px_minmax(0,1fr)_408px]">
+        <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:h-[calc(100vh-228px)] xl:grid-cols-[212px_minmax(0,1fr)_420px] 2xl:grid-cols-[220px_minmax(0,1fr)_440px]">
           <CategoryRail
             categories={categoryRailItems}
             selectedCategoryKey={selectedCategoryId}
             onSelectCategory={setSelectedCategoryId}
           />
 
-          <section className="flex min-h-0 flex-col rounded-[28px] border border-[#2c4555] bg-[linear-gradient(180deg,rgba(14,28,37,0.98)_0%,rgba(15,35,43,0.98)_100%)] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.22)] lg:h-full">
+          <section className="flex min-h-0 flex-col rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(7,28,33,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.26)] xl:h-full">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.22em] text-[#8da3af]">
-                  Menu
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Products
                 </p>
-                <h2 className="m-0 mt-2 text-[1.55rem] font-semibold tracking-[-0.03em] text-[#f7f3ea]">
+                <h2 className="m-0 mt-2 text-[1.55rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
                   {selectedCategoryName}
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#8fa1ae]">{selectedMenuHint}</p>
+                <p className="m-0 mt-2 text-sm text-[#8eaab0]">{selectedMenuHint}</p>
               </div>
 
-              <div className="rounded-full border border-[#3a5565] bg-[rgba(16,28,39,0.84)] px-3 py-2 text-center">
-                <p className="m-0 text-[10px] uppercase tracking-[0.2em] text-[#8da3af]">
-                  Ready Items
+              <div className="rounded-[8px] border border-[#2b5055] bg-[#0b1c22] px-3 py-3 text-right">
+                <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Selected Group
                 </p>
-                <p className="m-0 mt-1 text-sm font-semibold text-[#f7f3ea]">
-                  {visibleProducts.length} products
+                <p className="m-0 mt-2 text-lg font-semibold text-[#d8ffe3]">
+                  {visibleProducts.length} items
                 </p>
               </div>
             </div>
@@ -568,9 +924,9 @@ export default function PosOrderScreen() {
             {isLoading ? (
               <PosScreenLoader label="Loading menu..." />
             ) : categoryRailItems.length === 0 ? (
-              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[24px] border border-dashed border-[#41606e] bg-[rgba(9,16,23,0.48)] p-6 text-center">
+              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6 text-center">
                 <div>
-                  <p className="m-0 text-base font-semibold text-[#f7f3ea]">
+                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
                     No orderable categories
                   </p>
                   <p className="mt-2 text-sm text-[#90a3b2]">
@@ -579,10 +935,10 @@ export default function PosOrderScreen() {
                 </div>
               </div>
             ) : visibleProducts.length === 0 ? (
-              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[24px] border border-dashed border-[#41606e] bg-[rgba(9,16,23,0.48)] p-6 text-center">
+              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6 text-center">
                 <div>
-                  <p className="m-0 text-base font-semibold text-[#f7f3ea]">
-                    No products in this group
+                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                    No products in this category
                   </p>
                   <p className="mt-2 text-sm text-[#90a3b2]">
                     Choose another category or restock products from the manager side.
@@ -590,258 +946,405 @@ export default function PosOrderScreen() {
                 </div>
               </div>
             ) : (
-              <div className="scroll-y grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="scroll-y grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
                 {visibleProducts.map((product) => (
                   <ProductTile
                     key={product.id}
                     product={product}
                     disabled={!canEditOrderItems || isBusy}
-                    onAdd={(value) => {
-                      if (!canEditOrderItems) {
-                        setSubmitError(
-                          "Order is pending payment. Complete payment before adding new items."
-                        );
-                        return;
-                      }
-
-                      addProduct(value);
-                      setSubmitError("");
-                    }}
+                    onAdd={handleAddProduct}
                   />
                 ))}
               </div>
             )}
           </section>
 
-          <aside className="flex min-h-0 flex-col rounded-[28px] border border-[#2c4555] bg-[linear-gradient(180deg,rgba(11,22,31,0.98)_0%,rgba(11,28,36,0.98)_100%)] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.24)] lg:h-full">
-            <div className="rounded-[24px] border border-[#335263] bg-[linear-gradient(180deg,rgba(21,39,53,0.98)_0%,rgba(15,27,38,0.98)_100%)] p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="m-0 text-[11px] uppercase tracking-[0.22em] text-[#8da3af]">
-                    Order Summary
-                  </p>
-                  <h3 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.03em] text-[#f7f3ea]">
-                    {hasActiveOrder ? `Order #${currentOrder.id}` : `Table ${getDisplayTableId(table)}`}
-                  </h3>
-                  <p className="m-0 mt-1 text-sm text-[#95a8b7]">
-                    {displayLocation} | {waiterName}
-                  </p>
-                </div>
+          <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(7,28,33,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.28)] xl:h-full">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Order Summary
+                </p>
+                <h3 className="m-0 mt-2 text-[1.5rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                  {hasActiveOrder ? `Order #${currentOrder.id}` : `Table ${getDisplayTableId(table)}`}
+                </h3>
+                <p className="m-0 mt-1 text-sm text-[#8eaab0]">
+                  {displayLocation} | {waiterName}
+                </p>
+              </div>
 
+              <div className="flex flex-col items-end gap-2">
                 {hasActiveOrder ? (
                   <StatusChip status={currentOrder.status} />
                 ) : (
-                  <span className="inline-flex items-center rounded-full border border-[#4ca59e]/45 bg-[#163736]/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#9ce7d4]">
+                  <span className="inline-flex items-center rounded-full border border-[#3cc574]/35 bg-[#123126] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#c8f9da]">
                     New Ticket
                   </span>
                 )}
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <div className="rounded-[18px] border border-[#304958] bg-[rgba(10,19,29,0.58)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                    New Items
-                  </p>
-                  <p className="m-0 mt-2 text-lg font-semibold text-[#f7f3ea]">{itemCount}</p>
-                </div>
-                <div className="rounded-[18px] border border-[#304958] bg-[rgba(10,19,29,0.58)] px-3 py-3 text-right">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                    New Total
-                  </p>
-                  <p className="m-0 mt-2 text-lg font-semibold text-[#f0d6a2]">
-                    {formatPrice(total)} EUR
-                  </p>
-                </div>
-                <div className="rounded-[18px] border border-[#304958] bg-[rgba(10,19,29,0.58)] px-3 py-3">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                    Active Items
-                  </p>
-                  <p className="m-0 mt-2 text-lg font-semibold text-[#f7f3ea]">
-                    {activeOrderItemCount}
-                  </p>
-                </div>
-                <div className="rounded-[18px] border border-[#304958] bg-[rgba(10,19,29,0.58)] px-3 py-3 text-right">
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                    Ticket Total
-                  </p>
-                  <p className="m-0 mt-2 text-lg font-semibold text-[#f7f3ea]">
-                    {formatPrice(currentOrder?.total || 0)} EUR
-                  </p>
-                </div>
+                <span className="inline-flex items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d9eef2]">
+                  {selectedPaymentLabel}
+                </span>
               </div>
             </div>
 
-            {hasActiveOrder ? (
-              <div className="mt-3 rounded-[20px] border border-[#344b5b] bg-[rgba(17,30,40,0.86)] px-4 py-3">
-                <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                  Active Ticket
-                </p>
-                <p className="m-0 mt-2 text-lg font-semibold text-[#f7f3ea]">
-                  {formatPrice(currentOrder.total)} EUR
-                </p>
-                <p className="m-0 mt-2 text-sm text-[#93a8b6]">
-                  {orderStatus === "pending_payment"
-                    ? "Invoice is ready. Confirm payment after collecting the bill."
-                    : "This table already has an open ticket. New items will be appended."}
-                </p>
-              </div>
-            ) : (
-              <div className="mt-3 rounded-[20px] border border-[#344b5b] bg-[rgba(17,30,40,0.86)] px-4 py-3">
-                <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                  Order Flow
-                </p>
-                <p className="m-0 mt-2 text-lg font-semibold text-[#f7f3ea]">
-                  Add items first
-                </p>
-                <p className="m-0 mt-2 text-sm text-[#93a8b6]">
-                  Payment choice is hidden here. The ticket stays open until you generate the invoice.
-                </p>
-              </div>
-            )}
-
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.22em] text-[#8da3af]">
-                  Pending Cart
-                </p>
-                <p className="m-0 mt-1 text-sm text-[#93a8b6]">
-                  Items waiting to be added to the ticket.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="inline-flex min-h-[40px] items-center justify-center rounded-[14px] border border-[#32495a] bg-[rgba(14,24,34,0.78)] px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#d5deeb] transition hover:border-[#5a7488] hover:bg-[rgba(21,35,49,0.92)] disabled:cursor-not-allowed disabled:opacity-45"
-                onClick={clearCart}
-                disabled={isBusy || cart.length === 0}
-              >
-                Clear
-              </button>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {orderStats.map((item) => (
+                <div
+                  key={item.label}
+                  className={`rounded-[8px] border border-[#274852] bg-[#0a1a20] px-3 py-3 ${
+                    item.align || ""
+                  }`}
+                >
+                  <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                    {item.label}
+                  </p>
+                  <p className={`m-0 mt-2 text-lg font-semibold ${item.accent}`}>
+                    {item.value}
+                  </p>
+                </div>
+              ))}
             </div>
 
-            <div className="mt-3 flex min-h-0 flex-1 flex-col">
-              <div className="scroll-y min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                {hasActiveOrder &&
-                Array.isArray(currentOrder.items) &&
-                currentOrder.items.length > 0 ? (
-                  <div className="rounded-[20px] border border-[#334958] bg-[rgba(15,25,35,0.74)] p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                        Existing Ticket Items
+            <div className="mt-4">
+              <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                Top Actions
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  aria-pressed={isToGo}
+                  className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-3 text-sm font-semibold transition active:scale-[0.99] ${
+                    isToGo
+                      ? "border-[#3cc574] bg-[linear-gradient(180deg,rgba(33,122,83,0.98)_0%,rgba(22,89,61,0.99)_100%)] text-white"
+                      : "border-[#2b5055] bg-[#0b1c22] text-[#dceef1] hover:border-[#3cc574]"
+                  }`}
+                  onClick={() => setIsToGo((current) => !current)}
+                >
+                  To Go
+                </button>
+                <button
+                  type="button"
+                  className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-3 text-sm font-semibold transition active:scale-[0.99] ${
+                    hasDiscountRequest
+                      ? "border-[#e6b657] bg-[linear-gradient(180deg,rgba(158,118,44,0.98)_0%,rgba(120,86,28,0.99)_100%)] text-white"
+                      : "border-[#5b4a26] bg-[rgba(53,39,14,0.78)] text-[#f3ddb0] hover:brightness-110"
+                  }`}
+                  onClick={handleDiscountToggle}
+                >
+                  Discount / Coupon
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-3 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={isBusy || !canEditOrderItems || cart.length === 0}
+                  onClick={handleSaveOrder}
+                >
+                  {isSavingOrder ? "Confirming..." : hasActiveOrder ? "Confirm Order" : "Open Order"}
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-[8px] border border-[#284952] bg-[#08171d]">
+              <div className="grid grid-cols-[minmax(0,1fr)_110px_96px] gap-3 border-b border-[#183139] px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+                <span>Name</span>
+                <span className="text-center">Quantity</span>
+                <span className="text-right">Price</span>
+              </div>
+
+              <div className="scroll-y min-h-0 flex-1 overflow-y-auto p-3">
+                {ticketItems.length === 0 && cart.length === 0 ? (
+                  <div className="flex h-full min-h-[260px] items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] px-4 text-center">
+                    <div>
+                      <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                        No items yet
                       </p>
-                      <span className="text-xs font-semibold text-[#c7d3df]">
-                        {activeOrderItemCount} pcs
-                      </span>
+                      <p className="mt-2 text-sm text-[#92a6b6]">
+                        Tap product tiles to fill the order summary.
+                      </p>
                     </div>
-                    <div className="mt-3 space-y-1.5">
-                      {currentOrder.items.slice(0, 6).map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-3 text-sm text-[#d7e1eb]"
-                        >
-                          <span className="min-w-0 flex-1 truncate">
-                            {item.product?.name || "Product"} x{item.quantity}
-                          </span>
-                          <span className="shrink-0 text-[#f0d6a2]">
-                            {formatPrice(item.price * item.quantity)} EUR
-                          </span>
-                        </div>
-                      ))}
-                      {currentOrder.items.length > 6 ? (
-                        <p className="m-0 pt-1 text-xs text-[#8da3af]">
-                          +{currentOrder.items.length - 6} more item lines
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-
-                {cart.length === 0 ? (
-                  <div className="flex h-full min-h-[220px] flex-col items-center justify-center rounded-[22px] border border-dashed border-[#425f6c] bg-[rgba(11,20,28,0.5)] px-4 text-center">
-                    <p className="m-0 text-base font-semibold text-[#f7f3ea]">Cart is empty</p>
-                    <p className="mt-2 text-sm text-[#92a6b6]">
-                      Tap product cards to prepare the next items for this ticket.
-                    </p>
                   </div>
                 ) : (
-                  cart.map((item) => (
-                    <CartItemRow
-                      key={item.productId}
-                      item={item}
-                      onRemove={removeProduct}
-                      onChangeQuantity={changeQuantity}
-                    />
-                  ))
+                  <div className="space-y-4">
+                    {ticketItems.length > 0 ? (
+                      <section>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+                            On Ticket
+                          </p>
+                          <span className="text-[11px] font-semibold text-[#dbe8eb]">
+                            {activeOrderItemCount} pcs
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {ticketItems.map((item) => (
+                            <CartItemRow
+                              key={item.key}
+                              item={item}
+                              variant="ticket"
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {cart.length > 0 ? (
+                      <section
+                        className={ticketItems.length > 0 ? "border-t border-[#183139] pt-4" : ""}
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+                              Ready To Confirm
+                            </p>
+                            <p className="m-0 mt-1 text-xs text-[#8eaab0]">
+                              {selectedCartItem
+                                ? `${selectedCartItem.name} selected`
+                                : "Tap a pending line to edit or delete"}
+                            </p>
+                          </div>
+                          <span className="text-[11px] font-semibold text-[#dbe8eb]">
+                            {itemCount} pcs
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {cart.map((item) => (
+                            <CartItemRow
+                              key={item.productId}
+                              item={item}
+                              selected={selectedCartProductId === item.productId}
+                              onSelect={setSelectedCartProductId}
+                              onChangeQuantity={changeQuantity}
+                              disabled={isBusy}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+                  </div>
                 )}
               </div>
             </div>
 
-            <div className="mt-4 space-y-2.5">
-              <div className="rounded-[22px] border border-[#385161] bg-[linear-gradient(180deg,rgba(15,26,37,0.94)_0%,rgba(12,21,30,0.98)_100%)] px-4 py-4">
+            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4">
+              <div className="space-y-2 text-sm text-[#dcebef]">
                 <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8da3af]">
-                      New Items Total
-                    </p>
-                    <p className="m-0 mt-1 text-sm text-[#92a6b6]">
-                      Ready to save on this ticket
-                    </p>
-                  </div>
-                  <strong className="text-[2rem] font-semibold tracking-[-0.04em] text-[#f7f3ea]">
-                    {formatPrice(total)} EUR
-                  </strong>
+                  <span>Pending Cart</span>
+                  <strong>{formatPrice(total)} EUR</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>Current Ticket</span>
+                  <strong>{formatPrice(currentOrder?.total || 0)} EUR</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-[#183139] pt-2 text-base">
+                  <span>Total Due</span>
+                  <strong className="text-[#d8ffe3]">{formatPrice(projectedTotal)} EUR</strong>
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="inline-flex min-h-[62px] w-full items-center justify-center rounded-[20px] border border-[#4ca59e] bg-[linear-gradient(180deg,rgba(75,176,161,0.96)_0%,rgba(34,118,110,0.99)_100%)] px-4 text-base font-bold text-[#071311] transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isBusy || !canEditOrderItems || cart.length === 0}
-                onClick={handleSaveOrder}
-              >
-                {isSavingOrder
-                  ? "Saving..."
-                  : hasActiveOrder
-                    ? "Add Items To Order"
-                    : "Save Order"}
-              </button>
+              <p className="m-0 mt-3 text-sm text-[#8eaab0]">{flowHint}</p>
+              {hasDiscountRequest ? (
+                <p className="m-0 mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#f3ddb0]">
+                  Discount or coupon review flagged
+                </p>
+              ) : null}
 
-              {canGenerateInvoice || isGeneratingInvoice ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <button
                   type="button"
-                  className="inline-flex min-h-[56px] w-full items-center justify-center rounded-[18px] border border-[#b58a4b] bg-[linear-gradient(180deg,rgba(197,160,95,0.98)_0%,rgba(139,107,51,0.99)_100%)] px-4 text-sm font-semibold text-[#161109] transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isBusy || cart.length > 0}
+                  className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#d09b3c] bg-[linear-gradient(180deg,rgba(173,127,42,0.98)_0%,rgba(123,87,24,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={isBusy || !canGenerateInvoice || cart.length > 0}
                   onClick={handleGenerateInvoice}
                 >
-                  {isGeneratingInvoice ? "Generating Invoice..." : "Generate Invoice"}
+                  {isGeneratingInvoice ? "Sending..." : "Send To Payment"}
                 </button>
-              ) : null}
 
-              {canDownloadInvoice || isDownloadingInvoice ? (
+                {canDownloadInvoice || isDownloadingInvoice ? (
+                  <button
+                    type="button"
+                    className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#3d8ccf] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={isBusy}
+                    onClick={handleDownloadInvoice}
+                  >
+                    {isDownloadingInvoice ? "Downloading..." : "Receipt"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                  Bottom Actions
+                </p>
+                <span className="text-xs text-[#8eaab0]">
+                  {selectedCartItem ? `Selected: ${selectedCartItem.name}` : "Select a pending item"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  className="inline-flex min-h-[52px] w-full items-center justify-center rounded-[18px] border border-[#39526a] bg-[rgba(16,26,39,0.84)] px-4 text-sm font-semibold text-[#d3deec] transition hover:border-[#5d798f] hover:bg-[rgba(22,36,53,0.92)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isBusy}
-                  onClick={handleDownloadInvoice}
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#9a4c62] bg-[linear-gradient(180deg,rgba(126,47,67,0.96)_0%,rgba(91,33,48,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={isBusy || !selectedCartItem}
+                  onClick={handleDeleteSelectedItem}
                 >
-                  {isDownloadingInvoice ? "Downloading..." : "Invoice PDF"}
+                  Delete Item
                 </button>
-              ) : null}
-
-              {canCompletePayment || isCompletingPayment ? (
                 <button
                   type="button"
-                  className="inline-flex min-h-[58px] w-full items-center justify-center rounded-[18px] border border-[#67b26f] bg-[linear-gradient(180deg,rgba(87,175,98,0.98)_0%,rgba(49,112,60,0.99)_100%)] px-4 text-sm font-bold text-[#081207] transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isBusy}
-                  onClick={handleCompletePayment}
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#466b8f] bg-[linear-gradient(180deg,rgba(41,77,117,0.96)_0%,rgba(28,55,86,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={!hasActiveOrder}
+                  onClick={() => handleFutureAction("Split bill")}
                 >
-                  {isCompletingPayment ? "Completing Payment..." : "Complete Payment"}
+                  Split Bill
                 </button>
-              ) : null}
+                <button
+                  type="button"
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#3e7484] bg-[linear-gradient(180deg,rgba(29,104,116,0.96)_0%,rgba(20,72,82,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={!canTransferOrder || cart.length > 0}
+                  onClick={handleOpenTransferDialog}
+                >
+                  Transfer Order
+                </button>
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {PAYMENT_METHOD_OPTIONS.map((option) => {
+                  const isActive = selectedPaymentMethod === option.key;
+
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-4 text-sm font-bold transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 ${
+                        isActive ? option.activeClassName : option.className
+                      }`}
+                      disabled={isBusy || !canCompletePayment}
+                      onClick={() => handleCompletePayment(option.key)}
+                    >
+                      {isCompletingPayment && isActive ? "Processing..." : option.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </aside>
         </section>
       </section>
+
+      {isTransferDialogOpen ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
+          <div className="w-full max-w-[720px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Transfer Order
+                </p>
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                  Move Order #{currentOrder?.id}
+                </h2>
+                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                  Pick an available table for this active ticket.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                onClick={() => setIsTransferDialogOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] px-4 py-3 text-sm text-[#d9e7ea]">
+              <div className="flex items-center justify-between gap-3">
+                <span>Current table</span>
+                <strong>Table {getDisplayTableId(table)}</strong>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              {transferTablesError ? (
+                <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+                  {transferTablesError}
+                </div>
+              ) : isLoadingTransferTables ? (
+                <div className="flex min-h-[180px] items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6">
+                  <PosScreenLoader label="Loading tables..." />
+                </div>
+              ) : transferCandidates.length === 0 ? (
+                <div className="rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] px-4 py-8 text-center">
+                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                    No free tables right now
+                  </p>
+                  <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                    Free up another table, then try the transfer again.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid max-h-[320px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {transferCandidates.map((candidate) => {
+                    const isSelected = selectedTransferTableId === candidate.id;
+                    const candidateVisualId =
+                      tableVisualIdsById.get(candidate.id) || candidate.number;
+
+                    return (
+                      <button
+                        key={candidate.id}
+                        type="button"
+                        className={`rounded-[8px] border px-4 py-4 text-left transition active:scale-[0.99] ${
+                          isSelected
+                            ? "border-[#3cc574] bg-[linear-gradient(180deg,rgba(21,79,57,0.98)_0%,rgba(15,58,41,0.99)_100%)] text-white"
+                            : "border-[#284952] bg-[#0a1a20] text-[#e2eff2] hover:border-[#3cc574]"
+                        }`}
+                        onClick={() => setSelectedTransferTableId(candidate.id)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="m-0 text-lg font-semibold">
+                              Table {candidateVisualId}
+                            </p>
+                            <p className="m-0 mt-1 text-sm opacity-80">
+                              {candidate.location || "Floor"}
+                            </p>
+                          </div>
+                          <span className="rounded-full border border-current/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                            Available
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={
+                  isTransferringOrder ||
+                  isLoadingTransferTables ||
+                  !selectedTransferTableId ||
+                  transferCandidates.length === 0
+                }
+                onClick={handleTransferOrder}
+              >
+                {isTransferringOrder ? "Transferring..." : "Confirm Transfer"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                onClick={() => setIsTransferDialogOpen(false)}
+              >
+                Keep Table
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
