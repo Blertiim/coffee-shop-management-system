@@ -64,6 +64,132 @@
     @apply m-0 text-sm text-pos-muted;
   }
 
+  .manager-shell {
+    background:
+      radial-gradient(circle at 12% 14%, rgba(233, 122, 108, 0.18) 0%, transparent 24%),
+      radial-gradient(circle at 86% 18%, rgba(123, 223, 184, 0.2) 0%, transparent 28%),
+      radial-gradient(circle at 74% 82%, rgba(242, 210, 112, 0.12) 0%, transparent 30%),
+      linear-gradient(180deg, #173f38 0%, #1a4941 48%, #1f5046 100%);
+  }
+
+  .manager-shell .pos-panel {
+    border-color: rgba(210, 243, 229, 0.18);
+    background:
+      linear-gradient(180deg, rgba(19, 61, 54, 0.94) 0%, rgba(23, 73, 62, 0.96) 100%);
+    box-shadow: 0 20px 42px rgba(10, 35, 31, 0.2);
+  }
+
+  .manager-shell .pos-panel-soft {
+    border-color: rgba(210, 243, 229, 0.16);
+    background:
+      linear-gradient(180deg, rgba(24, 74, 62, 0.94) 0%, rgba(20, 63, 53, 0.96) 100%);
+    box-shadow: 0 18px 38px rgba(10, 35, 31, 0.18);
+  }
+
+  .manager-shell .pos-badge {
+    border-color: rgba(168, 240, 203, 0.32);
+    background: rgba(168, 240, 203, 0.14);
+    color: #bffff0;
+  }
+
+  .manager-shell .pos-button-primary {
+    background: linear-gradient(180deg, #97e9c1 0%, #79dbaa 100%);
+    color: #13372d;
+  }
+
+  .manager-shell .pos-button-primary:hover {
+    background: linear-gradient(180deg, #aaf0cf 0%, #89e3b6 100%);
+  }
+
+  .manager-shell .pos-button-danger {
+    background: linear-gradient(180deg, #d86f6b 0%, #bf5551 100%);
+    color: #fff8f7;
+  }
+
+  .manager-shell .pos-button-danger:hover {
+    background: linear-gradient(180deg, #e27f7b 0%, #ca605c 100%);
+  }
+
+  .manager-shell .pos-button-muted {
+    background: rgba(245, 255, 250, 0.08);
+    color: #f1fff8;
+  }
+
+  .manager-shell .pos-button-muted:hover {
+    background: rgba(245, 255, 250, 0.14);
+  }
+
+  .manager-shell .pos-title,
+  .manager-shell .text-white {
+    color: #f4fff8 !important;
+  }
+
+  .manager-shell .pos-subtitle,
+  .manager-shell .text-pos-muted {
+    color: #c0ddd2 !important;
+  }
+
+  .manager-shell .border-pos-accent {
+    border-color: #97e9c1 !important;
+  }
+
+  .manager-shell .bg-pos-accent {
+    background-color: #97e9c1 !important;
+  }
+
+  .manager-shell .text-pos-accent {
+    color: #97e9c1 !important;
+  }
+
+  .manager-shell .bg-pos-panelSoft {
+    background-color: rgba(17, 56, 48, 0.82) !important;
+  }
+
+  .manager-shell .bg-black\/20 {
+    background-color: rgba(244, 255, 249, 0.06) !important;
+  }
+
+  .manager-shell .bg-white\/5 {
+    background-color: rgba(244, 255, 249, 0.06) !important;
+  }
+
+  .manager-shell .bg-white\/10 {
+    background-color: rgba(244, 255, 249, 0.1) !important;
+  }
+
+  .manager-shell .border-white\/10 {
+    border-color: rgba(214, 241, 228, 0.16) !important;
+  }
+
+  .manager-shell .border-white\/15 {
+    border-color: rgba(214, 241, 228, 0.22) !important;
+  }
+
+  .manager-shell .hover\:bg-white\/10:hover {
+    background-color: rgba(244, 255, 249, 0.13) !important;
+  }
+
+  .manager-shell .hover\:bg-white\/20:hover {
+    background-color: rgba(244, 255, 249, 0.18) !important;
+  }
+
+  .manager-shell .hover\:bg-sky-300:hover {
+    background-color: #aaf0cf !important;
+  }
+
+  .manager-shell .file\:bg-pos-accent::file-selector-button {
+    background: #97e9c1 !important;
+    color: #13372d !important;
+  }
+
+  .manager-shell .scroll-y {
+    scrollbar-color: rgba(179, 230, 208, 0.52) transparent;
+  }
+
+  .manager-shell .scroll-y::-webkit-scrollbar-thumb {
+    background: rgba(179, 230, 208, 0.52);
+  }
+
   .touch-tile {
     @apply min-h-[86px] rounded-xl px-4 py-3 text-left transition duration-150 active:scale-[0.99];
   }

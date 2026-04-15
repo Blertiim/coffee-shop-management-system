@@ -707,14 +707,14 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   if (isLoading) {
     return (
-      <main className="pos-shell">
+      <main className="pos-shell manager-shell">
         <PosScreenLoader label="Loading manager dashboard..." />
       </main>
     );
   }
 
   return (
-    <main className="pos-shell">
+    <main className="pos-shell manager-shell">
       <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 xl:grid-cols-[230px_1fr]">
         <aside className="pos-panel-soft flex flex-col gap-3 p-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">

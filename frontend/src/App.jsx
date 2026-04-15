@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 
 import PosScreenLoader from "./components/PosScreenLoader";
 import PosToast from "./components/PosToast";
@@ -13,6 +13,8 @@ const TableSelectionScreen = lazy(() =>
 const ManagerDashboard = lazy(() =>
   import("./features/manager/ManagerDashboard")
 );
+const POS_IDLE_LOGOUT_MS = 30 * 1000;
+const POS_IDLE_LOGOUT_SCREENS = new Set(["tables", "order"]);
 
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -24,6 +26,52 @@ function PosAppShell() {
   const { session, screen, selectedTable, notice, dismissNotice, logout } = usePosApp();
   const isManagerView = ["admin", "manager"].includes(normalizeRole(session?.user?.role));
   const isGuestRoute = isGuestOrderingRoute();
+  const isPosIdleProtectedScreen =
+    Boolean(session) &&
+    !isGuestRoute &&
+    !isManagerView &&
+    POS_IDLE_LOGOUT_SCREENS.has(screen);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isPosIdleProtectedScreen) {
+      return undefined;
+    }
+
+    let timeoutId = 0;
+    const activityEvents = [
+      "pointerdown",
+      "pointermove",
+      "keydown",
+      "wheel",
+      "touchstart",
+    ];
+
+    const resetIdleTimer = () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      timeoutId = window.setTimeout(() => {
+        logout();
+      }, POS_IDLE_LOGOUT_MS);
+    };
+
+    resetIdleTimer();
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, resetIdleTimer, { passive: true });
+    });
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resetIdleTimer);
+      });
+    };
+  }, [isPosIdleProtectedScreen, logout]);
 
   return (
     <div className="app-root">
