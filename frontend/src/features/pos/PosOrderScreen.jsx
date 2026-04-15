@@ -19,33 +19,6 @@ import {
   transferOrderToTable,
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
-
-const DEFAULT_PAYMENT_METHOD = "cash";
-const PAYMENT_METHOD_OPTIONS = [
-  {
-    key: "cash",
-    label: "Cash",
-    className:
-      "border-[#46c46f] bg-[linear-gradient(180deg,rgba(41,129,68,0.98)_0%,rgba(28,94,49,0.99)_100%)] text-white hover:brightness-105",
-    activeClassName:
-      "border-[#6ef39a] bg-[linear-gradient(180deg,rgba(61,161,92,0.98)_0%,rgba(37,118,67,0.99)_100%)] text-white shadow-[0_12px_24px_rgba(18,82,39,0.32)]",
-  },
-  {
-    key: "card",
-    label: "Card",
-    className:
-      "border-[#3d8ccf] bg-[linear-gradient(180deg,rgba(31,93,154,0.98)_0%,rgba(22,66,111,0.99)_100%)] text-white hover:brightness-105",
-    activeClassName:
-      "border-[#70bcff] bg-[linear-gradient(180deg,rgba(43,117,190,0.98)_0%,rgba(27,82,140,0.99)_100%)] text-white shadow-[0_12px_24px_rgba(17,54,92,0.34)]",
-  },
-];
-
-const PAYMENT_METHOD_LABELS = PAYMENT_METHOD_OPTIONS.reduce((accumulator, option) => {
-  accumulator[option.key] = option.label;
-  return accumulator;
-}, {});
-
-const VALID_PAYMENT_METHODS = new Set(PAYMENT_METHOD_OPTIONS.map((option) => option.key));
 const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
 const TRANSFERABLE_ORDER_STATUSES = new Set([
   "pending",
@@ -74,13 +47,6 @@ const formatPrice = (value) =>
 
 const normalizeStatus = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
-
-const normalizePaymentMethod = (value) => {
-  const normalized = normalizeStatus(value);
-  return VALID_PAYMENT_METHODS.has(normalized)
-    ? normalized
-    : DEFAULT_PAYMENT_METHOD;
-};
 
 const buildTablePath = (visualTableId, fallbackTableNumber) => {
   const parsedVisualId = Number(visualTableId);
@@ -162,10 +128,9 @@ const getFlowHint = ({
   cartCount,
   hasActiveOrder,
   isToGo,
-  paymentMethodLabel,
 }) => {
   if (canCompletePayment) {
-    return `Choose ${paymentMethodLabel} to close this ticket.`;
+    return "Complete payment to close this ticket.";
   }
 
   if (canGenerateInvoice) {
@@ -196,9 +161,6 @@ export default function PosOrderScreen() {
   } = usePosApp();
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(
-    normalizePaymentMethod(table?.activeOrder?.paymentMethod)
-  );
   const [selectedCartProductId, setSelectedCartProductId] = useState(null);
   const [isToGo, setIsToGo] = useState(false);
   const [hasDiscountRequest, setHasDiscountRequest] = useState(false);
@@ -222,7 +184,6 @@ export default function PosOrderScreen() {
 
   useEffect(() => {
     setCurrentOrder(table?.activeOrder || null);
-    setSelectedPaymentMethod(normalizePaymentMethod(table?.activeOrder?.paymentMethod));
     setSelectedCartProductId(null);
     setIsToGo(false);
     setHasDiscountRequest(false);
@@ -462,8 +423,6 @@ export default function PosOrderScreen() {
       ? "Tap a category once, then hit products as fast as the guest calls them."
       : "No ready-to-order products are available right now.";
   const projectedTotal = Number(((currentOrder?.total || 0) + total).toFixed(2));
-  const selectedPaymentLabel =
-    PAYMENT_METHOD_LABELS[selectedPaymentMethod] || PAYMENT_METHOD_LABELS.cash;
   const serviceLabel = isToGo ? "To Go" : "Table Service";
   const selectedCartItem =
     cart.find((item) => item.productId === selectedCartProductId) || null;
@@ -473,7 +432,6 @@ export default function PosOrderScreen() {
     cartCount: cart.length,
     hasActiveOrder,
     isToGo,
-    paymentMethodLabel: selectedPaymentLabel,
   });
 
   useEffect(() => {
@@ -510,13 +468,11 @@ export default function PosOrderScreen() {
         })
       : await createOrder(session.token, {
           tableId: table.id,
-          paymentMethod: selectedPaymentMethod,
           items: payloadItems,
           ...(employeeId ? { employeeId } : {}),
         });
 
     setCurrentOrder(order);
-    setSelectedPaymentMethod(normalizePaymentMethod(order.paymentMethod || selectedPaymentMethod));
     clearCart();
     return order;
   };
@@ -604,9 +560,8 @@ export default function PosOrderScreen() {
     }
   };
 
-  const handleCompletePayment = async (paymentMethod) => {
+  const handleCompletePayment = async () => {
     setIsCompletingPayment(true);
-    setSelectedPaymentMethod(paymentMethod);
     setSubmitError("");
 
     try {
@@ -619,18 +574,10 @@ export default function PosOrderScreen() {
       }
 
       if (normalizeStatus(currentOrder.status) !== "pending_payment") {
-        throw new Error("Send the ticket to payment before choosing Cash or Card.");
+        throw new Error("Send the ticket to payment before completing payment.");
       }
 
-      const paidOrder = await completeOrderPayment(
-        session.token,
-        currentOrder.id,
-        paymentMethod
-      );
-      const paidMethodLabel =
-        PAYMENT_METHOD_LABELS[
-          normalizePaymentMethod(paidOrder.paymentMethod || paymentMethod)
-        ] || PAYMENT_METHOD_LABELS.cash;
+      const paidOrder = await completeOrderPayment(session.token, currentOrder.id);
 
       setCurrentOrder(paidOrder);
 
@@ -638,7 +585,7 @@ export default function PosOrderScreen() {
         refresh: true,
         notice: {
           type: "success",
-          message: `${paidMethodLabel} payment completed (${formatPrice(
+          message: `Payment completed (${formatPrice(
             paidOrder.total
           )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(
             table
@@ -946,7 +893,7 @@ export default function PosOrderScreen() {
                 </div>
               </div>
             ) : (
-              <div className="scroll-y grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
+              <div className="scroll-y grid min-h-0 flex-1 auto-rows-max grid-cols-1 content-start items-start gap-3 overflow-y-auto pr-1 sm:grid-cols-2 2xl:grid-cols-3">
                 {visibleProducts.map((product) => (
                   <ProductTile
                     key={product.id}
@@ -981,9 +928,6 @@ export default function PosOrderScreen() {
                     New Ticket
                   </span>
                 )}
-                <span className="inline-flex items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#d9eef2]">
-                  {selectedPaymentLabel}
-                </span>
               </div>
             </div>
 
@@ -1207,25 +1151,15 @@ export default function PosOrderScreen() {
                 </button>
               </div>
 
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {PAYMENT_METHOD_OPTIONS.map((option) => {
-                  const isActive = selectedPaymentMethod === option.key;
-
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      aria-pressed={isActive}
-                      className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-4 text-sm font-bold transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45 ${
-                        isActive ? option.activeClassName : option.className
-                      }`}
-                      disabled={isBusy || !canCompletePayment}
-                      onClick={() => handleCompletePayment(option.key)}
-                    >
-                      {isCompletingPayment && isActive ? "Processing..." : option.label}
-                    </button>
-                  );
-                })}
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={isBusy || !canCompletePayment}
+                  onClick={handleCompletePayment}
+                >
+                  {isCompletingPayment ? "Processing..." : "Complete Payment"}
+                </button>
               </div>
             </div>
           </aside>

@@ -50,16 +50,18 @@ const validateCreateOrderPayload = (body) => {
     body.employeeId !== undefined &&
     body.employeeId !== null &&
     String(body.employeeId).trim() !== "";
+  const hasPaymentMethod =
+    body.paymentMethod !== undefined &&
+    body.paymentMethod !== null &&
+    String(body.paymentMethod).trim() !== "";
 
   return {
     items: normalizeOrderItems(body.items),
     tableId: ensureId(body.tableId, "Table id"),
     employeeId: hasEmployeeId ? ensureId(body.employeeId, "Employee id") : null,
-    paymentMethod: ensureEnumValue(
-      body.paymentMethod,
-      "Payment method",
-      VALID_PAYMENT_METHODS
-    ),
+    paymentMethod: hasPaymentMethod
+      ? ensureEnumValue(body.paymentMethod, "Payment method", VALID_PAYMENT_METHODS)
+      : null,
   };
 };
 

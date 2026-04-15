@@ -20,7 +20,7 @@ export default function CategoryRail({
         </span>
       </div>
 
-      <div className="scroll-y grid flex-1 auto-rows-[minmax(82px,auto)] gap-2 overflow-y-auto pr-1">
+      <div className="scroll-y grid flex-1 auto-rows-max content-start items-start gap-2 overflow-y-auto pr-1">
         {categories.length === 0 ? (
           <div className="rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] px-3 py-4 text-xs text-[#8fa2b2]">
             No categories
@@ -34,7 +34,7 @@ export default function CategoryRail({
                 key={category.key}
                 type="button"
                 onClick={() => onSelectCategory(category.key)}
-                className={`touch-tile min-h-[88px] rounded-[8px] border px-3 py-3 text-left transition ${
+                className={`touch-tile min-h-[88px] w-full self-start rounded-[8px] border px-3 py-3 text-left transition ${
                   isActive
                     ? "border-[#3cc574] bg-[linear-gradient(180deg,rgba(34,120,84,0.98)_0%,rgba(24,88,63,0.99)_100%)] text-white shadow-[0_14px_30px_rgba(17,72,55,0.28)]"
                     : "border-[#274852] bg-[linear-gradient(180deg,rgba(12,30,38,0.98)_0%,rgba(10,23,30,0.99)_100%)] text-[#e4f0f2] hover:border-[#3cc574] hover:bg-[linear-gradient(180deg,rgba(14,36,44,0.98)_0%,rgba(11,28,34,0.99)_100%)]"

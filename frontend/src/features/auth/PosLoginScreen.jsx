@@ -56,6 +56,10 @@ export default function PosLoginScreen() {
       return undefined;
     }
 
+    if (window.location.pathname !== "/") {
+      window.history.replaceState({}, "", "/");
+    }
+
     const updateClock = () => {
       setCurrentDateTime(new Date());
     };
