@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import PosQrCode from "../../components/PosQrCode";
 import PosScreenLoader from "../../components/PosScreenLoader";
 import {
   assignTableToWaiter,
@@ -1751,12 +1752,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <div className="grid gap-3 md:grid-cols-[180px_1fr]">
                       <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
                         {guestOrderUrl ? (
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                              guestOrderUrl
-                            )}`}
+                          <PosQrCode
+                            value={guestOrderUrl}
                             alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
-                            className="h-[180px] w-[180px] rounded-lg bg-white p-2"
+                            size={180}
+                            imageClassName="h-[180px] w-[180px] rounded-lg bg-white p-2"
                           />
                         ) : (
                           <p className="text-sm text-pos-muted">
