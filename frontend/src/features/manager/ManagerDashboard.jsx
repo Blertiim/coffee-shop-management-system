@@ -108,12 +108,27 @@ const formatDate = (value) =>
 
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
 
-const buildGuestOrderUrl = (token) => {
-  if (!token || typeof window === "undefined") {
+const buildGuestOrderUrl = (guestAccess) => {
+  if (!guestAccess) {
     return "";
   }
 
-  return `${window.location.origin}/guest/table/${token}`;
+  if (typeof guestAccess.guestOrderUrl === "string" && guestAccess.guestOrderUrl.trim()) {
+    return guestAccess.guestOrderUrl.trim();
+  }
+
+  if (
+    typeof guestAccess.localGuestOrderUrl === "string" &&
+    guestAccess.localGuestOrderUrl.trim()
+  ) {
+    return guestAccess.localGuestOrderUrl.trim();
+  }
+
+  if (!guestAccess.token || typeof window === "undefined") {
+    return "";
+  }
+
+  return `${window.location.origin}/guest/table/${guestAccess.token}`;
 };
 
 const statusClass = (status) => {
@@ -364,7 +379,7 @@ export default function ManagerDashboard({ session, onLogout }) {
   );
 
   const guestOrderUrl = useMemo(
-    () => buildGuestOrderUrl(guestAccess?.token),
+    () => buildGuestOrderUrl(guestAccess),
     [guestAccess]
   );
 

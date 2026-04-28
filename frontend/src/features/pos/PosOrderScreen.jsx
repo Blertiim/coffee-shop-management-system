@@ -14,6 +14,7 @@ import {
   downloadOrderReceipt,
   generateOrderInvoice,
   getCategories,
+  getOrderById,
   getProducts,
   getTables,
   transferOrderToTable,
@@ -158,6 +159,7 @@ export default function PosOrderScreen() {
     returnToTables,
     selectTable,
     showNotice,
+    guestOrderAlert,
   } = usePosApp();
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
@@ -210,6 +212,59 @@ export default function PosOrderScreen() {
 
     replacePathname(buildTablePath(table.visualId, table.number));
   }, [table]);
+
+  useEffect(() => {
+    if (
+      !guestOrderAlert?.eventId ||
+      !table?.id ||
+      guestOrderAlert.tableId !== table.id ||
+      !guestOrderAlert.orderId
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    getOrderById(session.token, guestOrderAlert.orderId)
+      .then((refreshedOrder) => {
+        if (cancelled) {
+          return;
+        }
+
+        setCurrentOrder(refreshedOrder);
+        showNotice({
+          type: "info",
+          message: guestOrderAlert.appendedToExistingOrder
+            ? `Guest added ${guestOrderAlert.itemCount} item${
+                guestOrderAlert.itemCount === 1 ? "" : "s"
+              } to Table ${getDisplayTableId(table)}.`
+            : `Guest opened a QR order for Table ${getDisplayTableId(table)}.`,
+          duration: 5000,
+        });
+      })
+      .catch((requestError) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (requestError.status === 401) {
+          logout();
+          return;
+        }
+
+        showNotice({
+          type: "error",
+          message:
+            requestError.message ||
+            `Unable to refresh Table ${getDisplayTableId(table)} after the guest QR order.`,
+          duration: 5000,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [guestOrderAlert, logout, session.token, showNotice, table]);
 
   const handleReturnToTables = useCallback(
     (options = {}) => {

@@ -2,7 +2,9 @@ const bcrypt = require("bcryptjs");
 const { randomBytes } = require("crypto");
 
 const prisma = require("../../config/prisma");
+const { publishRealtimeEvent } = require("../../services/realtime.service");
 const AppError = require("../../utils/app-error");
+const { getReachableAppBaseUrl } = require("../../utils/network");
 const { handleControllerError, sendSuccess } = require("../../utils/response");
 
 const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
@@ -170,6 +172,19 @@ const guestOrderInclude = {
   },
 };
 
+const buildGuestAccessPayload = (req, table, access) => {
+  const localBaseUrl = `${req.protocol}://${req.get("host")}`;
+  const reachableBaseUrl = getReachableAppBaseUrl(req);
+
+  return {
+    table,
+    token: access.token,
+    expiresAt: access.expiresAt,
+    guestOrderUrl: `${reachableBaseUrl}/guest/table/${access.token}`,
+    localGuestOrderUrl: `${localBaseUrl}/guest/table/${access.token}`,
+  };
+};
+
 exports.getTableGuestAccess = async (req, res) => {
   try {
     const tableId = parseTableId(req.params.tableId);
@@ -192,11 +207,12 @@ exports.getTableGuestAccess = async (req, res) => {
       });
     }
 
-    return sendSuccess(res, 200, "Guest QR access prepared successfully", {
-      table,
-      token: access.token,
-      expiresAt: access.expiresAt,
-    });
+    return sendSuccess(
+      res,
+      200,
+      "Guest QR access prepared successfully",
+      buildGuestAccessPayload(req, table, access)
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get guest table access error");
   }
@@ -230,11 +246,12 @@ exports.rotateTableGuestAccess = async (req, res) => {
       },
     });
 
-    return sendSuccess(res, 201, "Guest QR token rotated successfully", {
-      table,
-      token: access.token,
-      expiresAt: access.expiresAt,
-    });
+    return sendSuccess(
+      res,
+      201,
+      "Guest QR token rotated successfully",
+      buildGuestAccessPayload(req, table, access)
+    );
   } catch (error) {
     return handleControllerError(res, error, "Rotate guest table access error");
   }
@@ -281,7 +298,7 @@ exports.submitGuestOrder = async (req, res) => {
     const items = validateGuestItems(req.body);
     const access = await ensureTableAccess(token);
 
-    const savedOrder = await prisma.$transaction(async (tx) => {
+    const { savedOrder, appendedToExistingOrder, itemCount } = await prisma.$transaction(async (tx) => {
       const [guestUser, products, activeOrder] = await Promise.all([
         ensureGuestOrderUser(tx),
         tx.product.findMany({
@@ -306,6 +323,7 @@ exports.submitGuestOrder = async (req, res) => {
       ]);
 
       const { orderItems, total } = buildOrderItems(products, items);
+      const itemCount = orderItems.reduce((sum, item) => sum + item.quantity, 0);
 
       if (activeOrder && !EDITABLE_ORDER_STATUSES.includes(activeOrder.status)) {
         throw new AppError("The current bill is already in payment stage. Please ask staff for help.");
@@ -323,15 +341,19 @@ exports.submitGuestOrder = async (req, res) => {
           })),
         });
 
-        return tx.order.update({
-          where: {
-            id: activeOrder.id,
-          },
-          data: {
-            total: Number((activeOrder.total + total).toFixed(2)),
-          },
-          include: guestOrderInclude,
-        });
+        return {
+          appendedToExistingOrder: true,
+          itemCount,
+          savedOrder: await tx.order.update({
+            where: {
+              id: activeOrder.id,
+            },
+            data: {
+              total: Number((activeOrder.total + total).toFixed(2)),
+            },
+            include: guestOrderInclude,
+          }),
+        };
       }
 
       await tx.table.update({
@@ -343,19 +365,36 @@ exports.submitGuestOrder = async (req, res) => {
         },
       });
 
-      return tx.order.create({
-        data: {
-          userId: guestUser.id,
-          tableId: access.tableId,
-          paymentMethod: "guest_qr",
-          total,
-          status: "pending",
-          items: {
-            create: orderItems,
+      return {
+        appendedToExistingOrder: false,
+        itemCount,
+        savedOrder: await tx.order.create({
+          data: {
+            userId: guestUser.id,
+            tableId: access.tableId,
+            paymentMethod: "guest_qr",
+            total,
+            status: "pending",
+            items: {
+              create: orderItems,
+            },
           },
-        },
-        include: guestOrderInclude,
-      });
+          include: guestOrderInclude,
+        }),
+      };
+    });
+
+    publishRealtimeEvent(["orders", "tables", "dashboard"], {
+      type: "guest-order.created",
+      eventId: `guest-order-${savedOrder.id}-${Date.now()}`,
+      orderId: savedOrder.id,
+      tableId: savedOrder.tableId,
+      tableNumber: savedOrder.table?.number || null,
+      location: savedOrder.table?.location || "",
+      assignedWaiterId: savedOrder.table?.assignedWaiterId || null,
+      itemCount,
+      total: Number(savedOrder.total || 0),
+      appendedToExistingOrder,
     });
 
     return sendSuccess(res, 201, "Guest order saved successfully", savedOrder);

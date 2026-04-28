@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect } from "react";
 
+import PosGuestOrderAlert from "./components/PosGuestOrderAlert";
 import PosScreenLoader from "./components/PosScreenLoader";
 import PosToast from "./components/PosToast";
 import { PosAppProvider, usePosApp } from "./context/PosAppContext";
@@ -23,7 +24,17 @@ const isGuestOrderingRoute = () =>
   typeof window !== "undefined" && /^\/guest\/table\/[^/]+\/?$/.test(window.location.pathname);
 
 function PosAppShell() {
-  const { session, screen, selectedTable, notice, dismissNotice, logout } = usePosApp();
+  const {
+    session,
+    screen,
+    selectedTable,
+    notice,
+    guestOrderAlert,
+    dismissNotice,
+    dismissGuestOrderAlert,
+    logout,
+    returnToTables,
+  } = usePosApp();
   const isManagerView = ["admin", "manager"].includes(normalizeRole(session?.user?.role));
   const isGuestRoute = isGuestOrderingRoute();
   const isPosIdleProtectedScreen =
@@ -73,6 +84,9 @@ function PosAppShell() {
     };
   }, [isPosIdleProtectedScreen, logout]);
 
+  const isViewingAlertTable =
+    Boolean(guestOrderAlert?.tableId) && selectedTable?.id === guestOrderAlert.tableId;
+
   return (
     <div className="app-root">
       <Suspense fallback={<PosScreenLoader label="Preparing your POS workspace..." />}>
@@ -89,6 +103,18 @@ function PosAppShell() {
         )}
       </Suspense>
 
+      <PosGuestOrderAlert
+        alert={guestOrderAlert}
+        isViewingSameTable={isViewingAlertTable}
+        onDismiss={dismissGuestOrderAlert}
+        onShowTables={() => {
+          if (!isViewingAlertTable) {
+            returnToTables({ refresh: true });
+          }
+
+          dismissGuestOrderAlert();
+        }}
+      />
       <PosToast notice={notice} onDismiss={dismissNotice} />
     </div>
   );

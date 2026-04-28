@@ -203,6 +203,7 @@ export default function TableSelectionScreen() {
     selectTable,
     showNotice,
     tablesRefreshToken,
+    highlightedGuestTableId,
   } = usePosApp();
   const [selectedLocation, setSelectedLocation] = useState("all");
   const [openingTableId, setOpeningTableId] = useState(null);
@@ -476,6 +477,7 @@ export default function TableSelectionScreen() {
                             <div className="grid content-start grid-cols-2 gap-[6px] sm:grid-cols-3">
                               {displayedBindings.map(({ table, visualId }) => {
                                 const isOpening = openingTableId === table.id;
+                                const isGuestHighlighted = highlightedGuestTableId === table.id;
                                 const theme = getTableCardTheme(table.status, isOpening);
                                 const showMeta = normalizeStatus(table.status) !== "available";
 
@@ -485,10 +487,19 @@ export default function TableSelectionScreen() {
                                     type="button"
                                     onClick={() => handleTableSelect(table, visualId)}
                                     disabled={isOpening}
-                                    className={`relative flex min-h-[74px] flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 sm:min-h-[84px] ${theme.className}`}
+                                    className={`relative flex min-h-[74px] flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 sm:min-h-[84px] ${theme.className} ${
+                                      isGuestHighlighted
+                                        ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
+                                        : ""
+                                    }`}
                                     aria-label={`Open Table ${visualId}`}
                                     title={`Table ${visualId}`}
                                   >
+                                    {isGuestHighlighted ? (
+                                      <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
+                                        QR
+                                      </span>
+                                    ) : null}
                                     <span
                                       className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
                                     />
@@ -507,6 +518,7 @@ export default function TableSelectionScreen() {
                           <div className="absolute inset-[6px_6px_18px_6px]">
                             {displayedBindings.map(({ table, visualId, slot }) => {
                               const isOpening = openingTableId === table.id;
+                              const isGuestHighlighted = highlightedGuestTableId === table.id;
                               const theme = getTableCardTheme(table.status, isOpening);
                               const showMeta = normalizeStatus(table.status) !== "available";
 
@@ -516,7 +528,11 @@ export default function TableSelectionScreen() {
                                   type="button"
                                   onClick={() => handleTableSelect(table, visualId)}
                                   disabled={isOpening}
-                                  className={`absolute flex flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 ${theme.className}`}
+                                  className={`absolute flex flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 ${theme.className} ${
+                                    isGuestHighlighted
+                                      ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
+                                      : ""
+                                  }`}
                                   style={{
                                     left: `${slot.left}%`,
                                     top: `${slot.top}%`,
@@ -526,6 +542,11 @@ export default function TableSelectionScreen() {
                                   aria-label={`Open Table ${visualId}`}
                                   title={`Table ${visualId}`}
                                 >
+                                  {isGuestHighlighted ? (
+                                    <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
+                                      QR
+                                    </span>
+                                  ) : null}
                                   <span
                                     className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
                                   />

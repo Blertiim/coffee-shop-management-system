@@ -12,6 +12,7 @@ import {
   getStoredSession,
   saveStoredSession,
 } from "../lib/authStorage";
+import { buildApiUrl } from "../lib/api";
 
 const POS_ALLOWED_ROLES = new Set(["admin", "waiter", "staff", "manager"]);
 const PosAppContext = createContext(null);
@@ -44,6 +45,36 @@ const buildNotice = (notice) => {
   };
 };
 
+const buildRealtimeStreamUrl = (token, channels = []) => {
+  const params = new URLSearchParams();
+  params.set("token", token);
+
+  if (channels.length > 0) {
+    params.set("channels", channels.join(","));
+  }
+
+  return buildApiUrl(`/system/realtime?${params.toString()}`);
+};
+
+const buildGuestOrderAlert = (payload) => {
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    eventId: String(payload.eventId || `guest-order-${Date.now()}`),
+    orderId: Number(payload.orderId) || null,
+    tableId: Number(payload.tableId) || null,
+    tableNumber: Number(payload.tableNumber) || null,
+    location: String(payload.location || "").trim(),
+    itemCount: Math.max(1, Number(payload.itemCount) || 1),
+    total: Number(payload.total || 0),
+    appendedToExistingOrder: Boolean(payload.appendedToExistingOrder),
+    assignedWaiterId: Number(payload.assignedWaiterId) || null,
+    timestamp: payload.timestamp || new Date().toISOString(),
+  };
+};
+
 const createInitialState = () => {
   const session = getStoredSession();
   const initialScreen = session
@@ -58,6 +89,8 @@ const createInitialState = () => {
     selectedTable: null,
     tablesRefreshToken: 0,
     notice: null,
+    guestOrderAlert: null,
+    highlightedGuestTableId: null,
   };
 };
 
@@ -70,6 +103,8 @@ const reducer = (state, action) => {
         screen: isManagerRole(action.payload?.user?.role) ? "manager" : "tables",
         selectedTable: null,
         notice: null,
+        guestOrderAlert: null,
+        highlightedGuestTableId: null,
       };
 
     case "LOGOUT":
@@ -79,6 +114,8 @@ const reducer = (state, action) => {
         screen: "login",
         selectedTable: null,
         notice: null,
+        guestOrderAlert: null,
+        highlightedGuestTableId: null,
       };
 
     case "SELECT_TABLE":
@@ -87,6 +124,14 @@ const reducer = (state, action) => {
         selectedTable: action.payload,
         screen: "order",
         notice: null,
+        guestOrderAlert:
+          state.guestOrderAlert?.tableId === action.payload?.id
+            ? null
+            : state.guestOrderAlert,
+        highlightedGuestTableId:
+          state.highlightedGuestTableId === action.payload?.id
+            ? null
+            : state.highlightedGuestTableId,
       };
 
     case "RETURN_TO_TABLES":
@@ -112,6 +157,23 @@ const reducer = (state, action) => {
         notice: null,
       };
 
+    case "GUEST_ORDER_RECEIVED": {
+      const nextAlert = buildGuestOrderAlert(action.payload);
+
+      return {
+        ...state,
+        guestOrderAlert: nextAlert,
+        highlightedGuestTableId: nextAlert?.tableId || null,
+        tablesRefreshToken: state.tablesRefreshToken + 1,
+      };
+    }
+
+    case "DISMISS_GUEST_ORDER_ALERT":
+      return {
+        ...state,
+        guestOrderAlert: null,
+      };
+
     default:
       return state;
   }
@@ -128,6 +190,54 @@ export function PosAppProvider({ children }) {
 
     clearStoredSession();
   }, [state.session]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !state.session?.token) {
+      return undefined;
+    }
+
+    const normalizedRole = normalizeRole(state.session.user?.role);
+
+    if (!["waiter", "staff"].includes(normalizedRole)) {
+      return undefined;
+    }
+
+    const source = new EventSource(
+      buildRealtimeStreamUrl(state.session.token, ["orders", "tables"])
+    );
+
+    const handleUpdate = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+
+        if (payload.type !== "guest-order.created") {
+          return;
+        }
+
+        if (
+          normalizedRole === "waiter" &&
+          payload.assignedWaiterId &&
+          Number(payload.assignedWaiterId) !== state.session.user?.id
+        ) {
+          return;
+        }
+
+        dispatch({
+          type: "GUEST_ORDER_RECEIVED",
+          payload,
+        });
+      } catch (error) {
+        console.error("Failed to parse guest order realtime event:", error);
+      }
+    };
+
+    source.addEventListener("update", handleUpdate);
+
+    return () => {
+      source.removeEventListener("update", handleUpdate);
+      source.close();
+    };
+  }, [state.session?.token, state.session?.user?.id, state.session?.user?.role]);
 
   const loginSuccess = useCallback((loginResponse, staffProfile) => {
     const nextSession = {
@@ -177,6 +287,10 @@ export function PosAppProvider({ children }) {
     dispatch({ type: "DISMISS_NOTICE" });
   }, []);
 
+  const dismissGuestOrderAlert = useCallback(() => {
+    dispatch({ type: "DISMISS_GUEST_ORDER_ALERT" });
+  }, []);
+
   const value = useMemo(
     () => ({
       ...state,
@@ -186,8 +300,18 @@ export function PosAppProvider({ children }) {
       returnToTables,
       showNotice,
       dismissNotice,
+      dismissGuestOrderAlert,
     }),
-    [dismissNotice, loginSuccess, logout, returnToTables, selectTable, showNotice, state]
+    [
+      dismissGuestOrderAlert,
+      dismissNotice,
+      loginSuccess,
+      logout,
+      returnToTables,
+      selectTable,
+      showNotice,
+      state,
+    ]
   );
 
   return <PosAppContext.Provider value={value}>{children}</PosAppContext.Provider>;
