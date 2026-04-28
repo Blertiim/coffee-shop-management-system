@@ -108,6 +108,13 @@ const formatDate = (value) =>
 
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
 
+const sortCategoriesByNewest = (rows) =>
+  [...ensureArray(rows)].sort((left, right) => {
+    const rightTime = new Date(right?.createdAt || 0).getTime();
+    const leftTime = new Date(left?.createdAt || 0).getTime();
+    return rightTime - leftTime;
+  });
+
 const buildGuestOrderUrl = (guestAccess) => {
   if (!guestAccess) {
     return "";
@@ -220,9 +227,10 @@ export default function ManagerDashboard({ session, onLogout }) {
     setError("");
     setFeedback("");
     try {
-      await action();
+      const result = await action();
       setFeedback(successMessage);
       refreshAll();
+      return result;
     } catch (requestError) {
       if (requestError.status === 401 || requestError.status === 403) {
         onLogout();
@@ -466,7 +474,15 @@ export default function ManagerDashboard({ session, onLogout }) {
     }
 
     const source = new EventSource(
-      buildRealtimeStreamUrl(session.token, ["dashboard", "orders", "alerts", "tables", "inventory"])
+      buildRealtimeStreamUrl(session.token, [
+        "dashboard",
+        "orders",
+        "alerts",
+        "tables",
+        "inventory",
+        "categories",
+        "products",
+      ])
     );
     let refreshTimeout = 0;
 
@@ -598,9 +614,19 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     await runAction(async () => {
       if (editingCategoryId) {
-        await updateCategory(session.token, editingCategoryId, payload);
+        const response = await updateCategory(session.token, editingCategoryId, payload);
+        setCategories((current) =>
+          sortCategoriesByNewest(
+            current.map((entry) =>
+              entry.id === editingCategoryId ? response.category || entry : entry
+            )
+          )
+        );
       } else {
-        await createCategory(session.token, payload);
+        const response = await createCategory(session.token, payload);
+        setCategories((current) =>
+          sortCategoriesByNewest([response.category, ...current].filter(Boolean))
+        );
       }
       resetCategoryForm();
     }, editingCategoryId ? "Category updated." : "Category created.");
@@ -1294,7 +1320,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                                         return;
                                       }
                                       runAction(
-                                        () => deleteCategory(session.token, category.id),
+                                        async () => {
+                                          await deleteCategory(session.token, category.id);
+                                          setCategories((current) =>
+                                            current.filter((entry) => entry.id !== category.id)
+                                          );
+                                        },
                                         "Category deleted."
                                       );
                                     }}

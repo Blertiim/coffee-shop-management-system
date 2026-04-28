@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import PosScreenLoader from "../../components/PosScreenLoader";
 import { usePosApp } from "../../context/PosAppContext";
 import useApiResource from "../../hooks/useApiResource";
+import { buildApiUrl } from "../../lib/api";
 import CartItemRow from "./components/CartItemRow";
 import CategoryRail from "./components/CategoryRail";
 import ProductTile from "./components/ProductTile";
@@ -28,6 +29,18 @@ const TRANSFERABLE_ORDER_STATUSES = new Set([
   "pending_payment",
 ]);
 const TABLES_PATH = "/tables";
+const REALTIME_MENU_CHANNELS = ["categories", "products", "inventory"];
+
+const buildRealtimeStreamUrl = (token, channels = []) => {
+  const params = new URLSearchParams();
+  params.set("token", token);
+
+  if (channels.length > 0) {
+    params.set("channels", channels.join(","));
+  }
+
+  return buildApiUrl(`/system/realtime?${params.toString()}`);
+};
 
 const isHiddenPosCategory = (name) => {
   const normalizedName =
@@ -266,6 +279,43 @@ export default function PosOrderScreen() {
     };
   }, [guestOrderAlert, logout, session.token, showNotice, table]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !session?.token) {
+      return undefined;
+    }
+
+    const source = new EventSource(
+      buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS)
+    );
+
+    const handleUpdate = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        const route = String(payload.route || "").toLowerCase();
+
+        if (
+          payload.type !== "resource.changed" ||
+          (!route.includes("/categories") &&
+            !route.includes("/products") &&
+            !route.includes("/inventory"))
+        ) {
+          return;
+        }
+
+        reloadMenu();
+      } catch (error) {
+        console.error("Failed to process realtime menu update:", error);
+      }
+    };
+
+    source.addEventListener("update", handleUpdate);
+
+    return () => {
+      source.removeEventListener("update", handleUpdate);
+      source.close();
+    };
+  }, [reloadMenu, session?.token]);
+
   const handleReturnToTables = useCallback(
     (options = {}) => {
       replacePathname(TABLES_PATH);
@@ -311,6 +361,7 @@ export default function PosOrderScreen() {
     data: menuData,
     isLoading,
     error,
+    reload: reloadMenu,
   } = useApiResource(loadMenu, {
     initialData: {
       categories: [],
