@@ -23,7 +23,7 @@ const posStaffRateLimiter = createRateLimiter({
 
 const posLoginRateLimiter = createRateLimiter({
   windowMs: 10 * 60 * 1000,
-  max: 20,
+  max: 12,
   message: "Too many PIN attempts. Please wait a few minutes and try again.",
   keyGenerator: (req) =>
     `${req.ip || "unknown"}:${String(req.body?.userId || "unknown").trim()}`,

@@ -4,8 +4,18 @@ const jwt = require("jsonwebtoken");
 const { getJwtSecret } = require("../../config/security");
 const { logManualAuditEvent } = require("../../services/audit.service");
 const { isDatabaseUnavailableError } = require("../../services/alert.service");
+const {
+  clearPosLoginAttemptState,
+  getPosLoginBlock,
+  registerFailedPosLoginAttempt,
+} = require("../../services/pos-login-guard.service");
 
 const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
+const INVALID_POS_LOGIN_MESSAGE = "Invalid user or PIN";
+const POS_LOGIN_LOCKED_MESSAGE =
+  "Too many failed attempts. POS login is temporarily locked. Please wait and try again.";
+const POS_LOGIN_DELAY_MESSAGE =
+  "Please wait a few seconds before trying again.";
 
 const normalizeRole = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -14,7 +24,7 @@ const isActiveStatus = (value) =>
   typeof value === "string" && value.trim().toLowerCase() === "active";
 
 const isValidPin = (value) =>
-  typeof value === "string" && /^\d{4,8}$/.test(value.trim());
+  typeof value === "string" && /^\d{4}$/.test(value.trim());
 
 const mapPosProfile = (user) => ({
   id: user.id,
@@ -247,6 +257,9 @@ exports.posLogin = async (req, res) => {
     const userId = Number(req.body && req.body.userId);
     const pin =
       typeof req.body?.pin === "string" ? req.body.pin.trim() : "";
+    const identifier = Number.isInteger(userId) && userId > 0 ? `user:${userId}` : "";
+    const auditContext = getAuditContext(req);
+    const ipAddress = auditContext.ipAddress;
 
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({ error: "Valid userId is required" });
@@ -254,7 +267,42 @@ exports.posLogin = async (req, res) => {
 
     if (!isValidPin(pin)) {
       return res.status(400).json({
-        error: "PIN is required and must be 4 to 8 digits",
+        error: "PIN is required and must be exactly 4 digits",
+      });
+    }
+
+    const activeBlock = getPosLoginBlock({
+      identifier,
+      ipAddress,
+    });
+
+    if (activeBlock) {
+      res.setHeader(
+        "Retry-After",
+        String(Math.max(1, Math.ceil(activeBlock.retryAfterMs / 1000)))
+      );
+
+      await logManualAuditEvent({
+        action:
+          activeBlock.type === "lockout"
+            ? "auth.pos.locked"
+            : "auth.pos.delayed",
+        entityType: "auth",
+        entityId: String(userId),
+        statusCode: 429,
+        summary:
+          activeBlock.type === "lockout"
+            ? `Blocked POS login for user ${userId} due to lockout`
+            : `Delayed repeated POS login attempt for user ${userId}`,
+        payload: { userId },
+        ...auditContext,
+      });
+
+      return res.status(429).json({
+        error:
+          activeBlock.type === "lockout"
+            ? POS_LOGIN_LOCKED_MESSAGE
+            : POS_LOGIN_DELAY_MESSAGE,
       });
     }
 
@@ -263,15 +311,38 @@ exports.posLogin = async (req, res) => {
     });
 
     if (!user || !POS_LOGIN_ROLES.has(normalizeRole(user.role))) {
+      const attemptState = registerFailedPosLoginAttempt({
+        identifier,
+        ipAddress,
+      });
+
+      res.setHeader(
+        "Retry-After",
+        String(
+          Math.max(
+            1,
+            Math.ceil(
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) /
+                1000
+            )
+          )
+        )
+      );
+
       await logManualAuditEvent({
-        action: "auth.pos.failed",
+        action: attemptState.lockedUntil ? "auth.pos.lockout" : "auth.pos.failed",
         entityType: "auth",
-        statusCode: 401,
+        statusCode: attemptState.lockedUntil ? 429 : 401,
         summary: `Failed POS login for user ${userId}`,
         payload: { userId },
-        ...getAuditContext(req),
+        ...auditContext,
       });
-      return res.status(401).json({ error: "Invalid user or PIN" });
+
+      return res.status(attemptState.lockedUntil ? 429 : 401).json({
+        error: attemptState.lockedUntil
+          ? POS_LOGIN_LOCKED_MESSAGE
+          : INVALID_POS_LOGIN_MESSAGE,
+      });
     }
 
     if (!isActiveStatus(user.status)) {
@@ -285,7 +356,7 @@ exports.posLogin = async (req, res) => {
         statusCode: 403,
         summary: `Inactive POS login blocked for ${user.fullName}`,
         payload: { userId },
-        ...getAuditContext(req),
+        ...auditContext,
       });
       return res.status(403).json({ error: "User account is not active" });
     }
@@ -293,20 +364,48 @@ exports.posLogin = async (req, res) => {
     const isMatch = await bcrypt.compare(pin, user.password);
 
     if (!isMatch) {
+      const attemptState = registerFailedPosLoginAttempt({
+        identifier,
+        ipAddress,
+      });
+
+      res.setHeader(
+        "Retry-After",
+        String(
+          Math.max(
+            1,
+            Math.ceil(
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) /
+                1000
+            )
+          )
+        )
+      );
+
       await logManualAuditEvent({
         actorId: user.id,
         actorName: user.fullName,
         actorRole: user.role,
-        action: "auth.pos.failed",
+        action: attemptState.lockedUntil ? "auth.pos.lockout" : "auth.pos.failed",
         entityType: "auth",
         entityId: user.id,
-        statusCode: 401,
+        statusCode: attemptState.lockedUntil ? 429 : 401,
         summary: `Failed POS login for ${user.fullName}`,
         payload: { userId },
-        ...getAuditContext(req),
+        ...auditContext,
       });
-      return res.status(401).json({ error: "Invalid user or PIN" });
+
+      return res.status(attemptState.lockedUntil ? 429 : 401).json({
+        error: attemptState.lockedUntil
+          ? POS_LOGIN_LOCKED_MESSAGE
+          : INVALID_POS_LOGIN_MESSAGE,
+      });
     }
+
+    clearPosLoginAttemptState({
+      identifier,
+      ipAddress,
+    });
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
@@ -324,7 +423,7 @@ exports.posLogin = async (req, res) => {
       statusCode: 200,
       summary: `POS login successful for ${user.fullName}`,
       payload: { userId },
-      ...getAuditContext(req),
+      ...auditContext,
     });
 
     return res.status(200).json({

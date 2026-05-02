@@ -3,27 +3,30 @@ require("dotenv").config();
 const bcrypt = require("bcryptjs");
 const prisma = require("../src/config/prisma");
 
-const DEFAULT_MANAGER_PIN = "1111";
-const DEFAULT_WAITER_PIN = "1234";
-
 const STAFF_PROFILES = [
   {
     fullName: "Meti Manager",
     email: "meti.manager@pos.local",
     role: "manager",
-    pin: DEFAULT_MANAGER_PIN,
+    pin: "1111",
   },
   {
     fullName: "Mili Waiter",
     email: "mili.waiter@pos.local",
     role: "waiter",
-    pin: DEFAULT_WAITER_PIN,
+    pin: "1234",
   },
   {
     fullName: "Egzon Waiter",
     email: "egzon.waiter@pos.local",
     role: "waiter",
-    pin: DEFAULT_WAITER_PIN,
+    pin: "5678",
+  },
+  {
+    fullName: "Aldi",
+    email: "aldi.waiter@pos.local",
+    role: "waiter",
+    pin: "2468",
   },
 ];
 
@@ -123,11 +126,19 @@ const CATALOG = [
 
 const ensureUser = async (profile) => {
   const passwordHash = await bcrypt.hash(profile.pin, 10);
-  const existingUser = await prisma.user.findUnique({
+  const existingUserByEmail = await prisma.user.findUnique({
     where: { email: profile.email },
   });
+  const existingUserByName =
+    existingUserByEmail ||
+    (await prisma.user.findFirst({
+      where: {
+        fullName: profile.fullName,
+        role: profile.role,
+      },
+    }));
 
-  if (!existingUser) {
+  if (!existingUserByName) {
     return prisma.user.create({
       data: {
         fullName: profile.fullName,
@@ -140,9 +151,10 @@ const ensureUser = async (profile) => {
   }
 
   return prisma.user.update({
-    where: { email: profile.email },
+    where: { id: existingUserByName.id },
     data: {
       fullName: profile.fullName,
+      email: profile.email,
       password: passwordHash,
       role: profile.role,
       status: "active",
@@ -261,13 +273,9 @@ async function main() {
   await assignTablesToWaiters(waiterUsers);
 
   console.log("POS demo data seeded successfully.");
-  console.log(`Manager PIN: ${DEFAULT_MANAGER_PIN} (${STAFF_PROFILES[0].email})`);
-  console.log(
-    `Waiter PIN: ${DEFAULT_WAITER_PIN} (${STAFF_PROFILES
-      .filter((profile) => profile.role === "waiter")
-      .map((profile) => profile.email)
-      .join(", ")})`
-  );
+  STAFF_PROFILES.forEach((profile) => {
+    console.log(`${profile.fullName} PIN: ${profile.pin} (${profile.email})`);
+  });
 }
 
 main()

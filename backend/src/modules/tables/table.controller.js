@@ -58,14 +58,12 @@ exports.getAllTables = async (req, res) => {
 
     let where = {};
 
-    if (userRole === "waiter" && userId) {
-      const assignedTablesCount = await prisma.table.count({
-        where: { assignedWaiterId: userId },
-      });
-
-      if (assignedTablesCount > 0) {
-        where = { assignedWaiterId: userId };
+    if (userRole === "waiter") {
+      if (!userId) {
+        return sendSuccess(res, 200, "Tables retrieved successfully", []);
       }
+
+      where = { assignedWaiterId: userId };
     }
 
     const tables = await prisma.table.findMany({

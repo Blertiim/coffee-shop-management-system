@@ -1489,13 +1489,13 @@ export default function ManagerDashboard({ session, onLogout }) {
                     placeholder={
                       editingWaiterId
                         ? "New PIN (optional)"
-                        : "PIN (4-8 digits)"
+                        : "PIN (4 digits)"
                     }
                     value={waiterForm.pin}
                     onChange={(event) =>
                       setWaiterForm((current) => ({
                         ...current,
-                        pin: event.target.value.replace(/\D/g, "").slice(0, 8),
+                        pin: event.target.value.replace(/\D/g, "").slice(0, 4),
                       }))
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"

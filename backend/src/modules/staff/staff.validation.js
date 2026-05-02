@@ -14,8 +14,8 @@ const normalizePin = (value) => {
 
   const pin = value.trim();
 
-  if (!/^\d{4,8}$/.test(pin)) {
-    throw new AppError("PIN must contain only digits (4 to 8)");
+  if (!/^\d{4}$/.test(pin)) {
+    throw new AppError("PIN must contain exactly 4 digits");
   }
 
   return pin;

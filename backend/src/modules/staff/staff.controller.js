@@ -8,6 +8,9 @@ const {
   sendSuccess,
 } = require("../../utils/response");
 const {
+  clearPosLoginAttemptState,
+} = require("../../services/pos-login-guard.service");
+const {
   validateCreateWaiterPayload,
   validateUpdateWaiterPayload,
   validateUpdateWaiterStatusPayload,
@@ -139,6 +142,10 @@ exports.updateWaiter = async (req, res) => {
       data,
     });
 
+    if (payload.pin !== undefined || payload.status !== undefined) {
+      clearPosLoginAttemptState({ identifier: `user:${updatedWaiter.id}` });
+    }
+
     return sendSuccess(
       res,
       200,
@@ -165,6 +172,8 @@ exports.updateWaiterStatus = async (req, res) => {
       data: { status },
     });
 
+    clearPosLoginAttemptState({ identifier: `user:${updatedWaiter.id}` });
+
     return sendSuccess(
       res,
       200,
@@ -190,6 +199,8 @@ exports.deleteWaiter = async (req, res) => {
         id: waiter.id,
       },
     });
+
+    clearPosLoginAttemptState({ identifier: `user:${waiter.id}` });
 
     return sendSuccess(res, 200, "Waiter deleted successfully", null);
   } catch (error) {
