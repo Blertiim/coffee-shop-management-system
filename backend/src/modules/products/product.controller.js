@@ -1,4 +1,8 @@
 const prisma = require("../../config/prisma");
+const {
+  resolveProductStockAlert,
+  syncProductStockAlert,
+} = require("../../services/alert.service");
 
 const parseId = (value) => {
   const id = Number(value);
@@ -57,6 +61,9 @@ const parseStock = (value) => {
 exports.getAllProducts = async (req, res) => {
   try {
     const products = await prisma.product.findMany({
+      where: {
+        deletedAt: null,
+      },
       include: { category: true },
       orderBy: { createdAt: "desc" },
     });
@@ -81,7 +88,7 @@ exports.getProductById = async (req, res) => {
       include: { category: true },
     });
 
-    if (!product) {
+    if (!product || product.deletedAt) {
       return res.status(404).json({ error: "Product not found" });
     }
 
@@ -175,6 +182,8 @@ exports.createProduct = async (req, res) => {
       include: { category: true },
     });
 
+    await syncProductStockAlert(product);
+
     res.status(201).json({
       message: "Product created successfully",
       product,
@@ -197,7 +206,7 @@ exports.updateProduct = async (req, res) => {
       where: { id },
     });
 
-    if (!existingProduct) {
+    if (!existingProduct || existingProduct.deletedAt) {
       return res.status(404).json({ error: "Product not found" });
     }
 
@@ -268,23 +277,27 @@ exports.updateProduct = async (req, res) => {
     }
 
     if (categoryId !== undefined) {
-      const normalizedCategoryId = parseId(categoryId);
+      if (categoryId === null || categoryId === "") {
+        data.categoryId = null;
+      } else {
+        const normalizedCategoryId = parseId(categoryId);
 
-      if (!normalizedCategoryId) {
-        return res.status(400).json({
-          error: "categoryId must be a valid positive integer",
+        if (!normalizedCategoryId) {
+          return res.status(400).json({
+            error: "categoryId must be a valid positive integer or null",
+          });
+        }
+
+        const category = await prisma.category.findUnique({
+          where: { id: normalizedCategoryId },
         });
+
+        if (!category) {
+          return res.status(404).json({ error: "Category not found" });
+        }
+
+        data.categoryId = normalizedCategoryId;
       }
-
-      const category = await prisma.category.findUnique({
-        where: { id: normalizedCategoryId },
-      });
-
-      if (!category) {
-        return res.status(404).json({ error: "Category not found" });
-      }
-
-      data.categoryId = normalizedCategoryId;
     }
 
     if (isAvailable !== undefined) {
@@ -309,6 +322,8 @@ exports.updateProduct = async (req, res) => {
       include: { category: true },
     });
 
+    await syncProductStockAlert(updatedProduct);
+
     res.status(200).json({
       message: "Product updated successfully",
       product: updatedProduct,
@@ -331,13 +346,19 @@ exports.deleteProduct = async (req, res) => {
       where: { id },
     });
 
-    if (!existingProduct) {
+    if (!existingProduct || existingProduct.deletedAt) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    await prisma.product.delete({
+    await prisma.product.update({
       where: { id },
+      data: {
+        deletedAt: new Date(),
+        isAvailable: false,
+      },
     });
+
+    await resolveProductStockAlert(id);
 
     res.status(200).json({
       message: "Product deleted successfully",
@@ -362,7 +383,7 @@ exports.updateProductStock = async (req, res) => {
       where: { id },
     });
 
-    if (!existingProduct) {
+    if (!existingProduct || existingProduct.deletedAt) {
       return res.status(404).json({ error: "Product not found" });
     }
 
@@ -418,6 +439,8 @@ exports.updateProductStock = async (req, res) => {
       },
       include: { category: true },
     });
+
+    await syncProductStockAlert(updatedProduct);
 
     return res.status(200).json({
       message: "Product stock updated successfully",

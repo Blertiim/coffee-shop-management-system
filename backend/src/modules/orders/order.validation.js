@@ -3,6 +3,7 @@ const {
   ensureArray,
   ensureEnumValue,
   ensureId,
+  ensureNonNegativeNumber,
   ensurePositiveInteger,
 } = require("../../utils/validation");
 
@@ -16,6 +17,7 @@ const VALID_ORDER_STATUSES = [
 ];
 
 const VALID_PAYMENT_METHODS = ["cash", "card"];
+const VALID_DISCOUNT_TYPES = ["percent", "fixed"];
 
 const normalizeOrderItems = (items) => {
   const normalizedItems = ensureArray(items, "Order items").map((item, index) => {
@@ -54,6 +56,20 @@ const validateCreateOrderPayload = (body) => {
     body.paymentMethod !== undefined &&
     body.paymentMethod !== null &&
     String(body.paymentMethod).trim() !== "";
+  const hasDiscountType =
+    body.discountType !== undefined &&
+    body.discountType !== null &&
+    String(body.discountType).trim() !== "";
+
+  const discountType = hasDiscountType
+    ? ensureEnumValue(body.discountType, "Discount type", VALID_DISCOUNT_TYPES)
+    : null;
+  const discountValue =
+    discountType !== null ? ensureNonNegativeNumber(body.discountValue, "Discount value") : null;
+
+  if (discountType === "percent" && discountValue > 100) {
+    throw new AppError("Discount value cannot be greater than 100%");
+  }
 
   return {
     items: normalizeOrderItems(body.items),
@@ -62,6 +78,8 @@ const validateCreateOrderPayload = (body) => {
     paymentMethod: hasPaymentMethod
       ? ensureEnumValue(body.paymentMethod, "Payment method", VALID_PAYMENT_METHODS)
       : null,
+    discountType,
+    discountValue,
   };
 };
 
@@ -87,7 +105,34 @@ const validateTransferOrderPayload = (body = {}) => ({
   tableId: ensureId(body.tableId, "Target table id"),
 });
 
+const validateOrderDiscountPayload = (body = {}) => {
+  const hasDiscountType =
+    body.discountType !== undefined &&
+    body.discountType !== null &&
+    String(body.discountType).trim() !== "";
+
+  if (!hasDiscountType) {
+    return {
+      discountType: null,
+      discountValue: null,
+    };
+  }
+
+  const discountType = ensureEnumValue(body.discountType, "Discount type", VALID_DISCOUNT_TYPES);
+  const discountValue = ensureNonNegativeNumber(body.discountValue, "Discount value");
+
+  if (discountType === "percent" && discountValue > 100) {
+    throw new AppError("Discount value cannot be greater than 100%");
+  }
+
+  return {
+    discountType,
+    discountValue,
+  };
+};
+
 module.exports = {
+  VALID_DISCOUNT_TYPES,
   VALID_ORDER_STATUSES,
   VALID_PAYMENT_METHODS,
   validateCreateOrderPayload,
@@ -97,4 +142,5 @@ module.exports = {
   validateAppendOrderItemsPayload,
   validateCompletePaymentPayload,
   validateTransferOrderPayload,
+  validateOrderDiscountPayload,
 };

@@ -203,7 +203,9 @@ export default function TableSelectionScreen() {
     selectTable,
     showNotice,
     tablesRefreshToken,
+    guestOrderAlert,
     highlightedGuestTableId,
+    receiveGuestOrderAlert,
   } = usePosApp();
   const [selectedLocation, setSelectedLocation] = useState("all");
   const [openingTableId, setOpeningTableId] = useState(null);
@@ -313,6 +315,22 @@ export default function TableSelectionScreen() {
     },
     [selectedLocation, tableBindings]
   );
+  const latestGuestOrderTable = useMemo(() => {
+    const guestOrderBindings = tableBindings
+      .filter(({ table }) => table.activeGuestOrder)
+      .sort((left, right) => {
+        const leftTime = new Date(
+          left.table.activeGuestOrder?.updatedAt || left.table.activeGuestOrder?.createdAt || 0
+        ).getTime();
+        const rightTime = new Date(
+          right.table.activeGuestOrder?.updatedAt || right.table.activeGuestOrder?.createdAt || 0
+        ).getTime();
+
+        return rightTime - leftTime;
+      });
+
+    return guestOrderBindings[0] || null;
+  }, [tableBindings]);
 
   const summary = useMemo(() => buildTableSummary(visibleTables), [visibleTables]);
   const openTablesCount = summary.openOrder + summary.pendingPayment;
@@ -431,6 +449,32 @@ export default function TableSelectionScreen() {
 
     handleTableSelect(matchedBinding.table, matchedBinding.visualId);
   }, [handleTableSelect, isLoading, openingTableId, tableBindings]);
+
+  useEffect(() => {
+    if (isLoading || !latestGuestOrderTable || guestOrderAlert?.tableId) {
+      return;
+    }
+
+    const { table, visualId } = latestGuestOrderTable;
+    const activeGuestOrder = table.activeGuestOrder;
+
+    if (!activeGuestOrder) {
+      return;
+    }
+
+    receiveGuestOrderAlert({
+      eventId: `existing-guest-order-${activeGuestOrder.orderId}-${activeGuestOrder.updatedAt || activeGuestOrder.createdAt || table.id}`,
+      orderId: activeGuestOrder.orderId,
+      tableId: table.id,
+      tableNumber: visualId || table.number,
+      location: table.location,
+      itemCount: activeGuestOrder.itemCount || 1,
+      total: activeGuestOrder.total || 0,
+      appendedToExistingOrder: true,
+      assignedWaiterId: table.assignedWaiterId || null,
+      timestamp: activeGuestOrder.updatedAt || activeGuestOrder.createdAt || new Date().toISOString(),
+    });
+  }, [guestOrderAlert?.tableId, isLoading, latestGuestOrderTable, receiveGuestOrderAlert]);
 
   return (
     <main className="min-h-[100dvh] bg-[linear-gradient(180deg,#090705_0%,#110d0a_42%,#16110d_100%)] p-0">

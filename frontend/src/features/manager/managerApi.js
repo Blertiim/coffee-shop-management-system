@@ -149,6 +149,23 @@ export const getTables = async (token, signal) =>
     })
   );
 
+export const createTable = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/tables", {
+      method: "POST",
+      token,
+      body: payload,
+    })
+  );
+
+export const deleteTable = async (token, tableId) =>
+  unwrapApiData(
+    await apiRequest(`/tables/${tableId}`, {
+      method: "DELETE",
+      token,
+    })
+  );
+
 export const createCategory = async (token, payload) =>
   apiRequest("/categories", {
     method: "POST",

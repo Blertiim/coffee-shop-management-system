@@ -24,10 +24,10 @@ export default function PosGuestOrderAlert({
       <div className="w-full max-w-[680px] overflow-hidden rounded-[18px] border border-[#e6b95d] bg-[linear-gradient(180deg,#36230a_0%,#20150a_100%)] shadow-[0_32px_90px_rgba(0,0,0,0.48)]">
         <div className="border-b border-[#e6b95d]/30 bg-[linear-gradient(90deg,rgba(226,166,65,0.26)_0%,rgba(226,166,65,0.08)_100%)] px-5 py-4">
           <p className="m-0 text-[11px] font-bold uppercase tracking-[0.26em] text-[#ffe6b0]">
-            Guest Order Incoming
+            Guest Order Notification
           </p>
           <h2 className="m-0 mt-2 text-[1.7rem] font-semibold text-white">
-            Table {alert.tableNumber || alert.tableId}
+            Guest Order - Table {alert.tableNumber || alert.tableId}
           </h2>
         </div>
 

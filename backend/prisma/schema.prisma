@@ -31,19 +31,20 @@ model Category {
 }
 
 model Product {
-  id          Int       @id @default(autoincrement())
-  name        String
-  description String?
-  price       Float
-  stock       Int       @default(0)
-  imageUrl    String?
-  categoryId  Int
-  category    Category  @relation(fields: [categoryId], references: [id])
-  orderItems  OrderItem[]
-  isAvailable Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
+    id          Int       @id @default(autoincrement())
+    name        String
+    description String?
+    price       Float
+    stock       Int       @default(0)
+    imageUrl    String?
+    categoryId  Int?
+    category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+    orderItems  OrderItem[]
+    isAvailable Boolean   @default(true)
+    deletedAt   DateTime?
+    createdAt   DateTime  @default(now())
+    updatedAt   DateTime  @updatedAt
+  }
 
 model Table {
   id               Int           @id @default(autoincrement())
@@ -84,6 +85,10 @@ model Order {
   userId        Int
   tableId       Int?
   employeeId    Int?
+  subtotal      Float?
+  discountType  String?
+  discountValue Float?
+  discountAmount Float      @default(0)
   total         Float
   paymentMethod String?
   status        String      @default("pending")

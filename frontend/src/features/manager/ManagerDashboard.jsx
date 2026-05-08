@@ -7,9 +7,11 @@ import {
   buildRealtimeStreamUrl,
   createCategory,
   createProduct,
+  createTable,
   createWaiter,
   deleteCategory,
   deleteProduct,
+  deleteTable,
   deleteWaiter,
   downloadAdvancedReportCsv,
   downloadAdvancedReportPdf,
@@ -75,7 +77,7 @@ const defaultProductForm = {
   name: "",
   categoryId: "",
   price: "",
-  stock: "",
+  stock: "1",
   imageUrl: "",
   description: "",
   isAvailable: true,
@@ -87,6 +89,12 @@ const defaultWaiterForm = {
   fullName: "",
   pin: "",
   status: "active",
+};
+
+const defaultTableForm = {
+  number: "",
+  capacity: "4",
+  location: "Main Hall",
 };
 
 const formatMoney = (value) =>
@@ -106,7 +114,42 @@ const formatDate = (value) =>
     dateStyle: "medium",
   }).format(new Date(value));
 
+const formatShortDay = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value || "");
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+};
+
+const formatMonthLabel = (value) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}$/.test(value.trim())) {
+    return String(value || "");
+  }
+
+  const [year, month] = value.trim().split("-");
+  const date = new Date(Number(year), Number(month) - 1, 1);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+  }).format(date);
+};
+
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
+
+const isAuthError = (error) => error?.status === 401 || error?.status === 403;
+
+const isAbortError = (error) => error?.name === "AbortError";
 
 const sortCategoriesByNewest = (rows) =>
   [...ensureArray(rows)].sort((left, right) => {
@@ -152,7 +195,15 @@ const statusClass = (status) => {
   return "border-sky-400/30 bg-sky-500/15 text-sky-300";
 };
 
-function BarRows({ rows, labelKey, valueKey, colorClass }) {
+function BarRows({
+  rows,
+  labelKey,
+  valueKey,
+  colorClass,
+  formatLabel = (value) => String(value || ""),
+  formatValue = (value) => `${formatMoney(value)} EUR`,
+  getMetaText = null,
+}) {
   const maxValue = Math.max(...rows.map((entry) => Number(entry[valueKey] || 0)), 1);
 
   if (rows.length === 0) {
@@ -163,13 +214,19 @@ function BarRows({ rows, labelKey, valueKey, colorClass }) {
     <div className="space-y-2">
       {rows.map((entry) => {
         const value = Number(entry[valueKey] || 0);
-        const width = Math.max(8, Math.round((value / maxValue) * 100));
+        const width = value <= 0 ? 0 : Math.max(8, Math.round((value / maxValue) * 100));
+        const metaText = typeof getMetaText === "function" ? getMetaText(entry) : "";
 
         return (
           <div key={entry[labelKey]} className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="mb-2 flex items-center justify-between text-xs text-pos-muted">
-              <span>{entry[labelKey]}</span>
-              <span>{formatMoney(value)} EUR</span>
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="m-0 text-sm font-medium text-white">{formatLabel(entry[labelKey], entry)}</p>
+                {metaText ? <p className="m-0 mt-1 text-[11px] text-pos-muted">{metaText}</p> : null}
+              </div>
+              <span className="shrink-0 text-xs font-medium text-pos-text">
+                {formatValue(value, entry)}
+              </span>
             </div>
             <div className="h-2 rounded-full bg-white/10">
               <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${width}%` }} />
@@ -219,6 +276,7 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [categoryForm, setCategoryForm] = useState(defaultCategoryForm);
   const [editingWaiterId, setEditingWaiterId] = useState(null);
   const [waiterForm, setWaiterForm] = useState(defaultWaiterForm);
+  const [tableForm, setTableForm] = useState(defaultTableForm);
 
   const refreshAll = () => setRefreshTick((value) => value + 1);
 
@@ -251,43 +309,128 @@ export default function ManagerDashboard({ session, onLogout }) {
       setError("");
 
       try {
-        const [
-          nextStats,
-          nextTopProducts,
-          nextTrend,
-          nextWaiter,
-          nextOrders,
-          nextInvoices,
-          nextSummary,
-          nextLowStock,
-          nextAdvancedReport,
-          nextAlerts,
-          nextAuditTrail,
-          nextProducts,
-          nextCategories,
-          nextWaiters,
-          nextTables,
-        ] = await Promise.all([
-          getManagerStats(session.token, filters, controller.signal),
-          getTopProducts(session.token, controller.signal),
-          getRevenueTrend(session.token, { days: 7 }, controller.signal),
-          getWaiterPerformance(session.token, filters, controller.signal),
-          getDashboardOrders(session.token, { ...filters, limit: 120 }, controller.signal),
-          getDashboardInvoices(session.token, { ...filters, limit: 120 }, controller.signal),
-          getDailySummary(session.token, { date: filters.from }, controller.signal),
-          getLowStockProducts(session.token, { threshold: 5 }, controller.signal),
-          getAdvancedReport(session.token, filters, controller.signal),
-          getSystemAlerts(session.token, { status: "open", limit: 20 }, controller.signal),
-          getAuditLogs(session.token, { limit: 16 }, controller.signal),
-          getProducts(session.token, controller.signal),
-          getCategories(session.token, controller.signal),
-          getWaiters(session.token, controller.signal),
-          getTables(session.token, controller.signal),
-        ]);
+        const requests = [
+          {
+            key: "stats",
+            label: "dashboard stats",
+            load: () => getManagerStats(session.token, filters, controller.signal),
+          },
+          {
+            key: "topProducts",
+            label: "top products",
+            load: () => getTopProducts(session.token, controller.signal),
+          },
+          {
+            key: "revenueTrend",
+            label: "revenue trend",
+            load: () => getRevenueTrend(session.token, { days: 7 }, controller.signal),
+          },
+          {
+            key: "waiterPerformance",
+            label: "waiter ranking",
+            load: () => getWaiterPerformance(session.token, filters, controller.signal),
+          },
+          {
+            key: "orders",
+            label: "orders",
+            load: () =>
+              getDashboardOrders(session.token, { ...filters, limit: 120 }, controller.signal),
+          },
+          {
+            key: "invoices",
+            label: "invoices",
+            load: () =>
+              getDashboardInvoices(session.token, { ...filters, limit: 120 }, controller.signal),
+          },
+          {
+            key: "summary",
+            label: "daily summary",
+            load: () => getDailySummary(session.token, { date: filters.from }, controller.signal),
+          },
+          {
+            key: "lowStock",
+            label: "stock alerts",
+            load: () => getLowStockProducts(session.token, { threshold: 5 }, controller.signal),
+          },
+          {
+            key: "advancedReport",
+            label: "advanced report",
+            load: () => getAdvancedReport(session.token, filters, controller.signal),
+          },
+          {
+            key: "alerts",
+            label: "system alerts",
+            load: () =>
+              getSystemAlerts(session.token, { status: "open", limit: 20 }, controller.signal),
+          },
+          {
+            key: "auditTrail",
+            label: "audit trail",
+            load: () => getAuditLogs(session.token, { limit: 16 }, controller.signal),
+          },
+          {
+            key: "products",
+            label: "products",
+            load: () => getProducts(session.token, controller.signal),
+          },
+          {
+            key: "categories",
+            label: "categories",
+            load: () => getCategories(session.token, controller.signal),
+          },
+          {
+            key: "waiters",
+            label: "waiters",
+            load: () => getWaiters(session.token, controller.signal),
+          },
+          {
+            key: "tables",
+            label: "tables",
+            load: () => getTables(session.token, controller.signal),
+          },
+        ];
+        const results = await Promise.allSettled(requests.map((request) => request.load()));
 
         if (!mounted) {
           return;
         }
+
+        const authFailure = results.find(
+          (result) => result.status === "rejected" && isAuthError(result.reason)
+        );
+
+        if (authFailure) {
+          onLogout();
+          return;
+        }
+
+        const getResultValue = (key, fallbackValue) => {
+          const requestIndex = requests.findIndex((request) => request.key === key);
+          const result = results[requestIndex];
+          return result?.status === "fulfilled" ? result.value : fallbackValue;
+        };
+
+        const failedRequests = results
+          .map((result, index) => ({ result, request: requests[index] }))
+          .filter(
+            ({ result }) => result.status === "rejected" && !isAbortError(result.reason)
+          );
+
+        const nextStats = getResultValue("stats", null);
+        const nextTopProducts = getResultValue("topProducts", []);
+        const nextTrend = getResultValue("revenueTrend", []);
+        const nextWaiter = getResultValue("waiterPerformance", null);
+        const nextOrders = getResultValue("orders", null);
+        const nextInvoices = getResultValue("invoices", null);
+        const nextSummary = getResultValue("summary", null);
+        const nextLowStock = getResultValue("lowStock", { products: [], threshold: 5 });
+        const nextAdvancedReport = getResultValue("advancedReport", null);
+        const nextAlerts = getResultValue("alerts", { alerts: [], count: 0 });
+        const nextAuditTrail = getResultValue("auditTrail", { logs: [], count: 0 });
+        const nextProducts = getResultValue("products", []);
+        const nextCategories = getResultValue("categories", []);
+        const nextWaiters = getResultValue("waiters", []);
+        const nextTables = getResultValue("tables", []);
 
         setStats(nextStats || null);
         setTopProducts(ensureArray(nextTopProducts));
@@ -310,14 +453,26 @@ export default function ManagerDashboard({ session, onLogout }) {
         setCategories(ensureArray(nextCategories));
         setWaiters(ensureArray(nextWaiters));
         setTables(ensureArray(nextTables));
+
+        if (failedRequests.length) {
+          const visibleLabels = failedRequests
+            .slice(0, 3)
+            .map(({ request }) => request.label);
+          const extraCount = failedRequests.length - visibleLabels.length;
+          const suffix = extraCount > 0 ? ` and ${extraCount} more` : "";
+
+          setError(`Some manager data could not load: ${visibleLabels.join(", ")}${suffix}.`);
+        }
       } catch (requestError) {
-        if (!mounted || requestError.name === "AbortError") {
+        if (!mounted || isAbortError(requestError)) {
           return;
         }
-        if (requestError.status === 401 || requestError.status === 403) {
+
+        if (isAuthError(requestError)) {
           onLogout();
           return;
         }
+
         setError(requestError.message || "Failed to load manager data.");
       } finally {
         if (mounted) {
@@ -357,6 +512,16 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     return counts;
   }, [products]);
+
+  const editingCategoryProducts = useMemo(() => {
+    if (!editingCategoryId) {
+      return [];
+    }
+
+    return products
+      .filter((product) => product.categoryId === editingCategoryId)
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [editingCategoryId, products]);
 
   const currentDateLabel = useMemo(
     () =>
@@ -546,7 +711,10 @@ export default function ManagerDashboard({ session, onLogout }) {
     setEditingProductId(product.id);
     setProductForm({
       name: product.name || "",
-      categoryId: String(product.categoryId || ""),
+      categoryId:
+        product.categoryId === null || product.categoryId === undefined
+          ? "uncategorized"
+          : String(product.categoryId),
       price: String(product.price ?? ""),
       stock: String(product.stock ?? ""),
       imageUrl: product.imageUrl || "",
@@ -584,17 +752,27 @@ export default function ManagerDashboard({ session, onLogout }) {
     setWaiterForm(defaultWaiterForm);
   };
 
+  const resetTableForm = () => {
+    setTableForm(defaultTableForm);
+  };
+
   const onProductSubmit = async (event) => {
     event.preventDefault();
     const normalizedStock =
       productForm.stock === "" ? undefined : Number(productForm.stock);
+    const normalizedCategoryId =
+      productForm.categoryId === "uncategorized"
+        ? null
+        : productForm.categoryId === ""
+          ? undefined
+          : Number(productForm.categoryId);
     const payload = {
       name: productForm.name.trim(),
-      categoryId: Number(productForm.categoryId),
       price: Number(productForm.price),
       imageUrl: productForm.imageUrl || null,
       description: productForm.description || null,
       isAvailable: Boolean(productForm.isAvailable),
+      ...(normalizedCategoryId !== undefined ? { categoryId: normalizedCategoryId } : {}),
       ...(normalizedStock !== undefined ? { stock: normalizedStock } : {}),
     };
 
@@ -632,6 +810,39 @@ export default function ManagerDashboard({ session, onLogout }) {
     }, editingCategoryId ? "Category updated." : "Category created.");
   };
 
+  const handleDeleteCategory = async (category, productCount) => {
+    await runAction(async () => {
+      const response = await deleteCategory(session.token, category.id);
+      setCategories((current) => current.filter((entry) => entry.id !== category.id));
+      setProducts((current) =>
+        current.map((product) =>
+          product.categoryId === category.id
+            ? {
+                ...product,
+                categoryId: null,
+                category: null,
+              }
+            : product
+        )
+      );
+
+      if (editingCategoryId === category.id) {
+        resetCategoryForm();
+      }
+    }, productCount > 0 ? "Category deleted. Products moved to Uncategorized." : "Category deleted.");
+  };
+
+  const handleDeleteProduct = async (product) => {
+    await runAction(async () => {
+      await deleteProduct(session.token, product.id);
+      setProducts((current) => current.filter((entry) => entry.id !== product.id));
+
+      if (editingProductId === product.id) {
+        resetProductForm();
+      }
+    }, "Product deleted.");
+  };
+
   const onWaiterSubmit = async (event) => {
     event.preventDefault();
 
@@ -656,6 +867,24 @@ export default function ManagerDashboard({ session, onLogout }) {
     }, editingWaiterId ? "Waiter updated." : "Waiter created.");
   };
 
+  const onTableSubmit = async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      number: Number(tableForm.number),
+      capacity: Number(tableForm.capacity),
+      location: tableForm.location.trim(),
+    };
+
+    await runAction(async () => {
+      const createdTable = await createTable(session.token, payload);
+      setTables((current) =>
+        [...current, createdTable].sort((left, right) => left.number - right.number)
+      );
+      resetTableForm();
+    }, "Table created.");
+  };
+
   const saveWaiterTableAssignments = async () => {
     if (!selectedWaiterForTables) {
       setError("Select a waiter first.");
@@ -677,6 +906,46 @@ export default function ManagerDashboard({ session, onLogout }) {
       () => assignTableToWaiter(session.token, tableId, waiterId),
       waiterId ? "Table assigned." : "Table unassigned."
     );
+  };
+
+  const handleDeleteWaiter = async (waiter) => {
+    if (!window.confirm(`Delete waiter ${waiter.fullName}?`)) {
+      return;
+    }
+
+    await runAction(async () => {
+      const response = await deleteWaiter(session.token, waiter.id);
+
+      setWaiters((current) => current.filter((entry) => entry.id !== waiter.id));
+      setTables((current) =>
+        current.map((table) =>
+          table.assignedWaiterId === waiter.id
+            ? {
+                ...table,
+                assignedWaiterId: null,
+                assignedWaiter: null,
+              }
+            : table
+        )
+      );
+
+      setSelectedWaiterForTables((current) => (current === waiter.id ? null : current));
+      setAssignedTableIds((current) =>
+        current.filter(
+          (tableId) => !response?.unassignedTableIds || !response.unassignedTableIds.includes(tableId)
+        )
+      );
+      resetWaiterForm();
+    }, "Waiter deleted.");
+  };
+
+  const handleDeleteTable = async (table) => {
+    await runAction(async () => {
+      await deleteTable(session.token, table.id);
+      setTables((current) => current.filter((entry) => entry.id !== table.id));
+      setAssignedTableIds((current) => current.filter((tableId) => tableId !== table.id));
+      setSelectedQrTableId((current) => (current === table.id ? null : current));
+    }, `Table ${table.number} removed.`);
   };
 
   const handleDownloadReportCsv = async () => {
@@ -879,6 +1148,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                     labelKey="date"
                     valueKey="revenue"
                     colorClass="bg-sky-400"
+                    formatLabel={formatShortDay}
+                    getMetaText={(entry) =>
+                      `${entry.orders || 0} paid order${Number(entry.orders || 0) === 1 ? "" : "s"}`
+                    }
                   />
                 </article>
 
@@ -890,6 +1163,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                     labelKey="waiterName"
                     valueKey="totalSales"
                     colorClass="bg-emerald-400"
+                    getMetaText={(entry) =>
+                      `${entry.ordersHandled || 0} order${Number(entry.ordersHandled || 0) === 1 ? "" : "s"}`
+                    }
                   />
                 </article>
 
@@ -1035,7 +1311,6 @@ export default function ManagerDashboard({ session, onLogout }) {
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   />
                   <select
-                    required
                     value={productForm.categoryId}
                     onChange={(event) =>
                       setProductForm((current) => ({ ...current, categoryId: event.target.value }))
@@ -1043,6 +1318,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   >
                     <option value="">Select category</option>
+                    <option value="uncategorized">Uncategorized</option>
                     {categories.map((category) => (
                       <option key={category.id} value={category.id}>
                         {category.name}
@@ -1063,10 +1339,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
                     <input
+                      required
                       type="number"
                       min="0"
                       step="1"
-                      placeholder="Stock (optional)"
+                      placeholder="Stock"
                       value={productForm.stock}
                       onChange={(event) =>
                         setProductForm((current) => ({ ...current, stock: event.target.value }))
@@ -1218,15 +1495,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <button
                                 className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
                                 type="button"
-                                onClick={() => {
-                                  if (!window.confirm(`Delete ${product.name}?`)) {
-                                    return;
-                                  }
-                                  runAction(
-                                    () => deleteProduct(session.token, product.id),
-                                    "Product deleted."
-                                  );
-                                }}
+                                disabled={isSaving}
+                                onClick={() => handleDeleteProduct(product)}
                               >
                                 Delete
                               </button>
@@ -1266,6 +1536,51 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </button>
                   </div>
                 </form>
+
+                {editingCategoryId ? (
+                  <div className="mt-4 rounded-xl border border-white/10 bg-black/10 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                        Category Products
+                      </p>
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-pos-text">
+                        {editingCategoryProducts.length}
+                      </span>
+                    </div>
+
+                    {editingCategoryProducts.length === 0 ? (
+                      <p className="m-0 mt-3 text-sm text-pos-muted">
+                        No products in this category yet.
+                      </p>
+                    ) : (
+                      <div className="scroll-y mt-3 max-h-[240px] space-y-2 overflow-y-auto pr-1">
+                        {editingCategoryProducts.map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                            onClick={() => {
+                              setActiveSection("products");
+                              beginEditProduct(product);
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <p className="m-0 truncate text-sm font-semibold text-white">
+                                {product.name}
+                              </p>
+                              <p className="m-0 mt-1 text-xs text-pos-muted">
+                                {formatMoney(product.price)} EUR | Stock {product.stock}
+                              </p>
+                            </div>
+                            <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
+                              Edit Product
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </article>
 
               <article className="pos-panel min-h-0 rounded-xl p-4">
@@ -1295,6 +1610,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <td className="px-3 py-2 text-white">{category.name}</td>
                               <td className="px-3 py-2 text-pos-muted">
                                 {count > 0 ? `${count} product${count > 1 ? "s" : ""}` : "Empty"}
+                                {count > 0 ? (
+                                  <div className="mt-1 text-[11px] text-orange-200/85">
+                                    Products will move to Uncategorized
+                                  </div>
+                                ) : null}
                               </td>
                               <td className="px-3 py-2 text-right">
                                 <div className="inline-flex gap-2">
@@ -1313,22 +1633,14 @@ export default function ManagerDashboard({ session, onLogout }) {
                                     Edit
                                   </button>
                                   <button
-                                    className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
+                                    className={`rounded-lg px-2 py-1 text-xs ${
+                                      isSaving
+                                        ? "cursor-not-allowed border border-white/10 bg-white/5 text-pos-muted opacity-70"
+                                        : "border border-red-300/40 bg-red-500/15 text-red-200 hover:bg-red-500/25"
+                                    }`}
                                     type="button"
-                                    onClick={() => {
-                                      if (!window.confirm(`Delete category ${category.name}?`)) {
-                                        return;
-                                      }
-                                      runAction(
-                                        async () => {
-                                          await deleteCategory(session.token, category.id);
-                                          setCategories((current) =>
-                                            current.filter((entry) => entry.id !== category.id)
-                                          );
-                                        },
-                                        "Category deleted."
-                                      );
-                                    }}
+                                    disabled={isSaving}
+                                    onClick={() => handleDeleteCategory(category, count)}
                                   >
                                     Delete
                                   </button>
@@ -1467,63 +1779,184 @@ export default function ManagerDashboard({ session, onLogout }) {
 
           {activeSection === "employees" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[340px_1fr]">
-              <article className="pos-panel rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">
-                  {editingWaiterId ? "Edit Waiter" : "Add Waiter"}
-                </h3>
-                <p className="mt-2 text-xs text-pos-muted">
-                  Essential fields only: waiter name + PIN.
-                </p>
-                <form className="mt-3 grid gap-2" onSubmit={onWaiterSubmit}>
-                  <input
-                    required
-                    placeholder="Waiter name"
-                    value={waiterForm.fullName}
-                    onChange={(event) =>
-                      setWaiterForm((current) => ({ ...current, fullName: event.target.value }))
-                    }
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
-                  <input
-                    required={!editingWaiterId}
-                    placeholder={
-                      editingWaiterId
-                        ? "New PIN (optional)"
-                        : "PIN (4 digits)"
-                    }
-                    value={waiterForm.pin}
-                    onChange={(event) =>
-                      setWaiterForm((current) => ({
-                        ...current,
-                        pin: event.target.value.replace(/\D/g, "").slice(0, 4),
-                      }))
-                    }
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
-                  <select
-                    value={waiterForm.status}
-                    onChange={(event) =>
-                      setWaiterForm((current) => ({ ...current, status: event.target.value }))
-                    }
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  >
-                    <option value="active">active</option>
-                    <option value="inactive">inactive</option>
-                  </select>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
-                      {editingWaiterId ? "Update Waiter" : "Add Waiter"}
-                    </button>
-                    <button
-                      className="pos-button pos-button-muted"
-                      type="button"
-                      onClick={resetWaiterForm}
+              <div className="grid min-h-0 grid-cols-1 gap-4">
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    {editingWaiterId ? "Edit Waiter" : "Add Waiter"}
+                  </h3>
+                  <p className="mt-2 text-xs text-pos-muted">
+                    Essential fields only: waiter name + PIN.
+                  </p>
+                  <form className="mt-3 grid gap-2" onSubmit={onWaiterSubmit}>
+                    <input
+                      required
+                      placeholder="Waiter name"
+                      value={waiterForm.fullName}
+                      onChange={(event) =>
+                        setWaiterForm((current) => ({ ...current, fullName: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <input
+                      required={!editingWaiterId}
+                      placeholder={
+                        editingWaiterId ? "New PIN (optional)" : "PIN (4 digits)"
+                      }
+                      value={waiterForm.pin}
+                      onChange={(event) =>
+                        setWaiterForm((current) => ({
+                          ...current,
+                          pin: event.target.value.replace(/\D/g, "").slice(0, 4),
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <select
+                      value={waiterForm.status}
+                      onChange={(event) =>
+                        setWaiterForm((current) => ({ ...current, status: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     >
-                      Clear
-                    </button>
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="pos-button pos-button-primary"
+                        type="submit"
+                        disabled={isSaving}
+                      >
+                        {editingWaiterId ? "Update Waiter" : "Add Waiter"}
+                      </button>
+                      <button
+                        className="pos-button pos-button-muted"
+                        type="button"
+                        onClick={resetWaiterForm}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Table Management</h3>
+                  <p className="mt-2 text-xs text-pos-muted">
+                    Add new tables and remove old ones from the same place.
+                  </p>
+                  <form className="mt-3 grid gap-2" onSubmit={onTableSubmit}>
+                    <input
+                      required
+                      min="1"
+                      type="number"
+                      placeholder="Table number"
+                      value={tableForm.number}
+                      onChange={(event) =>
+                        setTableForm((current) => ({ ...current, number: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <input
+                      required
+                      min="1"
+                      type="number"
+                      placeholder="Capacity"
+                      value={tableForm.capacity}
+                      onChange={(event) =>
+                        setTableForm((current) => ({ ...current, capacity: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <input
+                      required
+                      placeholder="Location"
+                      value={tableForm.location}
+                      onChange={(event) =>
+                        setTableForm((current) => ({ ...current, location: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="pos-button pos-button-primary"
+                        type="submit"
+                        disabled={isSaving}
+                      >
+                        Add Table
+                      </button>
+                      <button
+                        className="pos-button pos-button-muted"
+                        type="button"
+                        onClick={resetTableForm}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="mt-4 rounded-xl border border-white/10">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-3">
+                      <div>
+                        <h4 className="m-0 text-sm font-semibold text-white">Existing Tables</h4>
+                        <p className="m-0 mt-1 text-[11px] text-pos-muted">
+                          Delete a table here when you no longer need it.
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2 py-1 text-xs text-pos-muted">
+                        {tables.length} total
+                      </span>
+                    </div>
+
+                    <div className="scroll-y max-h-[28vh] overflow-y-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                          <tr>
+                            <th className="px-3 py-2">Table</th>
+                            <th className="px-3 py-2">Cap.</th>
+                            <th className="px-3 py-2">Waiter</th>
+                            <th className="px-3 py-2 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tables.length === 0 ? (
+                            <tr className="border-t border-white/10">
+                              <td className="px-3 py-6 text-pos-muted" colSpan={4}>
+                                No tables yet. Add your first table.
+                              </td>
+                            </tr>
+                          ) : (
+                            tables
+                              .slice()
+                              .sort((left, right) => left.number - right.number)
+                              .map((table) => (
+                                <tr
+                                  key={`manage-table-inline-${table.id}`}
+                                  className="border-t border-white/10"
+                                >
+                                  <td className="px-3 py-2 text-white">Table {table.number}</td>
+                                  <td className="px-3 py-2 text-pos-muted">{table.capacity}</td>
+                                  <td className="px-3 py-2 text-pos-muted">
+                                    {table.assignedWaiter?.fullName || "Unassigned"}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    <button
+                                      className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
+                                      type="button"
+                                      onClick={() => handleDeleteTable(table)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </form>
-              </article>
+                </article>
+              </div>
 
               <div className="grid min-h-0 grid-cols-1 gap-4">
                 <article className="pos-panel min-h-0 rounded-xl p-4">
@@ -1604,16 +2037,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   <button
                                     className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
                                     type="button"
-                                    onClick={() => {
-                                      if (!window.confirm(`Delete waiter ${waiter.fullName}?`)) {
-                                        return;
-                                      }
-
-                                      runAction(
-                                        () => deleteWaiter(session.token, waiter.id),
-                                        "Waiter deleted."
-                                      );
-                                    }}
+                                    onClick={() => handleDeleteWaiter(waiter)}
                                   >
                                     Delete
                                   </button>
@@ -2029,6 +2453,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                   labelKey="month"
                   valueKey="revenue"
                   colorClass="bg-amber-400"
+                  formatLabel={formatMonthLabel}
+                  getMetaText={(entry) =>
+                    `${entry.orders || 0} paid order${Number(entry.orders || 0) === 1 ? "" : "s"}`
+                  }
                 />
               </article>
 
@@ -2042,6 +2470,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                   labelKey="productName"
                   valueKey="revenue"
                   colorClass="bg-cyan-400"
+                  getMetaText={(entry) =>
+                    `${entry.categoryName || "Uncategorized"} | ${entry.quantitySold || 0} sold`
+                  }
                 />
               </article>
 
@@ -2055,6 +2486,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                   labelKey="employeeName"
                   valueKey="totalSales"
                   colorClass="bg-emerald-400"
+                  getMetaText={(entry) =>
+                    `${entry.ordersHandled || 0} order${Number(entry.ordersHandled || 0) === 1 ? "" : "s"} handled`
+                  }
                 />
               </article>
               </section>

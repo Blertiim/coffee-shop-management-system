@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const { randomBytes } = require("crypto");
 
 const prisma = require("../../config/prisma");
+const { syncProductStockAlert } = require("../../services/alert.service");
 const { publishRealtimeEvent } = require("../../services/realtime.service");
 const AppError = require("../../utils/app-error");
 const { getReachableAppBaseUrl } = require("../../utils/network");
@@ -10,6 +11,7 @@ const { handleControllerError, sendSuccess } = require("../../utils/response");
 const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
 const EDITABLE_ORDER_STATUSES = ["pending", "preparing", "served"];
 const GUEST_USER_EMAIL = "guest.orders@system.local";
+const ARCHIVED_TABLE_STATUS = "archived";
 
 const parseTableId = (value) => {
   const id = Number(value);
@@ -97,6 +99,10 @@ const ensureTableAccess = async (token) => {
     throw new AppError("QR access token is invalid or expired", 404);
   }
 
+  if (access.table?.status === ARCHIVED_TABLE_STATUS) {
+    throw new AppError("Table not found", 404);
+  }
+
   return access;
 };
 
@@ -153,6 +159,12 @@ const deductStockForOrderItems = async (tx, orderItems) => {
     if (updated.count === 0) {
       throw new AppError("Stock changed while saving the guest order. Please retry.");
     }
+
+    const product = await tx.product.findUnique({
+      where: { id: item.productId },
+    });
+
+    await syncProductStockAlert(product, undefined, tx);
   }
 };
 
@@ -192,7 +204,7 @@ exports.getTableGuestAccess = async (req, res) => {
       where: { id: tableId },
     });
 
-    if (!table) {
+    if (!table || table.status === ARCHIVED_TABLE_STATUS) {
       throw new AppError("Table not found", 404);
     }
 
@@ -225,7 +237,7 @@ exports.rotateTableGuestAccess = async (req, res) => {
       where: { id: tableId },
     });
 
-    if (!table) {
+    if (!table || table.status === ARCHIVED_TABLE_STATUS) {
       throw new AppError("Table not found", 404);
     }
 
@@ -267,6 +279,7 @@ exports.getGuestMenu = async (req, res) => {
       }),
       prisma.product.findMany({
         where: {
+          deletedAt: null,
           isAvailable: true,
           stock: {
             gt: 0,

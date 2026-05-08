@@ -91,6 +91,7 @@ const createInitialState = () => {
     notice: null,
     guestOrderAlert: null,
     highlightedGuestTableId: null,
+    dismissedGuestOrderEventId: null,
   };
 };
 
@@ -105,6 +106,7 @@ const reducer = (state, action) => {
         notice: null,
         guestOrderAlert: null,
         highlightedGuestTableId: null,
+        dismissedGuestOrderEventId: null,
       };
 
     case "LOGOUT":
@@ -116,6 +118,7 @@ const reducer = (state, action) => {
         notice: null,
         guestOrderAlert: null,
         highlightedGuestTableId: null,
+        dismissedGuestOrderEventId: null,
       };
 
     case "SELECT_TABLE":
@@ -160,11 +163,27 @@ const reducer = (state, action) => {
     case "GUEST_ORDER_RECEIVED": {
       const nextAlert = buildGuestOrderAlert(action.payload);
 
+      if (!nextAlert) {
+        return state;
+      }
+
+      if (
+        state.dismissedGuestOrderEventId &&
+        state.dismissedGuestOrderEventId === nextAlert.eventId
+      ) {
+        return {
+          ...state,
+          highlightedGuestTableId: nextAlert.tableId || state.highlightedGuestTableId,
+          tablesRefreshToken: state.tablesRefreshToken + 1,
+        };
+      }
+
       return {
         ...state,
         guestOrderAlert: nextAlert,
         highlightedGuestTableId: nextAlert?.tableId || null,
         tablesRefreshToken: state.tablesRefreshToken + 1,
+        dismissedGuestOrderEventId: null,
       };
     }
 
@@ -172,6 +191,8 @@ const reducer = (state, action) => {
       return {
         ...state,
         guestOrderAlert: null,
+        dismissedGuestOrderEventId:
+          state.guestOrderAlert?.eventId || state.dismissedGuestOrderEventId || null,
       };
 
     default:
@@ -291,6 +312,13 @@ export function PosAppProvider({ children }) {
     dispatch({ type: "DISMISS_GUEST_ORDER_ALERT" });
   }, []);
 
+  const receiveGuestOrderAlert = useCallback((payload) => {
+    dispatch({
+      type: "GUEST_ORDER_RECEIVED",
+      payload,
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       ...state,
@@ -301,12 +329,14 @@ export function PosAppProvider({ children }) {
       showNotice,
       dismissNotice,
       dismissGuestOrderAlert,
+      receiveGuestOrderAlert,
     }),
     [
       dismissGuestOrderAlert,
       dismissNotice,
       loginSuccess,
       logout,
+      receiveGuestOrderAlert,
       returnToTables,
       selectTable,
       showNotice,

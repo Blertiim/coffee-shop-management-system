@@ -15,6 +15,10 @@ const {
   validateUpdateTablePayload,
 } = require("./table.validation");
 
+const ARCHIVED_TABLE_STATUS = "archived";
+const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
+const GUEST_USER_EMAIL = "guest.orders@system.local";
+
 const tableInclude = {
   assignedWaiter: {
     select: {
@@ -24,6 +28,72 @@ const tableInclude = {
       status: true,
     },
   },
+  orders: {
+    where: {
+      status: {
+        in: ACTIVE_ORDER_STATUSES,
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    take: 1,
+    select: {
+      id: true,
+      total: true,
+      status: true,
+      paymentMethod: true,
+      createdAt: true,
+      updatedAt: true,
+      user: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+        },
+      },
+      items: {
+        select: {
+          quantity: true,
+        },
+      },
+    },
+  },
+};
+
+const isGuestOriginOrder = (order) => {
+  if (!order) {
+    return false;
+  }
+
+  return (
+    normalizeRole(order.user?.role) === "guest" ||
+    String(order.user?.email || "").trim().toLowerCase() === GUEST_USER_EMAIL ||
+    String(order.paymentMethod || "").trim().toLowerCase() === "guest_qr"
+  );
+};
+
+const mapTable = (table) => {
+  const activeOrder = Array.isArray(table?.orders) ? table.orders[0] : null;
+  const itemCount = Array.isArray(activeOrder?.items)
+    ? activeOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+    : 0;
+
+  return {
+    ...table,
+    activeGuestOrder: isGuestOriginOrder(activeOrder)
+      ? {
+          orderId: activeOrder.id,
+          total: Number(activeOrder.total || 0),
+          status: activeOrder.status,
+          itemCount,
+          createdAt: activeOrder.createdAt,
+          updatedAt: activeOrder.updatedAt,
+        }
+      : null,
+    orders: undefined,
+  };
 };
 
 const ensureWaiterUser = async (tx, waiterId) => {
@@ -56,14 +126,23 @@ exports.getAllTables = async (req, res) => {
     const userId = req.user && req.user.id;
     const userRole = normalizeRole(req.user && req.user.role);
 
-    let where = {};
+    let where = {
+      status: {
+        not: ARCHIVED_TABLE_STATUS,
+      },
+    };
 
     if (userRole === "waiter") {
       if (!userId) {
         return sendSuccess(res, 200, "Tables retrieved successfully", []);
       }
 
-      where = { assignedWaiterId: userId };
+      where = {
+        assignedWaiterId: userId,
+        status: {
+          not: ARCHIVED_TABLE_STATUS,
+        },
+      };
     }
 
     const tables = await prisma.table.findMany({
@@ -72,7 +151,12 @@ exports.getAllTables = async (req, res) => {
       orderBy: { number: "asc" },
     });
 
-    return sendSuccess(res, 200, "Tables retrieved successfully", tables);
+    return sendSuccess(
+      res,
+      200,
+      "Tables retrieved successfully",
+      tables.map(mapTable)
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get all tables error");
   }
@@ -87,11 +171,11 @@ exports.getTableById = async (req, res) => {
       include: tableInclude,
     });
 
-    if (!table) {
+    if (!table || table.status === ARCHIVED_TABLE_STATUS) {
       return sendError(res, 404, "Table not found");
     }
 
-    return sendSuccess(res, 200, "Table retrieved successfully", table);
+    return sendSuccess(res, 200, "Table retrieved successfully", mapTable(table));
   } catch (error) {
     return handleControllerError(res, error, "Get table by id error");
   }
@@ -223,7 +307,7 @@ exports.deleteTable = async (req, res) => {
       where: { id },
     });
 
-    if (!existingTable) {
+    if (!existingTable || existingTable.status === ARCHIVED_TABLE_STATUS) {
       return res.status(404).json({
         success: false,
         message: "Table not found",
@@ -231,11 +315,60 @@ exports.deleteTable = async (req, res) => {
       });
     }
 
-    await prisma.table.delete({
-      where: { id },
+    const relationSummary = await prisma.$transaction(async (tx) => {
+      const [orderCount, reservationCount] = await Promise.all([
+        tx.order.count({
+          where: {
+            tableId: id,
+          },
+        }),
+        tx.reservation.count({
+          where: {
+            tableId: id,
+          },
+        }),
+      ]);
+
+      if (orderCount === 0 && reservationCount === 0) {
+        await tx.table.delete({
+          where: { id },
+        });
+
+        return {
+          archived: false,
+        };
+      }
+
+      await tx.tableAccessToken.updateMany({
+        where: {
+          tableId: id,
+        },
+        data: {
+          status: "revoked",
+        },
+      });
+
+      await tx.table.update({
+        where: { id },
+        data: {
+          status: ARCHIVED_TABLE_STATUS,
+          assignedWaiterId: null,
+        },
+      });
+
+      return {
+        archived: true,
+      };
     });
 
-    return sendSuccess(res, 200, "Table deleted successfully", null);
+    return sendSuccess(
+      res,
+      200,
+      relationSummary.archived
+        ? "Table archived successfully"
+        : "Table deleted successfully",
+      relationSummary
+    );
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

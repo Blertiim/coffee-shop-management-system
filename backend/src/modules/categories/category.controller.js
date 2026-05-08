@@ -148,24 +148,35 @@ exports.deleteCategory = async (req, res) => {
       return res.status(404).json({ error: "Category not found" });
     }
 
-    await prisma.category.delete({
-      where: { id },
+    const result = await prisma.$transaction(async (tx) => {
+      const affectedProducts = await tx.product.findMany({
+        where: { categoryId: id },
+        select: { id: true },
+      });
+
+      if (affectedProducts.length > 0) {
+        await tx.product.updateMany({
+          where: { categoryId: id },
+          data: { categoryId: null },
+        });
+      }
+
+      await tx.category.delete({
+        where: { id },
+      });
+
+      return {
+        uncategorizedProductIds: affectedProducts.map((product) => product.id),
+        uncategorizedCount: affectedProducts.length,
+      };
     });
 
     res.status(200).json({
       message: "Category deleted successfully",
+      data: result,
     });
   } catch (error) {
     console.error("Delete category error:", error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return res.status(400).json({
-        error: "Cannot delete category with associated products",
-      });
-    }
 
     res.status(500).json({ error: "Server error" });
   }

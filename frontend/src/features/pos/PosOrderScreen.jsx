@@ -19,6 +19,7 @@ import {
   getProducts,
   getTables,
   transferOrderToTable,
+  updateOrderDiscount,
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
 const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
@@ -30,6 +31,7 @@ const TRANSFERABLE_ORDER_STATUSES = new Set([
 ]);
 const TABLES_PATH = "/tables";
 const REALTIME_MENU_CHANNELS = ["categories", "products", "inventory"];
+const MAX_SPLIT_PARTS = 12;
 
 const buildRealtimeStreamUrl = (token, channels = []) => {
   const params = new URLSearchParams();
@@ -81,6 +83,55 @@ const replacePathname = (pathname) => {
 };
 
 const getDisplayTableId = (table) => table?.visualId || table?.number || "-";
+
+const normalizeOrderSubtotal = (order) =>
+  Number(
+    (
+      order?.subtotal ??
+      (Number(order?.total || 0) + Number(order?.discountAmount || 0))
+    ).toFixed(2)
+  );
+
+const buildDiscountConfig = (source = null) => ({
+  discountType: source?.discountType || null,
+  discountValue:
+    source?.discountValue !== undefined && source?.discountValue !== null
+      ? Number(source.discountValue)
+      : null,
+});
+
+const calculateDiscountAmount = (subtotal, discountType, discountValue) => {
+  const normalizedSubtotal = Number(subtotal || 0);
+  const normalizedValue = Number(discountValue || 0);
+
+  if (!discountType || normalizedSubtotal <= 0 || normalizedValue <= 0) {
+    return 0;
+  }
+
+  if (discountType === "percent") {
+    return Number(((normalizedSubtotal * normalizedValue) / 100).toFixed(2));
+  }
+
+  return Number(Math.min(normalizedValue, normalizedSubtotal).toFixed(2));
+};
+
+const buildSplitShares = (total, count) => {
+  const normalizedTotal = Number(total || 0);
+  const normalizedCount = Math.max(2, Math.min(MAX_SPLIT_PARTS, Number(count) || 2));
+  const totalCents = Math.max(0, Math.round(normalizedTotal * 100));
+  const baseShareCents = Math.floor(totalCents / normalizedCount);
+  const remainderCents = totalCents % normalizedCount;
+
+  return Array.from({ length: normalizedCount }, (_, index) => {
+    const shareCents = baseShareCents + (index < remainderCents ? 1 : 0);
+
+    return {
+      key: `split-share-${index + 1}`,
+      label: `Guest ${index + 1}`,
+      amount: Number((shareCents / 100).toFixed(2)),
+    };
+  });
+};
 
 const getUiStatusLabel = (status) => {
   const normalized = normalizeStatus(status);
@@ -178,7 +229,17 @@ export default function PosOrderScreen() {
   const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
   const [selectedCartProductId, setSelectedCartProductId] = useState(null);
   const [isToGo, setIsToGo] = useState(false);
-  const [hasDiscountRequest, setHasDiscountRequest] = useState(false);
+  const [pendingDiscount, setPendingDiscount] = useState(() =>
+    buildDiscountConfig(table?.activeOrder)
+  );
+  const [isDiscountDialogOpen, setIsDiscountDialogOpen] = useState(false);
+  const [discountForm, setDiscountForm] = useState({
+    discountType: "percent",
+    discountValue: "",
+  });
+  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false);
+  const [isSplitDialogOpen, setIsSplitDialogOpen] = useState(false);
+  const [splitCount, setSplitCount] = useState(2);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [isCompletingPayment, setIsCompletingPayment] = useState(false);
@@ -201,7 +262,9 @@ export default function PosOrderScreen() {
     setCurrentOrder(table?.activeOrder || null);
     setSelectedCartProductId(null);
     setIsToGo(false);
-    setHasDiscountRequest(false);
+    setPendingDiscount(buildDiscountConfig(table?.activeOrder));
+    setIsDiscountDialogOpen(false);
+    setIsSplitDialogOpen(false);
     setIsTransferDialogOpen(false);
     setSelectedTransferTableId(null);
     setSubmitError("");
@@ -279,43 +342,6 @@ export default function PosOrderScreen() {
     };
   }, [guestOrderAlert, logout, session.token, showNotice, table]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !session?.token) {
-      return undefined;
-    }
-
-    const source = new EventSource(
-      buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS)
-    );
-
-    const handleUpdate = (event) => {
-      try {
-        const payload = JSON.parse(event.data || "{}");
-        const route = String(payload.route || "").toLowerCase();
-
-        if (
-          payload.type !== "resource.changed" ||
-          (!route.includes("/categories") &&
-            !route.includes("/products") &&
-            !route.includes("/inventory"))
-        ) {
-          return;
-        }
-
-        reloadMenu();
-      } catch (error) {
-        console.error("Failed to process realtime menu update:", error);
-      }
-    };
-
-    source.addEventListener("update", handleUpdate);
-
-    return () => {
-      source.removeEventListener("update", handleUpdate);
-      source.close();
-    };
-  }, [reloadMenu, session?.token]);
-
   const handleReturnToTables = useCallback(
     (options = {}) => {
       replacePathname(TABLES_PATH);
@@ -371,6 +397,43 @@ export default function PosOrderScreen() {
     onUnauthorized: logout,
   });
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !session?.token) {
+      return undefined;
+    }
+
+    const source = new EventSource(
+      buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS)
+    );
+
+    const handleUpdate = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        const route = String(payload.route || "").toLowerCase();
+
+        if (
+          payload.type !== "resource.changed" ||
+          (!route.includes("/categories") &&
+            !route.includes("/products") &&
+            !route.includes("/inventory"))
+        ) {
+          return;
+        }
+
+        reloadMenu();
+      } catch (error) {
+        console.error("Failed to process realtime menu update:", error);
+      }
+    };
+
+    source.addEventListener("update", handleUpdate);
+
+    return () => {
+      source.removeEventListener("update", handleUpdate);
+      source.close();
+    };
+  }, [reloadMenu, session?.token]);
+
   const loadTransferTables = useCallback(
     async (signal) => getTables(session.token, signal),
     [session.token]
@@ -394,10 +457,10 @@ export default function PosOrderScreen() {
   const employeeId =
     session.staffProfile?.employeeId || session.user?.employee?.id || null;
   const waiterName = session.staffProfile?.name || session.user?.fullName || "Waiter";
-  const orderableProducts = useMemo(
+  const availableProducts = useMemo(
     () =>
       products
-        .filter((product) => product.isAvailable && product.stock > 0)
+        .filter((product) => product.isAvailable)
         .sort((left, right) => left.name.localeCompare(right.name)),
     [products]
   );
@@ -405,21 +468,20 @@ export default function PosOrderScreen() {
   const categoryCounts = useMemo(() => {
     const counts = new Map();
 
-    orderableProducts.forEach((product) => {
+    availableProducts.forEach((product) => {
       const key = String(product.categoryId);
       counts.set(key, (counts.get(key) || 0) + 1);
     });
 
     return counts;
-  }, [orderableProducts]);
+  }, [availableProducts]);
 
   const menuCategories = useMemo(
     () =>
       backendCategories
-        .filter((category) => categoryCounts.has(String(category.id)))
         .filter((category) => !isHiddenPosCategory(category.name))
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [backendCategories, categoryCounts]
+    [backendCategories]
   );
 
   useEffect(() => {
@@ -469,6 +531,7 @@ export default function PosOrderScreen() {
   const canDownloadInvoice =
     hasActiveOrder && (orderStatus === "pending_payment" || orderStatus === "paid");
   const isBusy =
+    isApplyingDiscount ||
     isSavingOrder ||
     isGeneratingInvoice ||
     isCompletingPayment ||
@@ -498,7 +561,7 @@ export default function PosOrderScreen() {
       menuCategories.map((category) => String(category.id))
     );
 
-    return orderableProducts.filter((product) => {
+    return availableProducts.filter((product) => {
       const productCategoryId = String(product.categoryId);
 
       if (!allowedCategoryIds.has(productCategoryId)) {
@@ -511,7 +574,7 @@ export default function PosOrderScreen() {
 
       return productCategoryId === selectedCategoryId;
     });
-  }, [menuCategories, orderableProducts, selectedCategoryId]);
+  }, [menuCategories, availableProducts, selectedCategoryId]);
 
   const ticketItems = useMemo(
     () => buildTicketSummaryItems(Array.isArray(currentOrder?.items) ? currentOrder.items : []),
@@ -528,10 +591,30 @@ export default function PosOrderScreen() {
     categoryRailItems.length > 0
       ? "Tap a category once, then hit products as fast as the guest calls them."
       : "No ready-to-order products are available right now.";
-  const projectedTotal = Number(((currentOrder?.total || 0) + total).toFixed(2));
+  const activeDiscountConfig = hasActiveOrder
+    ? buildDiscountConfig(currentOrder)
+    : pendingDiscount;
+  const currentSubtotal = hasActiveOrder ? normalizeOrderSubtotal(currentOrder) : 0;
+  const projectedSubtotal = Number((currentSubtotal + total).toFixed(2));
+  const projectedDiscountAmount = calculateDiscountAmount(
+    projectedSubtotal,
+    activeDiscountConfig.discountType,
+    activeDiscountConfig.discountValue
+  );
+  const projectedTotal = Number(Math.max(projectedSubtotal - projectedDiscountAmount, 0).toFixed(2));
   const serviceLabel = isToGo ? "To Go" : "Table Service";
   const selectedCartItem =
     cart.find((item) => item.productId === selectedCartProductId) || null;
+  const hasAppliedDiscount = projectedDiscountAmount > 0;
+  const discountSummaryLabel = hasAppliedDiscount
+    ? activeDiscountConfig.discountType === "percent"
+      ? `${formatPrice(activeDiscountConfig.discountValue)}% discount`
+      : `${formatPrice(activeDiscountConfig.discountValue)} EUR discount`
+    : "No discount";
+  const splitShares = useMemo(
+    () => buildSplitShares(Number(currentOrder?.total || 0), splitCount),
+    [currentOrder?.total, splitCount]
+  );
   const flowHint = getFlowHint({
     canCompletePayment,
     canGenerateInvoice,
@@ -575,10 +658,17 @@ export default function PosOrderScreen() {
       : await createOrder(session.token, {
           tableId: table.id,
           items: payloadItems,
+          ...(pendingDiscount.discountType
+            ? {
+                discountType: pendingDiscount.discountType,
+                discountValue: pendingDiscount.discountValue,
+              }
+            : {}),
           ...(employeeId ? { employeeId } : {}),
         });
 
     setCurrentOrder(order);
+    setPendingDiscount(buildDiscountConfig(order));
     clearCart();
     return order;
   };
@@ -733,19 +823,111 @@ export default function PosOrderScreen() {
     setSubmitError("");
   };
 
-  const handleDiscountToggle = () => {
-    setHasDiscountRequest((current) => {
-      const next = !current;
-
-      showNotice({
-        type: "info",
-        message: next
-          ? "Discount or coupon flagged for checkout review."
-          : "Discount or coupon flag cleared.",
-      });
-
-      return next;
+  const handleOpenDiscountDialog = () => {
+    setDiscountForm({
+      discountType: activeDiscountConfig.discountType || "percent",
+      discountValue:
+        activeDiscountConfig.discountValue !== null &&
+        activeDiscountConfig.discountValue !== undefined
+          ? String(activeDiscountConfig.discountValue)
+          : "",
     });
+    setIsDiscountDialogOpen(true);
+    setSubmitError("");
+  };
+
+  const handleApplyDiscount = async () => {
+    const discountType = String(discountForm.discountType || "").trim().toLowerCase();
+    const discountValue = Number(discountForm.discountValue);
+
+    if (!["percent", "fixed"].includes(discountType)) {
+      setSubmitError("Choose a valid discount type.");
+      return;
+    }
+
+    if (!Number.isFinite(discountValue) || discountValue <= 0) {
+      setSubmitError("Enter a discount value greater than 0.");
+      return;
+    }
+
+    if (discountType === "percent" && discountValue > 100) {
+      setSubmitError("Percent discount cannot be more than 100.");
+      return;
+    }
+
+    setIsApplyingDiscount(true);
+    setSubmitError("");
+
+    try {
+      if (hasActiveOrder) {
+        const updatedOrder = await updateOrderDiscount(session.token, currentOrder.id, {
+          discountType,
+          discountValue,
+        });
+        setCurrentOrder(updatedOrder);
+        setPendingDiscount(buildDiscountConfig(updatedOrder));
+      } else {
+        setPendingDiscount({
+          discountType,
+          discountValue,
+        });
+      }
+
+      setIsDiscountDialogOpen(false);
+      showNotice({
+        type: "success",
+        message:
+          discountType === "percent"
+            ? `${formatPrice(discountValue)}% discount applied.`
+            : `${formatPrice(discountValue)} EUR discount applied.`,
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
+
+      setSubmitError(requestError.message || "Cannot apply discount.");
+    } finally {
+      setIsApplyingDiscount(false);
+    }
+  };
+
+  const handleClearDiscount = async () => {
+    setIsApplyingDiscount(true);
+    setSubmitError("");
+
+    try {
+      if (hasActiveOrder) {
+        const updatedOrder = await updateOrderDiscount(session.token, currentOrder.id, {});
+        setCurrentOrder(updatedOrder);
+        setPendingDiscount(buildDiscountConfig(updatedOrder));
+      } else {
+        setPendingDiscount({
+          discountType: null,
+          discountValue: null,
+        });
+      }
+
+      setDiscountForm({
+        discountType: "percent",
+        discountValue: "",
+      });
+      setIsDiscountDialogOpen(false);
+      showNotice({
+        type: "success",
+        message: "Discount cleared.",
+      });
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        logout();
+        return;
+      }
+
+      setSubmitError(requestError.message || "Cannot clear discount.");
+    } finally {
+      setIsApplyingDiscount(false);
+    }
   };
 
   const handleOpenTransferDialog = () => {
@@ -824,11 +1006,25 @@ export default function PosOrderScreen() {
     }
   };
 
-  const handleFutureAction = (label) => {
-    showNotice({
-      type: "info",
-      message: `${label} is staged in the POS flow and ready for backend wiring.`,
-    });
+  const handleOpenSplitDialog = () => {
+    if (!hasActiveOrder) {
+      setSubmitError("Open an order first to split the bill.");
+      return;
+    }
+
+    if (cart.length > 0) {
+      setSubmitError("Confirm pending items first, then split the bill.");
+      return;
+    }
+
+    if (Number(currentOrder?.total || 0) <= 0) {
+      setSubmitError("There is no payable amount to split.");
+      return;
+    }
+
+    setSplitCount(2);
+    setIsSplitDialogOpen(true);
+    setSubmitError("");
   };
 
   const headerStats = [
@@ -1004,7 +1200,7 @@ export default function PosOrderScreen() {
                   <ProductTile
                     key={product.id}
                     product={product}
-                    disabled={!canEditOrderItems || isBusy}
+                    disabled={!canEditOrderItems || isBusy || Number(product.stock || 0) <= 0}
                     onAdd={handleAddProduct}
                   />
                 ))}
@@ -1075,11 +1271,11 @@ export default function PosOrderScreen() {
                 <button
                   type="button"
                   className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-3 text-sm font-semibold transition active:scale-[0.99] ${
-                    hasDiscountRequest
+                    hasAppliedDiscount
                       ? "border-[#e6b657] bg-[linear-gradient(180deg,rgba(158,118,44,0.98)_0%,rgba(120,86,28,0.99)_100%)] text-white"
                       : "border-[#5b4a26] bg-[rgba(53,39,14,0.78)] text-[#f3ddb0] hover:brightness-110"
                   }`}
-                  onClick={handleDiscountToggle}
+                  onClick={handleOpenDiscountDialog}
                 >
                   Discount / Coupon
                 </button>
@@ -1180,6 +1376,18 @@ export default function PosOrderScreen() {
                   <span>Pending Cart</span>
                   <strong>{formatPrice(total)} EUR</strong>
                 </div>
+                {hasAppliedDiscount ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Subtotal Before Discount</span>
+                      <strong>{formatPrice(projectedSubtotal)} EUR</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-[#f3ddb0]">
+                      <span>{discountSummaryLabel}</span>
+                      <strong>-{formatPrice(projectedDiscountAmount)} EUR</strong>
+                    </div>
+                  </>
+                ) : null}
                 <div className="flex items-center justify-between gap-3">
                   <span>Current Ticket</span>
                   <strong>{formatPrice(currentOrder?.total || 0)} EUR</strong>
@@ -1191,9 +1399,9 @@ export default function PosOrderScreen() {
               </div>
 
               <p className="m-0 mt-3 text-sm text-[#8eaab0]">{flowHint}</p>
-              {hasDiscountRequest ? (
+              {hasAppliedDiscount ? (
                 <p className="m-0 mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#f3ddb0]">
-                  Discount or coupon review flagged
+                  {discountSummaryLabel} active
                 </p>
               ) : null}
 
@@ -1242,8 +1450,8 @@ export default function PosOrderScreen() {
                 <button
                   type="button"
                   className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#466b8f] bg-[linear-gradient(180deg,rgba(41,77,117,0.96)_0%,rgba(28,55,86,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={!hasActiveOrder}
-                  onClick={() => handleFutureAction("Split bill")}
+                  disabled={!hasActiveOrder || cart.length > 0 || Number(currentOrder?.total || 0) <= 0}
+                  onClick={handleOpenSplitDialog}
                 >
                   Split Bill
                 </button>
@@ -1380,6 +1588,200 @@ export default function PosOrderScreen() {
                 onClick={() => setIsTransferDialogOpen(false)}
               >
                 Keep Table
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isDiscountDialogOpen ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
+          <div className="w-full max-w-[680px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Discount / Coupon
+                </p>
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                  Adjust ticket total
+                </h2>
+                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                  Apply a percent or fixed discount to this ticket.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                onClick={() => setIsDiscountDialogOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                  Discount Type
+                </span>
+                <select
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  value={discountForm.discountType}
+                  onChange={(event) =>
+                    setDiscountForm((current) => ({
+                      ...current,
+                      discountType: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="percent">Percent (%)</option>
+                  <option value="fixed">Fixed amount (EUR)</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                  Value
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step={discountForm.discountType === "percent" ? "1" : "0.01"}
+                  inputMode="decimal"
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  value={discountForm.discountValue}
+                  onChange={(event) =>
+                    setDiscountForm((current) => ({
+                      ...current,
+                      discountValue: event.target.value,
+                    }))
+                  }
+                  placeholder={discountForm.discountType === "percent" ? "10" : "2.50"}
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4 text-sm text-[#dcebef]">
+              <div className="flex items-center justify-between gap-3">
+                <span>Subtotal</span>
+                <strong>{formatPrice(projectedSubtotal)} EUR</strong>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 text-[#f3ddb0]">
+                <span>{discountSummaryLabel}</span>
+                <strong>-{formatPrice(projectedDiscountAmount)} EUR</strong>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#183139] pt-2 text-base">
+                <span>Projected total</span>
+                <strong className="text-[#d8ffe3]">{formatPrice(projectedTotal)} EUR</strong>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={isApplyingDiscount}
+                onClick={handleApplyDiscount}
+              >
+                {isApplyingDiscount ? "Applying..." : "Apply Discount"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#9a4c62] bg-[linear-gradient(180deg,rgba(126,47,67,0.96)_0%,rgba(91,33,48,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={isApplyingDiscount || !hasAppliedDiscount}
+                onClick={handleClearDiscount}
+              >
+                Clear Discount
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isSplitDialogOpen ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
+          <div className="w-full max-w-[680px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                  Split Bill
+                </p>
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                  Divide ticket total
+                </h2>
+                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                  Choose how many guests are splitting the payment.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                onClick={() => setIsSplitDialogOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
+              <label className="block">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                  Guests
+                </span>
+                <input
+                  type="number"
+                  min="2"
+                  max={MAX_SPLIT_PARTS}
+                  step="1"
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  value={splitCount}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    setSplitCount(
+                      Math.max(2, Math.min(MAX_SPLIT_PARTS, Number.isFinite(nextValue) ? nextValue : 2))
+                    );
+                  }}
+                />
+              </label>
+
+              <div className="rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4 text-sm text-[#dcebef]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Total ticket</span>
+                  <strong>{formatPrice(currentOrder?.total || 0)} EUR</strong>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span>Guests</span>
+                  <strong>{splitShares.length}</strong>
+                </div>
+                <p className="m-0 mt-3 text-xs text-[#8eaab0]">
+                  Remainder cents are distributed automatically so the full total stays exact.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid max-h-[320px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+              {splitShares.map((share) => (
+                <div
+                  key={share.key}
+                  className="rounded-[8px] border border-[#284952] bg-[#0a1a20] px-4 py-3 text-[#e2eff2]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold">{share.label}</span>
+                    <strong className="text-base text-[#d8ffe3]">
+                      {formatPrice(share.amount)} EUR
+                    </strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-5 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                onClick={() => setIsSplitDialogOpen(false)}
+              >
+                Done
               </button>
             </div>
           </div>

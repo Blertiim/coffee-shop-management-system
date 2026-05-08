@@ -33,6 +33,11 @@ router.patch(
   orderController.transferOrderToTable
 );
 router.patch(
+  "/orders/:id/discount",
+  authMiddleware,
+  orderController.applyDiscount
+);
+router.patch(
   "/orders/:id/complete-payment",
   authMiddleware,
   orderController.completePayment

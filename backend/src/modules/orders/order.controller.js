@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const prisma = require("../../config/prisma");
+const { syncProductStockAlert } = require("../../services/alert.service");
 const AppError = require("../../utils/app-error");
 const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const { normalizeRole } = require("../../middlewares/role.middleware");
@@ -7,6 +8,7 @@ const {
   validateCreateOrderPayload,
   validateAppendOrderItemsPayload,
   validateCompletePaymentPayload,
+  validateOrderDiscountPayload,
   validateOrderId,
   validateTableId,
   validateOrderStatusUpdatePayload,
@@ -21,6 +23,7 @@ const ORDER_PROGRESS_FLOW = {
 const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
 const ITEM_EDITABLE_ORDER_STATUSES = ["pending", "preparing", "served"];
 const RECEIPT_READY_STATUSES = ["pending_payment", "paid"];
+const ARCHIVED_TABLE_STATUS = "archived";
 const RECEIPT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "short",
   timeStyle: "short",
@@ -101,6 +104,47 @@ const normalizeStatus = (value) =>
 
 const formatMoney = (value) => MONEY_FORMATTER.format(Number(value || 0));
 
+const getOrderSubtotal = (order) => {
+  const subtotal =
+    order?.subtotal ?? Number((Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2));
+
+  return Number(subtotal || 0);
+};
+
+const buildDiscountTotals = (subtotal, discountType = null, discountValue = null) => {
+  const normalizedSubtotal = Number(Number(subtotal || 0).toFixed(2));
+  const normalizedValue =
+    discountValue === null || discountValue === undefined ? null : Number(discountValue);
+
+  if (!discountType || !normalizedValue || normalizedSubtotal <= 0) {
+    return {
+      subtotal: normalizedSubtotal,
+      discountType: null,
+      discountValue: null,
+      discountAmount: 0,
+      total: normalizedSubtotal,
+    };
+  }
+
+  let discountAmount = 0;
+
+  if (discountType === "percent") {
+    discountAmount = normalizedSubtotal * (normalizedValue / 100);
+  } else {
+    discountAmount = Math.min(normalizedValue, normalizedSubtotal);
+  }
+
+  const normalizedDiscountAmount = Number(discountAmount.toFixed(2));
+
+  return {
+    subtotal: normalizedSubtotal,
+    discountType,
+    discountValue: Number(normalizedValue.toFixed(2)),
+    discountAmount: normalizedDiscountAmount,
+    total: Number(Math.max(normalizedSubtotal - normalizedDiscountAmount, 0).toFixed(2)),
+  };
+};
+
 const buildReceiptFileName = (order) =>
   `coupon-order-${order.id}-${new Date().toISOString().slice(0, 10)}.pdf`;
 
@@ -154,9 +198,16 @@ const streamOrderReceiptPdf = (res, order) => {
   });
 
   doc.moveDown(0.8);
-  doc
-    .fontSize(12)
-    .text(`TOTAL: ${formatMoney(order.total)} EUR`, { align: "right" });
+  const receiptSubtotal = getOrderSubtotal(order);
+  const receiptDiscountAmount = Number(order.discountAmount || 0);
+
+  doc.fontSize(11).text(`SUBTOTAL: ${formatMoney(receiptSubtotal)} EUR`, { align: "right" });
+
+  if (receiptDiscountAmount > 0) {
+    doc.text(`DISCOUNT: -${formatMoney(receiptDiscountAmount)} EUR`, { align: "right" });
+  }
+
+  doc.fontSize(12).text(`TOTAL: ${formatMoney(order.total)} EUR`, { align: "right" });
 
   doc.moveDown(1.2);
   doc
@@ -203,7 +254,7 @@ const buildOrderItems = (products, normalizedItems) => {
 
 const restoreStockForOrder = async (tx, items) => {
   for (const item of items) {
-    await tx.product.update({
+    const updatedProduct = await tx.product.update({
       where: { id: item.productId },
       data: {
         stock: {
@@ -211,6 +262,8 @@ const restoreStockForOrder = async (tx, items) => {
         },
       },
     });
+
+    await syncProductStockAlert(updatedProduct, undefined, tx);
   }
 };
 
@@ -233,6 +286,12 @@ const deductStockForOrderItems = async (tx, orderItems) => {
     if (updatedProduct.count === 0) {
       throw new AppError("Stock changed while creating the order. Please try again.");
     }
+
+    const product = await tx.product.findUnique({
+      where: { id: item.productId },
+    });
+
+    await syncProductStockAlert(product, undefined, tx);
   }
 };
 
@@ -369,7 +428,7 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 401, "Invalid authenticated user");
     }
 
-    const { items, tableId, employeeId, paymentMethod } = validateCreateOrderPayload(
+    const { items, tableId, employeeId, paymentMethod, discountType, discountValue } = validateCreateOrderPayload(
       req.body
     );
 
@@ -401,7 +460,7 @@ exports.createOrder = async (req, res) => {
           })
         : null;
 
-      if (!table) {
+      if (!table || normalizeStatus(table.status) === ARCHIVED_TABLE_STATUS) {
         throw new AppError("Table not found", 404);
       }
 
@@ -415,7 +474,8 @@ exports.createOrder = async (req, res) => {
         throw new AppError("Orders can only be assigned to employees with waiter position");
       }
 
-      const { orderItems, total } = buildOrderItems(products, items);
+      const { orderItems, total: subtotal } = buildOrderItems(products, items);
+      const totals = buildDiscountTotals(subtotal, discountType, discountValue);
 
       await deductStockForOrderItems(tx, orderItems);
 
@@ -431,8 +491,12 @@ exports.createOrder = async (req, res) => {
           userId,
           tableId,
           employeeId: employee ? employee.id : null,
+          subtotal: totals.subtotal,
+          discountType: totals.discountType,
+          discountValue: totals.discountValue,
+          discountAmount: totals.discountAmount,
           paymentMethod,
-          total,
+          total: totals.total,
           status: "pending",
           items: {
             create: orderItems,
@@ -530,7 +594,7 @@ exports.appendItemsToOrder = async (req, res) => {
         },
       });
 
-      const { orderItems, total } = buildOrderItems(products, items);
+      const { orderItems, total: addedSubtotal } = buildOrderItems(products, items);
       await deductStockForOrderItems(tx, orderItems);
 
       await tx.orderItem.createMany({
@@ -542,10 +606,21 @@ exports.appendItemsToOrder = async (req, res) => {
         })),
       });
 
+      const nextSubtotal = Number((getOrderSubtotal(existingOrder) + addedSubtotal).toFixed(2));
+      const totals = buildDiscountTotals(
+        nextSubtotal,
+        existingOrder.discountType,
+        existingOrder.discountValue
+      );
+
       return tx.order.update({
         where: { id: existingOrder.id },
         data: {
-          total: Number((existingOrder.total + total).toFixed(2)),
+          subtotal: totals.subtotal,
+          discountType: totals.discountType,
+          discountValue: totals.discountValue,
+          discountAmount: totals.discountAmount,
+          total: totals.total,
         },
         include: orderInclude,
       });
@@ -774,7 +849,7 @@ exports.transferOrderToTable = async (req, res) => {
         }),
       ]);
 
-      if (!targetTable) {
+      if (!targetTable || normalizeStatus(targetTable.status) === ARCHIVED_TABLE_STATUS) {
         throw new AppError("Target table not found", 404);
       }
 
@@ -816,6 +891,54 @@ exports.transferOrderToTable = async (req, res) => {
     );
   } catch (error) {
     return handleControllerError(res, error, "Transfer order error");
+  }
+};
+
+exports.applyDiscount = async (req, res) => {
+  try {
+    const id = validateOrderId(req.params.id);
+    const { discountType, discountValue } = validateOrderDiscountPayload(req.body);
+
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { id },
+        include: orderInclude,
+      });
+
+      if (!existingOrder) {
+        throw new AppError("Order not found", 404);
+      }
+
+      if (!canManageOrderLifecycle(req, existingOrder)) {
+        throw new AppError("Only POS staff or order owner can apply discount", 403);
+      }
+
+      if (!ACTIVE_ORDER_STATUSES.includes(existingOrder.status)) {
+        throw new AppError("Discount can only be changed while the order is active");
+      }
+
+      const totals = buildDiscountTotals(
+        getOrderSubtotal(existingOrder),
+        discountType,
+        discountValue
+      );
+
+      return tx.order.update({
+        where: { id: existingOrder.id },
+        data: {
+          subtotal: totals.subtotal,
+          discountType: totals.discountType,
+          discountValue: totals.discountValue,
+          discountAmount: totals.discountAmount,
+          total: totals.total,
+        },
+        include: orderInclude,
+      });
+    });
+
+    return sendSuccess(res, 200, "Discount updated successfully", updatedOrder);
+  } catch (error) {
+    return handleControllerError(res, error, "Apply discount error");
   }
 };
 

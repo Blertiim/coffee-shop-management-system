@@ -1,32 +1,42 @@
-const resolveAutoApiBaseUrl = () => {
+const resolveAutoApiBaseUrls = () => {
   const apiPort = String(import.meta.env.VITE_API_PORT || "5000").trim() || "5000";
+  const localCandidates = [`http://127.0.0.1:${apiPort}/api`, `http://localhost:${apiPort}/api`];
 
   if (typeof window === "undefined") {
-    return `http://localhost:${apiPort}/api`;
+    return localCandidates;
   }
+
   const currentOrigin = window.location.origin;
+  const sameOriginCandidate =
+    currentOrigin && currentOrigin !== "null"
+      ? `${currentOrigin.replace(/\/$/, "")}/api`
+      : null;
 
-  if (currentOrigin && currentOrigin !== "null") {
-    return `${currentOrigin.replace(/\/$/, "")}/api`;
-  }
-
-  return `http://localhost:${apiPort}/api`;
+  return [sameOriginCandidate, ...localCandidates].filter(
+    (candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index
+  );
 };
 
-const rawApiBaseUrl =
-  import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto";
+const isAutoApiBaseUrl =
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto")
+    .trim()
+    .toLowerCase() === "auto";
+
+const autoApiBaseUrls = resolveAutoApiBaseUrls();
+
+const rawApiBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto";
 
 const API_BASE_URL =
-  rawApiBaseUrl.trim().toLowerCase() === "auto"
-    ? resolveAutoApiBaseUrl()
+  isAutoApiBaseUrl
+    ? autoApiBaseUrls[0]
     : rawApiBaseUrl.replace(/\/$/, "");
 
-const buildUrl = (path) => {
+const buildUrl = (path, baseUrl = API_BASE_URL) => {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     return path;
   }
 
-  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 };
 
 export const buildApiUrl = (path) => buildUrl(path);
@@ -95,24 +105,40 @@ export const apiRequest = async (path, options = {}) => {
   }
 
   try {
-    const response = await fetch(buildUrl(path), {
-      ...rest,
-      headers: resolvedHeaders,
-      body: resolvedBody,
-      signal: abortController.signal,
-    });
+    const baseUrls = isAutoApiBaseUrl ? autoApiBaseUrls : [API_BASE_URL];
+    let lastNetworkError = null;
 
-    return parseResponse(response);
-  } catch (error) {
-    if (didTimeout) {
-      const timeoutError = new Error(
-        "Request timed out. Check that the backend server is running."
-      );
-      timeoutError.name = "TimeoutError";
-      timeoutError.status = 408;
-      throw timeoutError;
+    for (let index = 0; index < baseUrls.length; index += 1) {
+      try {
+        const response = await fetch(buildUrl(path, baseUrls[index]), {
+          ...rest,
+          headers: resolvedHeaders,
+          body: resolvedBody,
+          signal: abortController.signal,
+        });
+
+        return parseResponse(response);
+      } catch (error) {
+        if (didTimeout) {
+          const timeoutError = new Error(
+            "Request timed out. Check that the backend server is running."
+          );
+          timeoutError.name = "TimeoutError";
+          timeoutError.status = 408;
+          throw timeoutError;
+        }
+
+        // When the desktop app ends up on an unreachable LAN origin, retry the API on loopback.
+        if (error?.name === "AbortError" || error?.status) {
+          throw error;
+        }
+
+        lastNetworkError = error;
+      }
     }
 
+    throw lastNetworkError || new Error("Failed to fetch");
+  } catch (error) {
     throw error;
   } finally {
     if (timeoutId) {

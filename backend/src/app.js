@@ -52,7 +52,16 @@ app.use(
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
 );
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "upgrade-insecure-requests": null,
+      },
+    },
+  })
+);
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(requestActivityMiddleware);

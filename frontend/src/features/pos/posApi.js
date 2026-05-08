@@ -98,6 +98,15 @@ export const transferOrderToTable = async (token, orderId, tableId) =>
     })
   );
 
+export const updateOrderDiscount = async (token, orderId, payload) =>
+  unwrapApiData(
+    await apiRequest(`/orders/${orderId}/discount`, {
+      method: "PATCH",
+      token,
+      body: payload,
+    })
+  );
+
 export const completeOrderPayment = async (token, orderId, paymentMethod) =>
   unwrapApiData(
     await apiRequest(`/orders/${orderId}/complete-payment`, {

@@ -2,6 +2,7 @@ const { Prisma } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
 const prisma = require("../../config/prisma");
+const { publishRealtimeEvent } = require("../../services/realtime.service");
 const {
   handleControllerError,
   sendError,
@@ -18,6 +19,7 @@ const {
 } = require("./staff.validation");
 
 const WAITER_ROLE = "waiter";
+const ARCHIVED_WAITER_STATUS = "archived";
 
 const mapWaiter = (waiter) => ({
   id: waiter.id,
@@ -55,6 +57,9 @@ exports.getAllWaiters = async (req, res) => {
     const waiters = await prisma.user.findMany({
       where: {
         role: WAITER_ROLE,
+        status: {
+          not: ARCHIVED_WAITER_STATUS,
+        },
       },
       orderBy: [{ status: "asc" }, { fullName: "asc" }],
     });
@@ -194,15 +199,82 @@ exports.deleteWaiter = async (req, res) => {
       return sendError(res, 404, "Waiter not found");
     }
 
-    await prisma.user.delete({
-      where: {
-        id: waiter.id,
-      },
+    const deletionSummary = await prisma.$transaction(async (tx) => {
+      const [assignedTables, relatedOrders] = await Promise.all([
+        tx.table.findMany({
+          where: {
+            assignedWaiterId: waiter.id,
+          },
+          select: {
+            id: true,
+            number: true,
+          },
+        }),
+        tx.order.count({
+          where: {
+            userId: waiter.id,
+          },
+        }),
+      ]);
+
+      if (assignedTables.length > 0) {
+        await tx.table.updateMany({
+          where: {
+            assignedWaiterId: waiter.id,
+          },
+          data: {
+            assignedWaiterId: null,
+          },
+        });
+      }
+
+      let archived = false;
+
+      if (relatedOrders > 0) {
+        archived = true;
+        await tx.user.update({
+          where: {
+            id: waiter.id,
+          },
+          data: {
+            status: ARCHIVED_WAITER_STATUS,
+          },
+        });
+      } else {
+        await tx.user.delete({
+          where: {
+            id: waiter.id,
+          },
+        });
+      }
+
+      return {
+        archived,
+        relatedOrders,
+        unassignedTableIds: assignedTables.map((table) => table.id),
+        unassignedTableNumbers: assignedTables.map((table) => table.number),
+      };
     });
 
     clearPosLoginAttemptState({ identifier: `user:${waiter.id}` });
+    publishRealtimeEvent(["staff", "tables", "dashboard"], {
+      type: "resource.changed",
+      method: "DELETE",
+      route: `/api/staff/waiters/${waiter.id}`,
+      statusCode: 200,
+      waiterId: waiter.id,
+      archived: deletionSummary.archived,
+      unassignedTableIds: deletionSummary.unassignedTableIds,
+    });
 
-    return sendSuccess(res, 200, "Waiter deleted successfully", null);
+    return sendSuccess(
+      res,
+      200,
+      deletionSummary.archived
+        ? "Waiter archived successfully"
+        : "Waiter deleted successfully",
+      deletionSummary
+    );
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -211,7 +283,7 @@ exports.deleteWaiter = async (req, res) => {
       return sendError(
         res,
         400,
-        "Cannot delete waiter with related orders. Disable the waiter instead."
+        "Cannot delete waiter because related records are still linked."
       );
     }
 

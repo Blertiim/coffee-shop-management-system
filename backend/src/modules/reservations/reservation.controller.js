@@ -7,6 +7,8 @@ const {
   validateUpdateReservationPayload,
 } = require("./reservation.validation");
 
+const ARCHIVED_TABLE_STATUS = "archived";
+
 const reservationInclude = {
   table: true,
 };
@@ -40,7 +42,7 @@ const ensureTableAvailabilityForReservation = async (
     where: { id: tableId },
   });
 
-  if (!table) {
+  if (!table || table.status === ARCHIVED_TABLE_STATUS) {
     throw new AppError("Table not found", 404);
   }
 

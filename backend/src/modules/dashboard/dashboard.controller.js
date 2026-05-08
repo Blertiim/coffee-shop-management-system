@@ -41,6 +41,17 @@ const toEndExclusiveDay = (date) => {
 };
 
 const parseDateInput = (value, label) => {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    const [year, month, day] = value.trim().split("-").map(Number);
+    const parsedLocalDate = new Date(year, month - 1, day);
+
+    if (Number.isNaN(parsedLocalDate.getTime())) {
+      throw new AppError(`${label} must be a valid date`);
+    }
+
+    return parsedLocalDate;
+  }
+
   const parsedDate = new Date(value);
 
   if (Number.isNaN(parsedDate.getTime())) {
@@ -91,7 +102,20 @@ const buildDateRange = (query, options = {}) => {
   return { from, to };
 };
 
-const formatDateKey = (date) => date.toISOString().slice(0, 10);
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const formatMonthKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  return `${year}-${month}`;
+};
 
 const buildRangeFilter = (field, range) => ({
   [field]: {
@@ -135,7 +159,7 @@ const buildMonthBuckets = (range) => {
   cursor.setDate(1);
 
   while (cursor < range.to) {
-    const key = cursor.toISOString().slice(0, 7);
+    const key = formatMonthKey(cursor);
     buckets[key] = { month: key, revenue: 0, orders: 0 };
     cursor.setMonth(cursor.getMonth() + 1);
   }
@@ -207,7 +231,7 @@ const buildAdvancedReportPayload = async (range) => {
 
   paidOrders.forEach((order) => {
     const dayKey = formatDateKey(order.updatedAt);
-    const monthKey = order.updatedAt.toISOString().slice(0, 7);
+    const monthKey = formatMonthKey(order.updatedAt);
 
     if (dayBuckets[dayKey]) {
       dayBuckets[dayKey].revenue = Number((dayBuckets[dayKey].revenue + order.total).toFixed(2));
@@ -785,7 +809,9 @@ exports.getLowStockProducts = async (req, res) => {
 
       const inventoryAlerts = await prisma.systemAlert.findMany({
         where: {
-          type: "inventory.low",
+          type: {
+            in: ["inventory.low", "product.low"],
+          },
           status: "open",
         },
         orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
