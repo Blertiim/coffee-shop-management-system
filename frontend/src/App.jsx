@@ -164,11 +164,12 @@ function PosAppShell() {
         isViewingSameTable={isViewingAlertTable}
         onDismiss={dismissGuestOrderAlert}
         onShowTables={() => {
+          dismissGuestOrderAlert();
+
           if (!isViewingAlertTable) {
             returnToTables({ refresh: true });
+            return;
           }
-
-          dismissGuestOrderAlert();
         }}
       />
       <PosToast notice={notice} onDismiss={dismissNotice} />

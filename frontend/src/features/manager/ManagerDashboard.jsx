@@ -7,6 +7,8 @@ import {
   buildRealtimeStreamUrl,
   createCategory,
   createProduct,
+  createSupplier,
+  createSupplierOrder,
   createTable,
   createWaiter,
   deleteCategory,
@@ -16,6 +18,7 @@ import {
   downloadAdvancedReportCsv,
   downloadAdvancedReportPdf,
   downloadInvoicePdf,
+  downloadSupplierInvoicePdf,
   getAdvancedReport,
   getAuditLogs,
   getCategories,
@@ -26,6 +29,8 @@ import {
   getLowStockProducts,
   getManagerStats,
   getProducts,
+  getSupplierOrders,
+  getSuppliers,
   getSystemAlerts,
   getTables,
   getTopProducts,
@@ -36,7 +41,7 @@ import {
   setWaiterTableAssignments,
   updateCategory,
   updateProduct,
-  updateProductStock,
+  updateSupplierOrder,
   updateWaiter,
   updateWaiterStatus,
 } from "./managerApi";
@@ -46,6 +51,7 @@ const SECTIONS = [
   { key: "products", label: "Products" },
   { key: "categories", label: "Categories" },
   { key: "stock", label: "Stock" },
+  { key: "incoming", label: "Incoming Invoices" },
   { key: "employees", label: "Staff & Tables" },
   { key: "orders", label: "Orders" },
   { key: "reports", label: "Reports" },
@@ -78,6 +84,7 @@ const defaultProductForm = {
   categoryId: "",
   price: "",
   stock: "1",
+  stockUnit: "cope",
   imageUrl: "",
   description: "",
   isAvailable: true,
@@ -96,6 +103,32 @@ const defaultTableForm = {
   capacity: "4",
   location: "Main Hall",
 };
+
+const defaultSupplierInvoiceForm = {
+  supplierId: "",
+  invoiceNumber: "",
+  orderDate: todayDate,
+  expectedDate: "",
+  status: "pending",
+  notes: "",
+  items: [{ productId: "", quantity: "1", unit: "cope", unitPrice: "" }],
+};
+
+const defaultSupplierForm = {
+  companyName: "",
+  contactName: "",
+  phone: "",
+  email: "",
+  productType: "",
+};
+
+const STOCK_UNITS = [
+  { value: "cope", label: "cope" },
+  { value: "shishe", label: "shishe" },
+  { value: "litra", label: "litra" },
+  { value: "kg", label: "kg" },
+  { value: "paketa", label: "paketa" },
+];
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -146,6 +179,13 @@ const formatMonthLabel = (value) => {
 };
 
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
+
+const formatProductOption = (product) => {
+  const categoryName = product.category?.name || "Uncategorized";
+  return `${product.name} #${product.id} | ${categoryName} | Stock ${product.stock} ${product.stockUnit || "cope"}`;
+};
+
+const formatStock = (product) => `${product.stock} ${product.stockUnit || "cope"}`;
 
 const isAuthError = (error) => error?.status === 401 || error?.status === 403;
 
@@ -261,6 +301,8 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [auditTrail, setAuditTrail] = useState({ logs: [], count: 0 });
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierOrders, setSupplierOrders] = useState([]);
   const [waiters, setWaiters] = useState([]);
   const [tables, setTables] = useState([]);
   const [selectedWaiterForTables, setSelectedWaiterForTables] = useState(null);
@@ -277,6 +319,8 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [editingWaiterId, setEditingWaiterId] = useState(null);
   const [waiterForm, setWaiterForm] = useState(defaultWaiterForm);
   const [tableForm, setTableForm] = useState(defaultTableForm);
+  const [supplierInvoiceForm, setSupplierInvoiceForm] = useState(defaultSupplierInvoiceForm);
+  const [supplierForm, setSupplierForm] = useState(defaultSupplierForm);
 
   const refreshAll = () => setRefreshTick((value) => value + 1);
 
@@ -379,6 +423,16 @@ export default function ManagerDashboard({ session, onLogout }) {
             load: () => getCategories(session.token, controller.signal),
           },
           {
+            key: "suppliers",
+            label: "suppliers",
+            load: () => getSuppliers(session.token, controller.signal),
+          },
+          {
+            key: "supplierOrders",
+            label: "incoming invoices",
+            load: () => getSupplierOrders(session.token, controller.signal),
+          },
+          {
             key: "waiters",
             label: "waiters",
             load: () => getWaiters(session.token, controller.signal),
@@ -429,6 +483,8 @@ export default function ManagerDashboard({ session, onLogout }) {
         const nextAuditTrail = getResultValue("auditTrail", { logs: [], count: 0 });
         const nextProducts = getResultValue("products", []);
         const nextCategories = getResultValue("categories", []);
+        const nextSuppliers = getResultValue("suppliers", []);
+        const nextSupplierOrders = getResultValue("supplierOrders", []);
         const nextWaiters = getResultValue("waiters", []);
         const nextTables = getResultValue("tables", []);
 
@@ -451,6 +507,8 @@ export default function ManagerDashboard({ session, onLogout }) {
         setAuditTrail(nextAuditTrail || { logs: [], count: 0 });
         setProducts(ensureArray(nextProducts));
         setCategories(ensureArray(nextCategories));
+        setSuppliers(ensureArray(nextSuppliers));
+        setSupplierOrders(ensureArray(nextSupplierOrders));
         setWaiters(ensureArray(nextWaiters));
         setTables(ensureArray(nextTables));
 
@@ -512,6 +570,15 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     return counts;
   }, [products]);
+
+  const supplierInvoiceTotal = useMemo(
+    () =>
+      supplierInvoiceForm.items.reduce(
+        (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
+        0
+      ),
+    [supplierInvoiceForm.items]
+  );
 
   const editingCategoryProducts = useMemo(() => {
     if (!editingCategoryId) {
@@ -580,6 +647,40 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     setAssignedTableIds(tablesByWaiter.get(selectedWaiterForTables) || []);
   }, [selectedWaiterForTables, tablesByWaiter]);
+
+  useEffect(() => {
+    setSupplierInvoiceForm((current) => {
+      const nextSupplierId =
+        current.supplierId || (suppliers[0]?.id ? String(suppliers[0].id) : "");
+
+      let didChangeItem = false;
+      const nextItems = current.items.map((item) => ({
+        ...item,
+        productId:
+          item.productId ||
+          (() => {
+            const nextProductId = products[0]?.id ? String(products[0].id) : "";
+            didChangeItem = didChangeItem || Boolean(nextProductId);
+            return nextProductId;
+          })(),
+        unit:
+          item.unit ||
+          products.find((product) => String(product.id) === String(item.productId))?.stockUnit ||
+          products[0]?.stockUnit ||
+          "cope",
+      }));
+
+      if (nextSupplierId === current.supplierId && !didChangeItem) {
+        return current;
+      }
+
+      return {
+        ...current,
+        supplierId: nextSupplierId,
+        items: nextItems,
+      };
+    });
+  }, [products, suppliers]);
 
   useEffect(() => {
     if (!tables.length) {
@@ -717,6 +818,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           : String(product.categoryId),
       price: String(product.price ?? ""),
       stock: String(product.stock ?? ""),
+      stockUnit: product.stockUnit || "cope",
       imageUrl: product.imageUrl || "",
       description: product.description || "",
       isAvailable: Boolean(product.isAvailable),
@@ -756,6 +858,67 @@ export default function ManagerDashboard({ session, onLogout }) {
     setTableForm(defaultTableForm);
   };
 
+  const resetSupplierInvoiceForm = () => {
+    setSupplierInvoiceForm({
+      ...defaultSupplierInvoiceForm,
+      supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
+      items: [
+        {
+          productId: products[0]?.id ? String(products[0].id) : "",
+          quantity: "1",
+          unit: products[0]?.stockUnit || "cope",
+          unitPrice: "",
+        },
+      ],
+    });
+  };
+
+  const resetSupplierForm = () => {
+    setSupplierForm(defaultSupplierForm);
+  };
+
+  const updateSupplierInvoiceItem = (index, field, value) => {
+    setSupplierInvoiceForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item
+      ),
+    }));
+  };
+
+  const addSupplierInvoiceItem = () => {
+    setSupplierInvoiceForm((current) => ({
+      ...current,
+      items: [...current.items, { productId: "", quantity: "1", unit: "cope", unitPrice: "" }],
+    }));
+  };
+
+  const removeSupplierInvoiceItem = (index) => {
+    setSupplierInvoiceForm((current) => ({
+      ...current,
+      items:
+        current.items.length === 1
+          ? current.items
+          : current.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const startIncomingInvoiceForProduct = (product) => {
+    setSupplierInvoiceForm({
+      ...defaultSupplierInvoiceForm,
+      supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
+      items: [
+        {
+          productId: String(product.id),
+          quantity: "1",
+          unit: product.stockUnit || "cope",
+          unitPrice: "",
+        },
+      ],
+    });
+    setActiveSection("incoming");
+  };
+
   const onProductSubmit = async (event) => {
     event.preventDefault();
     const normalizedStock =
@@ -769,6 +932,7 @@ export default function ManagerDashboard({ session, onLogout }) {
     const payload = {
       name: productForm.name.trim(),
       price: Number(productForm.price),
+      stockUnit: productForm.stockUnit || "cope",
       imageUrl: productForm.imageUrl || null,
       description: productForm.description || null,
       isAvailable: Boolean(productForm.isAvailable),
@@ -784,6 +948,109 @@ export default function ManagerDashboard({ session, onLogout }) {
       }
       resetProductForm();
     }, editingProductId ? "Product updated." : "Product created.");
+  };
+
+  const onSupplierInvoiceSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!supplierInvoiceForm.supplierId) {
+      setError("Choose a supplier before saving the incoming invoice.");
+      return;
+    }
+
+    if (supplierInvoiceForm.items.some((item) => !item.productId)) {
+      setError("Choose a product for every incoming invoice item.");
+      return;
+    }
+
+    if (
+      supplierInvoiceForm.items.some(
+        (item) => Number(item.quantity) <= 0 || Number(item.unitPrice) <= 0
+      )
+    ) {
+      setError("Quantity and unit price must be greater than 0 for every item.");
+      return;
+    }
+
+    const payload = {
+      supplierId: Number(supplierInvoiceForm.supplierId),
+      invoiceNumber: supplierInvoiceForm.invoiceNumber || null,
+      orderDate: supplierInvoiceForm.orderDate,
+      expectedDate: supplierInvoiceForm.expectedDate || null,
+      status: supplierInvoiceForm.status,
+      notes: supplierInvoiceForm.notes || null,
+      items: supplierInvoiceForm.items.map((item) => ({
+        productId: Number(item.productId),
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        unit: item.unit || "cope",
+      })),
+    };
+
+    await runAction(async () => {
+      const supplierOrder = await createSupplierOrder(session.token, payload);
+      setSupplierOrders((current) => [supplierOrder, ...current]);
+      setProducts((current) =>
+        current.map((product) => {
+          const receivedItem =
+            supplierOrder.status === "delivered"
+              ? ensureArray(supplierOrder.items).find((item) => item.productId === product.id)
+              : null;
+
+          return receivedItem
+            ? {
+                ...product,
+                stock: Number(product.stock || 0) + Number(receivedItem.quantity || 0),
+                stockUnit: receivedItem.unit || product.stockUnit || "cope",
+              }
+            : product;
+        })
+      );
+      resetSupplierInvoiceForm();
+      try {
+        await downloadSupplierInvoicePdf(session.token, supplierOrder.id);
+      } catch (pdfError) {
+        setError(`Invoice saved, but PDF could not download: ${pdfError.message || "PDF failed."}`);
+      }
+    }, payload.status === "delivered" ? "Incoming invoice saved, stock increased, and PDF downloaded." : "Incoming invoice saved and PDF downloaded.");
+  };
+
+  const markSupplierInvoiceDelivered = async (supplierOrder) => {
+    await runAction(
+      () => updateSupplierOrder(session.token, supplierOrder.id, { status: "delivered" }),
+      "Incoming invoice delivered. Stock increased from invoice items."
+    );
+  };
+
+  const onSupplierSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!supplierForm.companyName.trim() || !supplierForm.contactName.trim() || !supplierForm.phone.trim()) {
+      setError("Company, contact, and phone are required to add a supplier.");
+      return;
+    }
+
+    const payload = {
+      companyName: supplierForm.companyName.trim(),
+      contactName: supplierForm.contactName.trim(),
+      phone: supplierForm.phone.trim(),
+      email: supplierForm.email || null,
+      productType: supplierForm.productType || null,
+    };
+
+    await runAction(async () => {
+      const supplier = await createSupplier(session.token, payload);
+      setSuppliers((current) =>
+        [...current, supplier].sort((left, right) =>
+          left.companyName.localeCompare(right.companyName)
+        )
+      );
+      setSupplierInvoiceForm((current) => ({
+        ...current,
+        supplierId: String(supplier.id),
+      }));
+      resetSupplierForm();
+    }, "Supplier created.");
   };
 
   const onCategorySubmit = async (event) => {
@@ -1325,7 +1592,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <input
                       required
                       type="number"
@@ -1350,6 +1617,19 @@ export default function ManagerDashboard({ session, onLogout }) {
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
+                    <select
+                      value={productForm.stockUnit}
+                      onChange={(event) =>
+                        setProductForm((current) => ({ ...current, stockUnit: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    >
+                      {STOCK_UNITS.map((unit) => (
+                        <option key={unit.value} value={unit.value}>
+                          {unit.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <input
                     placeholder="Image URL"
@@ -1426,7 +1706,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {product.category?.name || "Uncategorized"}
                           </td>
                           <td className="px-3 py-2 text-pos-muted">{formatMoney(product.price)} EUR</td>
-                          <td className="px-3 py-2 text-pos-muted">{product.stock}</td>
+                          <td className="px-3 py-2 text-pos-muted">{formatStock(product)}</td>
                           <td className="px-3 py-2">
                             <span
                               className={`rounded-full border px-2 py-1 text-xs ${
@@ -1569,7 +1849,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 {product.name}
                               </p>
                               <p className="m-0 mt-1 text-xs text-pos-muted">
-                                {formatMoney(product.price)} EUR | Stock {product.stock}
+                                {formatMoney(product.price)} EUR | Stock {formatStock(product)}
                               </p>
                             </div>
                             <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
@@ -1668,7 +1948,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                         <th className="px-3 py-2">Product</th>
                         <th className="px-3 py-2">Category</th>
                         <th className="px-3 py-2">Stock</th>
-                        <th className="px-3 py-2 text-right">Adjust</th>
+                        <th className="px-3 py-2 text-right">Source</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1686,51 +1966,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   : "text-pos-text"
                               }`}
                             >
-                              {product.stock}
+                              {formatStock(product)}
+                              <span className="ml-2 text-[11px] font-normal text-pos-muted">
+                                #{product.id}
+                              </span>
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <div className="inline-flex gap-1">
-                              <button
-                                type="button"
-                                className="rounded-md border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      updateProductStock(session.token, product.id, { delta: -1 }),
-                                    `${product.name} stock decreased by 1.`
-                                  )
-                                }
-                              >
-                                -1
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      updateProductStock(session.token, product.id, { delta: 1 }),
-                                    `${product.name} stock increased by 1.`
-                                  )
-                                }
-                              >
-                                +1
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      updateProductStock(session.token, product.id, { delta: 10 }),
-                                    `${product.name} stock increased by 10.`
-                                  )
-                                }
-                              >
-                                +10
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
+                              onClick={() => startIncomingInvoiceForProduct(product)}
+                            >
+                              Add invoice
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1767,11 +2016,375 @@ export default function ManagerDashboard({ session, onLogout }) {
                       >
                         <p className="m-0 text-sm font-semibold text-red-200">{product.name}</p>
                         <p className="m-0 mt-1 text-xs text-red-200/90">
-                          Stock: {product.stock} | Category: {product.category?.name || "N/A"}
+                          Stock: {formatStock(product)} | Category: {product.category?.name || "N/A"}
                         </p>
                       </div>
                     ))
                   )}
+                </div>
+              </article>
+            </section>
+          ) : null}
+
+          {activeSection === "incoming" ? (
+            <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+              <article className="pos-panel rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">Incoming Invoice</h3>
+                <form className="mt-3 grid gap-2" onSubmit={onSupplierInvoiceSubmit}>
+                  <select
+                    required
+                    value={supplierInvoiceForm.supplierId}
+                    onChange={(event) =>
+                      setSupplierInvoiceForm((current) => ({
+                        ...current,
+                        supplierId: event.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                  >
+                    <option value="">Select supplier</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.companyName}
+                      </option>
+                    ))}
+                  </select>
+                  <details className="rounded-lg border border-white/10 bg-black/15 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-pos-text">
+                      Add supplier
+                    </summary>
+                    <div className="mt-3 grid gap-2" onSubmit={onSupplierSubmit}>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          placeholder="Company"
+                          value={supplierForm.companyName}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({
+                              ...current,
+                              companyName: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                        <input
+                          placeholder="Contact"
+                          value={supplierForm.contactName}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({
+                              ...current,
+                              contactName: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          placeholder="Phone"
+                          value={supplierForm.phone}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({
+                              ...current,
+                              phone: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                        <input
+                          type="email"
+                          placeholder="Email"
+                          value={supplierForm.email}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({
+                              ...current,
+                              email: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                      <input
+                        placeholder="Product type"
+                        value={supplierForm.productType}
+                        onChange={(event) =>
+                          setSupplierForm((current) => ({
+                            ...current,
+                            productType: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <button
+                        type="button"
+                        className="pos-button pos-button-muted"
+                        disabled={isSaving}
+                        onClick={onSupplierSubmit}
+                      >
+                        Save Supplier
+                      </button>
+                    </div>
+                  </details>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      placeholder="Invoice number"
+                      value={supplierInvoiceForm.invoiceNumber}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          invoiceNumber: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <select
+                      value={supplierInvoiceForm.status}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          status: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="approved">Approved</option>
+                      <option value="delivered">Delivered</option>
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="date"
+                      value={supplierInvoiceForm.orderDate}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          orderDate: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <input
+                      type="date"
+                      value={supplierInvoiceForm.expectedDate}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          expectedDate: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    {supplierInvoiceForm.items.map((item, index) => (
+                      <div
+                        key={index}
+                        className="grid grid-cols-[1fr_74px_74px_104px_34px] gap-2 rounded-lg border border-white/10 bg-black/15 p-2"
+                      >
+                        <select
+                          required
+                          value={item.productId}
+                          onChange={(event) =>
+                            setSupplierInvoiceForm((current) => ({
+                              ...current,
+                              items: current.items.map((entry, itemIndex) => {
+                                if (itemIndex !== index) {
+                                  return entry;
+                                }
+
+                                const selectedProduct = products.find(
+                                  (product) => String(product.id) === String(event.target.value)
+                                );
+
+                                return {
+                                  ...entry,
+                                  productId: event.target.value,
+                                  unit: selectedProduct?.stockUnit || entry.unit || "cope",
+                                };
+                              }),
+                            }))
+                          }
+                          className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                        >
+                          <option value="">Product</option>
+                          {products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {formatProductOption(product)}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="Qty"
+                          value={item.quantity}
+                          onChange={(event) =>
+                            updateSupplierInvoiceItem(index, "quantity", event.target.value)
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                        />
+                        <select
+                          value={item.unit || "cope"}
+                          onChange={(event) =>
+                            updateSupplierInvoiceItem(index, "unit", event.target.value)
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                        >
+                          {STOCK_UNITS.map((unit) => (
+                            <option key={unit.value} value={unit.value}>
+                              {unit.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          required
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          placeholder="Price/unit"
+                          value={item.unitPrice}
+                          onChange={(event) =>
+                            updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg border border-red-300/40 bg-red-500/15 text-sm text-red-200"
+                          onClick={() => removeSupplierInvoiceItem(index)}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
+                    onClick={addSupplierInvoiceItem}
+                  >
+                    Add item
+                  </button>
+                  <textarea
+                    placeholder="Notes"
+                    value={supplierInvoiceForm.notes}
+                    onChange={(event) =>
+                      setSupplierInvoiceForm((current) => ({
+                        ...current,
+                        notes: event.target.value,
+                      }))
+                    }
+                    className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                  />
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                    <span className="text-sm text-pos-muted">Total</span>
+                    <span className="text-sm font-semibold text-white">
+                      {formatMoney(supplierInvoiceTotal)} EUR
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
+                      Save Invoice
+                    </button>
+                    <button
+                      className="pos-button pos-button-muted"
+                      type="button"
+                      onClick={resetSupplierInvoiceForm}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </form>
+              </article>
+
+              <article className="pos-panel min-h-0 rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">Incoming Invoice History</h3>
+                <div className="scroll-y mt-3 max-h-[64vh] overflow-y-auto rounded-xl border border-white/10">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                      <tr>
+                        <th className="px-3 py-2">Invoice</th>
+                        <th className="px-3 py-2">Supplier</th>
+                        <th className="px-3 py-2">Items</th>
+                        <th className="px-3 py-2">Total</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierOrders.map((supplierOrder) => (
+                        <tr key={supplierOrder.id} className="border-t border-white/10 align-top">
+                          <td className="px-3 py-2 text-white">
+                            {supplierOrder.invoiceNumber || `#${supplierOrder.id}`}
+                            <p className="m-0 mt-1 text-xs text-pos-muted">
+                              {formatDate(supplierOrder.orderDate)}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 text-pos-muted">
+                            {supplierOrder.supplier?.companyName || "Supplier"}
+                          </td>
+                          <td className="px-3 py-2 text-pos-muted">
+                            {ensureArray(supplierOrder.items)
+                              .map(
+                                (item) =>
+                                  `${item.product?.name || "Product"} #${item.productId} x${item.quantity} ${item.unit || item.product?.stockUnit || "cope"}`
+                              )
+                              .join(", ")}
+                          </td>
+                          <td className="px-3 py-2 text-pos-muted">
+                            {formatMoney(supplierOrder.total)} EUR
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`rounded-full border px-2 py-1 text-xs ${
+                                supplierOrder.status === "delivered"
+                                  ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                                  : "border-orange-400/30 bg-orange-500/15 text-orange-200"
+                              }`}
+                            >
+                              {supplierOrder.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {supplierOrder.status !== "delivered" ? (
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
+                                  onClick={() => markSupplierInvoiceDelivered(supplierOrder)}
+                                >
+                                  Mark delivered
+                                </button>
+                              ) : (
+                                <span className="px-2 py-1 text-xs text-pos-muted">Stock applied</span>
+                              )}
+                              <button
+                                type="button"
+                                className="rounded-lg border border-white/20 bg-white/10 px-2 py-1 text-xs text-white hover:bg-white/15"
+                                onClick={() =>
+                                  runAction(
+                                    () => downloadSupplierInvoicePdf(session.token, supplierOrder.id),
+                                    "Incoming invoice PDF downloaded."
+                                  )
+                                }
+                              >
+                                PDF
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {supplierOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" className="px-3 py-6 text-center text-pos-muted">
+                            No incoming invoices yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
                 </div>
               </article>
             </section>

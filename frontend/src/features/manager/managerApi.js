@@ -106,6 +106,51 @@ export const getProducts = async (token, signal) =>
     signal,
   });
 
+export const getSuppliers = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/suppliers", {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
+export const createSupplier = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/suppliers", {
+      method: "POST",
+      token,
+      body: payload,
+    })
+  );
+
+export const getSupplierOrders = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/supplier-orders", {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
+export const createSupplierOrder = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/supplier-orders", {
+      method: "POST",
+      token,
+      body: payload,
+    })
+  );
+
+export const updateSupplierOrder = async (token, supplierOrderId, payload) =>
+  unwrapApiData(
+    await apiRequest(`/supplier-orders/${supplierOrderId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    })
+  );
+
 export const createProduct = async (token, payload) =>
   apiRequest("/products", {
     method: "POST",
@@ -306,6 +351,31 @@ export const downloadInvoicePdf = async (token, orderId) => {
   const link = document.createElement("a");
   link.href = objectUrl;
   link.download = `invoice-order-${orderId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+};
+
+export const downloadSupplierInvoicePdf = async (token, supplierOrderId) => {
+  const response = await fetch(buildApiUrl(`/supplier-orders/${supplierOrderId}/pdf`), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = new Error(await parseDownloadError(response));
+    error.status = response.status;
+    throw error;
+  }
+
+  const blob = await response.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `incoming-invoice-${supplierOrderId}.pdf`;
   document.body.appendChild(link);
   link.click();
   link.remove();

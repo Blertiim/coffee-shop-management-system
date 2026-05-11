@@ -8,56 +8,58 @@ datasource db {
 }
 
 model User {
-  id             Int      @id @default(autoincrement())
+  id             Int        @id @default(autoincrement())
   fullName       String
-  email          String   @unique
+  email          String     @unique
   password       String
-  role           String   @default("user")
-  status         String   @default("active")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  role           String     @default("user")
+  status         String     @default("active")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
   orders         Order[]
-  assignedTables Table[]  @relation("TableAssignments")
+  assignedTables Table[]    @relation("TableAssignments")
   auditLogs      AuditLog[] @relation("AuditActor")
 }
 
 model Category {
-  id        Int       @id @default(autoincrement())
-  name      String    @unique
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
   description String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  products  Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
 }
 
 model Product {
-    id          Int       @id @default(autoincrement())
-    name        String
-    description String?
-    price       Float
-    stock       Int       @default(0)
-    imageUrl    String?
-    categoryId  Int?
-    category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-    orderItems  OrderItem[]
-    isAvailable Boolean   @default(true)
-    deletedAt   DateTime?
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
-  }
+  id                 Int                 @id @default(autoincrement())
+  name               String
+  description        String?
+  price              Float
+  stock              Int                 @default(0)
+  stockUnit          String              @default("cope")
+  imageUrl           String?
+  categoryId         Int?
+  category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems         OrderItem[]
+  supplierOrderItems SupplierOrderItem[]
+  isAvailable        Boolean             @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
 
 model Table {
-  id               Int           @id @default(autoincrement())
-  number           Int           @unique
+  id               Int                @id @default(autoincrement())
+  number           Int                @unique
   capacity         Int
   location         String
-  status           String        @default("available")
+  status           String             @default("available")
   assignedWaiterId Int?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
   orders           Order[]
   reservations     Reservation[]
-  assignedWaiter   User?         @relation("TableAssignments", fields: [assignedWaiterId], references: [id])
+  assignedWaiter   User?              @relation("TableAssignments", fields: [assignedWaiterId], references: [id])
   accessTokens     TableAccessToken[]
 
   @@index([assignedWaiterId])
@@ -81,23 +83,23 @@ model Employee {
 }
 
 model Order {
-  id            Int         @id @default(autoincrement())
-  userId        Int
-  tableId       Int?
-  employeeId    Int?
-  subtotal      Float?
-  discountType  String?
-  discountValue Float?
-  discountAmount Float      @default(0)
-  total         Float
-  paymentMethod String?
-  status        String      @default("pending")
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  user          User        @relation(fields: [userId], references: [id])
-  table         Table?      @relation(fields: [tableId], references: [id])
-  employee      Employee?   @relation(fields: [employeeId], references: [id])
-  items         OrderItem[]
+  id             Int         @id @default(autoincrement())
+  userId         Int
+  tableId        Int?
+  employeeId     Int?
+  subtotal       Float?
+  discountType   String?
+  discountValue  Float?
+  discountAmount Float       @default(0)
+  total          Float
+  paymentMethod  String?
+  status         String      @default("pending")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  user           User        @relation(fields: [userId], references: [id])
+  table          Table?      @relation(fields: [tableId], references: [id])
+  employee       Employee?   @relation(fields: [employeeId], references: [id])
+  items          OrderItem[]
 
   @@index([userId])
   @@index([tableId])
@@ -160,21 +162,38 @@ model Inventory {
 }
 
 model SupplierOrder {
-  id           Int       @id @default(autoincrement())
-  supplierId   Int
-  employeeId   Int?
-  orderDate    DateTime  @default(now())
-  expectedDate DateTime?
-  total        Float
-  status       String    @default("pending")
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  supplier     Supplier  @relation(fields: [supplierId], references: [id])
-  employee     Employee? @relation(fields: [employeeId], references: [id])
+  id            Int                 @id @default(autoincrement())
+  supplierId    Int
+  employeeId    Int?
+  invoiceNumber String?
+  orderDate     DateTime            @default(now())
+  expectedDate  DateTime?
+  total         Float
+  status        String              @default("pending")
+  notes         String?
+  receivedAt    DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  supplier      Supplier            @relation(fields: [supplierId], references: [id])
+  employee      Employee?           @relation(fields: [employeeId], references: [id])
+  items         SupplierOrderItem[]
 
   @@index([supplierId])
   @@index([employeeId])
+}
+
+model SupplierOrderItem {
+  id              Int           @id @default(autoincrement())
+  supplierOrderId Int
+  productId       Int
+  quantity        Int
+  unitPrice       Float
+  unit            String        @default("cope")
+  supplierOrder   SupplierOrder @relation(fields: [supplierOrderId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id])
+
+  @@index([supplierOrderId])
+  @@index([productId])
 }
 
 model Shift {
@@ -226,32 +245,32 @@ model AuditLog {
 }
 
 model SystemAlert {
-  id         Int      @id @default(autoincrement())
+  id         Int       @id @default(autoincrement())
   type       String
-  severity   String   @default("warning")
+  severity   String    @default("warning")
   title      String
   message    String
-  status     String   @default("open")
+  status     String    @default("open")
   entityType String?
   entityId   String?
   meta       Json?
   resolvedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([status, createdAt])
   @@index([type, entityType, entityId])
 }
 
 model TableAccessToken {
-  id        Int      @id @default(autoincrement())
-  tableId    Int
-  token     String   @unique
-  status    String   @default("active")
+  id        Int       @id @default(autoincrement())
+  tableId   Int
+  token     String    @unique
+  status    String    @default("active")
   expiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  table      Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  table     Table     @relation(fields: [tableId], references: [id], onDelete: Cascade)
 
   @@index([tableId, status])
 }

@@ -38,6 +38,8 @@ const normalizeOptionalString = (value) => {
   return normalizedValue ? normalizedValue : null;
 };
 
+const normalizeStockUnit = (value) => normalizeOptionalString(value) || "cope";
+
 const parsePrice = (value) => {
   const price = Number(value);
 
@@ -106,6 +108,7 @@ exports.createProduct = async (req, res) => {
       description,
       price,
       stock,
+      stockUnit,
       imageUrl,
       categoryId,
       isAvailable,
@@ -175,6 +178,7 @@ exports.createProduct = async (req, res) => {
           description !== undefined ? normalizeOptionalString(description) : null,
         price: normalizedPrice,
         stock: normalizedStock,
+        stockUnit: normalizeStockUnit(stockUnit),
         imageUrl: imageUrl !== undefined ? normalizeOptionalString(imageUrl) : null,
         categoryId: normalizedCategoryId,
         isAvailable: isAvailable !== undefined ? isAvailable : true,
@@ -215,6 +219,7 @@ exports.updateProduct = async (req, res) => {
       description,
       price,
       stock,
+      stockUnit,
       imageUrl,
       categoryId,
       isAvailable,
@@ -264,6 +269,10 @@ exports.updateProduct = async (req, res) => {
       }
 
       data.stock = normalizedStock;
+    }
+
+    if (stockUnit !== undefined) {
+      data.stockUnit = normalizeStockUnit(stockUnit);
     }
 
     if (imageUrl !== undefined) {

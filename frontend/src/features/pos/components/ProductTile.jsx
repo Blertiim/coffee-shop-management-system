@@ -29,7 +29,7 @@ export default function ProductTile({ product, onAdd, disabled = false }) {
         </div>
 
         <span className="shrink-0 whitespace-nowrap rounded-[8px] border border-[#2f5f53] bg-[#0c1d22] px-2.5 py-1 text-[11px] font-semibold text-[#d7f4e5]">
-          {product.stock} left
+          {product.stock} {product.stockUnit || "cope"} left
         </span>
       </div>
 

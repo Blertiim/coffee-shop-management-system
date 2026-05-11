@@ -205,6 +205,7 @@ export default function TableSelectionScreen() {
     tablesRefreshToken,
     guestOrderAlert,
     highlightedGuestTableId,
+    dismissedGuestOrderEventId,
     receiveGuestOrderAlert,
   } = usePosApp();
   const [selectedLocation, setSelectedLocation] = useState("all");
@@ -332,6 +333,18 @@ export default function TableSelectionScreen() {
     return guestOrderBindings[0] || null;
   }, [tableBindings]);
 
+  const latestGuestOrderEventId = useMemo(() => {
+    const activeGuestOrder = latestGuestOrderTable?.table?.activeGuestOrder;
+
+    if (!activeGuestOrder) {
+      return "";
+    }
+
+    return `existing-guest-order-${activeGuestOrder.orderId}-${
+      activeGuestOrder.updatedAt || activeGuestOrder.createdAt || latestGuestOrderTable.table.id
+    }`;
+  }, [latestGuestOrderTable]);
+
   const summary = useMemo(() => buildTableSummary(visibleTables), [visibleTables]);
   const openTablesCount = summary.openOrder + summary.pendingPayment;
   const isTabletLayout = useMemo(() => {
@@ -451,7 +464,13 @@ export default function TableSelectionScreen() {
   }, [handleTableSelect, isLoading, openingTableId, tableBindings]);
 
   useEffect(() => {
-    if (isLoading || !latestGuestOrderTable || guestOrderAlert?.tableId) {
+    if (
+      isLoading ||
+      !latestGuestOrderTable ||
+      !latestGuestOrderEventId ||
+      guestOrderAlert?.eventId === latestGuestOrderEventId ||
+      dismissedGuestOrderEventId === latestGuestOrderEventId
+    ) {
       return;
     }
 
@@ -463,7 +482,7 @@ export default function TableSelectionScreen() {
     }
 
     receiveGuestOrderAlert({
-      eventId: `existing-guest-order-${activeGuestOrder.orderId}-${activeGuestOrder.updatedAt || activeGuestOrder.createdAt || table.id}`,
+      eventId: latestGuestOrderEventId,
       orderId: activeGuestOrder.orderId,
       tableId: table.id,
       tableNumber: visualId || table.number,
@@ -474,7 +493,14 @@ export default function TableSelectionScreen() {
       assignedWaiterId: table.assignedWaiterId || null,
       timestamp: activeGuestOrder.updatedAt || activeGuestOrder.createdAt || new Date().toISOString(),
     });
-  }, [guestOrderAlert?.tableId, isLoading, latestGuestOrderTable, receiveGuestOrderAlert]);
+  }, [
+    dismissedGuestOrderEventId,
+    guestOrderAlert?.eventId,
+    isLoading,
+    latestGuestOrderEventId,
+    latestGuestOrderTable,
+    receiveGuestOrderAlert,
+  ]);
 
   return (
     <main className="min-h-[100dvh] bg-[linear-gradient(180deg,#090705_0%,#110d0a_42%,#16110d_100%)] p-0">

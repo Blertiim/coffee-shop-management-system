@@ -7,12 +7,16 @@ const resolveAutoApiBaseUrls = () => {
   }
 
   const currentOrigin = window.location.origin;
+  const currentHostCandidate =
+    window.location.hostname && window.location.protocol
+      ? `${window.location.protocol}//${window.location.hostname}:${apiPort}/api`
+      : null;
   const sameOriginCandidate =
     currentOrigin && currentOrigin !== "null"
       ? `${currentOrigin.replace(/\/$/, "")}/api`
       : null;
 
-  return [sameOriginCandidate, ...localCandidates].filter(
+  return [currentHostCandidate, ...localCandidates, sameOriginCandidate].filter(
     (candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index
   );
 };

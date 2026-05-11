@@ -295,7 +295,7 @@ export default function GuestOrderScreen() {
                         </p>
                       </div>
                       <span className="rounded-full border border-[#3d6e71] bg-[#173438] px-2 py-1 text-[11px] text-[#b6efe6]">
-                        Stock {product.stock}
+                        Stock {product.stock} {product.stockUnit || "cope"}
                       </span>
                     </div>
                     <p className="m-0 mt-4 text-xl font-semibold text-[#f5dca8]">
