@@ -2,15 +2,14 @@
   "name": "coffee-shop-management-system",
   "private": true,
   "version": "1.0.0",
-  "description": "Desktop launcher and build orchestration for the coffee shop POS.",
-  "main": "electron/main.js",
+  "description": "Web app orchestration for the coffee shop POS and management system.",
   "scripts": {
     "setup": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "preview:frontend": "npm --prefix frontend run preview",
     "build": "npm --prefix frontend run build",
-    "electron": "npm run build && electron .",
-    "shortcut:create": "powershell -ExecutionPolicy Bypass -File .\\scripts\\create-electron-shortcut.ps1"
-  },
-  "devDependencies": {
-    "electron": "^33.2.1"
+    "publish:check": "npm run build && npm --prefix backend test",
+    "start": "npm --prefix backend start"
   }
 }

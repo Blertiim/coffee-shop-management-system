@@ -1,71 +1,107 @@
 # coffee-shop-management-system
 
-## Desktop POS (Electron)
+Coffee shop POS and management system running as a standard web application.
 
-This project can now run as a single desktop POS app with Electron while keeping the existing folders:
+## Project structure
 
-- `backend/`
-- `frontend/`
-- `electron/`
+- `backend/` - Express API, Prisma, MySQL integration
+- `frontend/` - React/Vite browser application
 
-### One-time setup
+## One-time setup
 
-Install dependencies in each app plus Electron at the repo root:
+Install dependencies for the backend and frontend:
 
 ```powershell
-npm install
 npm run setup
 ```
 
-### Build and run the desktop app
+MySQL must be running and reachable through `backend/.env`.
+Use `backend/.env.example` for local development and `backend/.env.production.example`
+for publishing.
 
-Build the React frontend and open the Electron POS window:
+## Development
+
+Run the backend API:
 
 ```powershell
-npm run electron
+npm run dev:backend
 ```
 
-This flow:
+Run the frontend in a separate terminal:
 
-1. builds `frontend/dist`
-2. starts the Express backend automatically inside Electron
-3. tries to start XAMPP MySQL automatically if the database is offline
-4. serves the built frontend through Express
-5. opens the POS window at `http://localhost:5000`
+```powershell
+npm run dev:frontend
+```
 
-### Important local requirement
+Open the app in your browser at:
 
-MySQL still needs to be available locally for Prisma. For café-style desktop use, prefer:
+```text
+http://127.0.0.1:5173
+```
 
-- MySQL installed as a Windows service with auto-start
-- or XAMPP MySQL configured to start automatically with Windows
-
-The Electron app now removes the need to run the frontend dev server or `npm run dev` manually, but it cannot replace the database service itself.
-
-### XAMPP auto-start
-
-The Electron launcher will try to start XAMPP MySQL automatically before the POS opens.
-
-Optional backend env settings:
+The frontend uses `/api` by default. In development, Vite proxies `/api` to the backend.
+You can override the backend target with:
 
 ```env
-AUTO_START_XAMPP_MYSQL="true"
-XAMPP_PATH="C:\\xampp"
+VITE_API_PROXY_TARGET="http://127.0.0.1:5000"
 ```
 
-If your XAMPP is installed somewhere else, set `XAMPP_PATH` in [backend/.env.example](C:/Users/blert/OneDrive/Documents/GitHub/coffee-shop-management-system/backend/.env.example) style inside your real `backend/.env`.
+## Production build
 
-## Tablet Access
+Build the frontend:
 
-For tablet/phone testing on the same Wi-Fi:
+```powershell
+npm run build
+```
+
+Start the backend API:
+
+```powershell
+npm start
+```
+
+Serve `frontend/dist` with any static web host, or use `npm --prefix frontend run preview`
+to preview the built browser app locally.
+
+For production frontend configuration, copy:
+
+```text
+frontend/.env.production.example -> frontend/.env.production
+```
+
+Use:
+
+```env
+VITE_API_URL="/api"
+```
+
+when frontend and backend are on the same domain through a reverse proxy. Use:
+
+```env
+VITE_API_URL="https://api.your-domain.com/api"
+```
+
+when the backend is published on a separate domain.
+
+Run the full pre-publish check:
+
+```powershell
+npm run publish:check
+```
+
+See [DEPLOYMENT.md](C:/Users/blert/OneDrive/Documents/GitHub/coffee-shop-management-system/DEPLOYMENT.md) for the production checklist.
+
+## Tablet access
+
+For tablet or phone testing on the same Wi-Fi:
 
 1. Start the backend on port `5000`.
-2. Start the frontend normally.
+2. Start the frontend with Vite.
 3. Open the frontend from the laptop IP, for example:
    `http://192.168.0.12:5173`
 
-The frontend is configured to resolve the API automatically to:
-`http://<current-device-hostname>:5000/api`
+The frontend will call:
 
-So if the tablet opens `http://192.168.0.12:5173`, API calls will go to:
-`http://192.168.0.12:5000/api`
+```text
+http://192.168.0.12:5000/api
+```

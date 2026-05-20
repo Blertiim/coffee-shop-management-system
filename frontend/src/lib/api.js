@@ -1,34 +1,34 @@
 const resolveAutoApiBaseUrls = () => {
   const apiPort = String(import.meta.env.VITE_API_PORT || "5000").trim() || "5000";
-  const localCandidates = [`http://127.0.0.1:${apiPort}/api`, `http://localhost:${apiPort}/api`];
+  const sameOriginCandidate = "/api";
+  const localCandidates = [
+    sameOriginCandidate,
+    `http://127.0.0.1:${apiPort}/api`,
+    `http://localhost:${apiPort}/api`,
+  ];
 
   if (typeof window === "undefined") {
     return localCandidates;
   }
 
-  const currentOrigin = window.location.origin;
   const currentHostCandidate =
     window.location.hostname && window.location.protocol
       ? `${window.location.protocol}//${window.location.hostname}:${apiPort}/api`
       : null;
-  const sameOriginCandidate =
-    currentOrigin && currentOrigin !== "null"
-      ? `${currentOrigin.replace(/\/$/, "")}/api`
-      : null;
 
-  return [currentHostCandidate, ...localCandidates, sameOriginCandidate].filter(
+  return [sameOriginCandidate, currentHostCandidate, ...localCandidates].filter(
     (candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index
   );
 };
 
 const isAutoApiBaseUrl =
-  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto")
+  (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api")
     .trim()
     .toLowerCase() === "auto";
 
 const autoApiBaseUrls = resolveAutoApiBaseUrls();
 
-const rawApiBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "auto";
+const rawApiBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api";
 
 const API_BASE_URL =
   isAutoApiBaseUrl
@@ -132,7 +132,7 @@ export const apiRequest = async (path, options = {}) => {
           throw timeoutError;
         }
 
-        // When the desktop app ends up on an unreachable LAN origin, retry the API on loopback.
+        // When a browser opens an unreachable LAN origin, retry the API on loopback.
         if (error?.name === "AbortError" || error?.status) {
           throw error;
         }

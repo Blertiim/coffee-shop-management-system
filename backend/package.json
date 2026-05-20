@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "prod:check": "node -c src/app.js && node -c src/server.js && node -c src/startServer.js",
     "seed:pos": "node scripts/seed-pos-demo.js",
     "backup:snapshot": "node scripts/backup-system-snapshot.js",
     "report:daily": "node scripts/export-daily-sales.js"
@@ -22,7 +25,8 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
-    "pdfkit": "^0.18.0"
+    "pdfkit": "^0.18.0",
+    "swagger-ui-dist": "^5.32.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",
