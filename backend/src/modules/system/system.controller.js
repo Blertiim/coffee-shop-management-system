@@ -230,7 +230,7 @@ h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1; }
 
 const buildApiCatalogJs = (req) => {
   const workspaceRoot = path.resolve(__dirname, "../../../..").replace(/\\/g, "/");
-  const openApiUrl = `${buildBaseUrl(req)}/api/system/docs/openapi.json`;
+  const openApiUrl = "/api/system/docs/openapi.json";
 
   return `"use strict";
 

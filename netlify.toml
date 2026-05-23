@@ -7,6 +7,18 @@
   NODE_VERSION = "20"
 
 [[redirects]]
+  from = "/apis"
+  to = "https://coffee-shop-management-backend.onrender.com/api/system/api-catalog"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://coffee-shop-management-backend.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
