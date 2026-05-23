@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: coffee-shop-management-backend
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    preDeployCommand: npm run db:push
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GUEST_ORDER_PUBLIC_BASE_URL
+        sync: false
+      - key: API_DOCS_ENABLED
+        value: "false"

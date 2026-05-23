@@ -5,7 +5,92 @@ This project is now a standard web app:
 - `frontend/` builds to static files with Vite.
 - `backend/` runs an Express API with Prisma/MySQL.
 
-## 1. Backend Production Environment
+## Free Hosting Path
+
+Recommended zero-cost setup:
+
+- Frontend: Netlify Free plan
+- Backend API: Render Free web service
+- Database: Aiven for MySQL free tier
+
+Important free-tier limits:
+
+- Render Free web services can sleep after inactivity, so the first request can be slow.
+- Aiven free MySQL is limited to 1 GB storage and can be powered off if unused.
+- Netlify Free has monthly usage credits. Keep auto-recharge disabled if you want no surprise charges.
+
+## 1. Create the Free MySQL Database
+
+1. Create an Aiven account.
+2. Create an Aiven for MySQL service on the free tier.
+3. Copy the MySQL connection string.
+4. Make sure the connection string uses this shape:
+
+```env
+mysql://USER:PASSWORD@HOST:PORT/DATABASE
+```
+
+Use that as `DATABASE_URL` in Render.
+
+## 2. Publish the Backend on Render
+
+This repo includes `render.yaml`, so Render can detect the backend service.
+
+1. Push the repository to GitHub.
+2. In Render, choose Blueprint or New Web Service from this repository.
+3. Use the free instance type if asked.
+4. Enter these environment values when prompted:
+
+```env
+DATABASE_URL="mysql://USER:PASSWORD@HOST:PORT/DATABASE"
+CORS_ORIGINS="https://your-netlify-site.netlify.app"
+GUEST_ORDER_PUBLIC_BASE_URL="https://your-netlify-site.netlify.app"
+```
+
+Render will run:
+
+```powershell
+npm install && npm run build
+npm run db:push
+npm start
+```
+
+After deploy, check:
+
+```text
+https://your-render-service.onrender.com/api/health
+```
+
+## 3. Publish the Frontend on Netlify
+
+This repo includes `netlify.toml`, so Netlify builds from `frontend/`.
+
+Build settings:
+
+```text
+Base directory: frontend
+Build command: npm run build
+Publish directory: dist
+```
+
+Set this Netlify environment variable before deploy:
+
+```env
+VITE_API_URL="https://your-render-service.onrender.com/api"
+```
+
+After Netlify gives you the final site URL, update Render:
+
+```env
+CORS_ORIGINS="https://your-netlify-site.netlify.app"
+GUEST_ORDER_PUBLIC_BASE_URL="https://your-netlify-site.netlify.app"
+```
+
+Then redeploy the backend once.
+
+## Production Environment Reference
+
+### Backend Environment
 
 Create `backend/.env` from `backend/.env.production.example`.
 
@@ -24,7 +109,7 @@ Notes:
 - `CORS_ORIGINS` must be explicit in production.
 - API docs are disabled in production unless `API_DOCS_ENABLED="true"` and docs credentials are configured.
 
-## 2. Frontend Production Environment
+### Frontend Environment
 
 Create `frontend/.env.production` from `frontend/.env.production.example`.
 
@@ -40,7 +125,7 @@ Separate frontend/backend domains:
 VITE_API_URL="https://api.your-domain.com/api"
 ```
 
-## 3. Build
+### Build
 
 Install dependencies:
 
@@ -60,7 +145,7 @@ The static output is:
 frontend/dist
 ```
 
-## 4. Run Backend
+### Run Backend
 
 From the repository root:
 
@@ -80,7 +165,7 @@ The backend health check is:
 GET /api/health
 ```
 
-## 5. Publish Frontend
+### Publish Frontend
 
 Publish the contents of `frontend/dist` to any static host.
 
@@ -97,7 +182,7 @@ If using same-domain deployment, configure your reverse proxy so:
 /*     -> frontend/dist
 ```
 
-## 6. Pre-Publish Check
+### Pre-Publish Check
 
 Run:
 
