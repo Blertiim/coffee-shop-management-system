@@ -50,8 +50,7 @@ GUEST_ORDER_PUBLIC_BASE_URL="https://your-netlify-site.netlify.app"
 Render will run:
 
 ```powershell
-npm install && npm run build
-npm run db:push
+npm install && npm run build && npm run db:push
 npm start
 ```
 
