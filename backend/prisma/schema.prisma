@@ -37,6 +37,7 @@ model Product {
   price              Float
   stock              Int                 @default(0)
   stockUnit          String              @default("cope")
+  unitsPerPackage    Int?
   imageUrl           String?
   categoryId         Int?
   category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -183,14 +184,17 @@ model SupplierOrder {
 }
 
 model SupplierOrderItem {
-  id              Int           @id @default(autoincrement())
-  supplierOrderId Int
-  productId       Int
-  quantity        Int
-  unitPrice       Float
-  unit            String        @default("cope")
-  supplierOrder   SupplierOrder @relation(fields: [supplierOrderId], references: [id], onDelete: Cascade)
-  product         Product       @relation(fields: [productId], references: [id])
+  id                        Int           @id @default(autoincrement())
+  supplierOrderId           Int
+  productId                 Int
+  quantity                  Int
+  unitPrice                 Float
+  unit                      String        @default("cope")
+  stockQuantity             Int           @default(0)
+  stockUnit                 String        @default("cope")
+  stockUnitsPerPurchaseUnit Int           @default(1)
+  supplierOrder             SupplierOrder @relation(fields: [supplierOrderId], references: [id], onDelete: Cascade)
+  product                   Product       @relation(fields: [productId], references: [id])
 
   @@index([supplierOrderId])
   @@index([productId])

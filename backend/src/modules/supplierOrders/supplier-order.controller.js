@@ -88,14 +88,16 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
   const tableTop = doc.y;
   const columns = {
     product: 36,
-    quantity: 250,
-    unitPrice: 335,
-    total: 450,
+    quantity: 220,
+    stockQuantity: 300,
+    unitPrice: 375,
+    total: 470,
   };
 
   doc.fontSize(9).fillColor("#333333");
   doc.text("Product", columns.product, tableTop);
-  doc.text("Qty", columns.quantity, tableTop);
+  doc.text("Bought", columns.quantity, tableTop);
+  doc.text("Stock +", columns.stockQuantity, tableTop);
   doc.text("Unit Price", columns.unitPrice, tableTop);
   doc.text("Line Total", columns.total, tableTop);
   doc.moveTo(36, tableTop + 14).lineTo(558, tableTop + 14).strokeColor("#cccccc").stroke();
@@ -106,6 +108,8 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
   supplierOrder.items.forEach((item) => {
     const productName = item.product?.name || `Product #${item.productId}`;
     const unit = item.unit || item.product?.stockUnit || "cope";
+    const stockQuantity = Number(item.stockQuantity || item.quantity || 0);
+    const stockUnit = item.stockUnit || item.product?.stockUnit || "cope";
     const lineTotal = Number(item.quantity || 0) * Number(item.unitPrice || 0);
 
     if (rowY > 745) {
@@ -116,9 +120,10 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
     doc.text(`${productName} #${item.productId}`, columns.product, rowY, {
       width: 200,
     });
-    doc.text(`${item.quantity} ${unit}`, columns.quantity, rowY, { width: 70 });
-    doc.text(`${formatMoney(item.unitPrice)} EUR`, columns.unitPrice, rowY, { width: 95 });
-    doc.text(`${formatMoney(lineTotal)} EUR`, columns.total, rowY, { width: 100 });
+    doc.text(`${item.quantity} ${unit}`, columns.quantity, rowY, { width: 75 });
+    doc.text(`${stockQuantity} ${stockUnit}`, columns.stockQuantity, rowY, { width: 70 });
+    doc.text(`${formatMoney(item.unitPrice)} EUR`, columns.unitPrice, rowY, { width: 90 });
+    doc.text(`${formatMoney(lineTotal)} EUR`, columns.total, rowY, { width: 88 });
     rowY += 24;
   });
 
@@ -171,6 +176,7 @@ const ensureProductsExist = async (tx, items) => {
       id: true,
       name: true,
       stockUnit: true,
+      unitsPerPackage: true,
     },
   });
 
@@ -186,10 +192,51 @@ const ensureProductsExist = async (tx, items) => {
 };
 
 const withItemUnits = (items, productsById) =>
-  items.map((item) => ({
-    ...item,
-    unit: item.unit || productsById.get(item.productId)?.stockUnit || "cope",
-  }));
+  items.map((item) => {
+    const product = productsById.get(item.productId);
+    const stockUnit = product?.stockUnit || "cope";
+    const purchaseUnit = item.unit || stockUnit;
+    const productPackageSize = Number(product?.unitsPerPackage || 0);
+    let stockUnitsPerPurchaseUnit =
+      item.stockUnitsPerPurchaseUnit ||
+      (purchaseUnit === "paketa" && productPackageSize > 0 ? productPackageSize : 1);
+    let stockQuantity = item.stockQuantity || item.quantity * stockUnitsPerPurchaseUnit;
+
+    if (
+      item.stockQuantity &&
+      item.stockUnitsPerPurchaseUnit &&
+      item.stockQuantity !== item.quantity * item.stockUnitsPerPurchaseUnit
+    ) {
+      throw new AppError(
+        `${product?.name || "Product"} stock quantity must match quantity x stock units per purchase unit`
+      );
+    }
+
+    if (item.stockQuantity && !item.stockUnitsPerPurchaseUnit) {
+      if (item.stockQuantity % item.quantity !== 0) {
+        throw new AppError(
+          `${product?.name || "Product"} stock quantity must divide evenly by purchase quantity`
+        );
+      }
+
+      stockUnitsPerPurchaseUnit = item.stockQuantity / item.quantity;
+      stockQuantity = item.stockQuantity;
+    }
+
+    if (purchaseUnit !== stockUnit && !item.stockUnitsPerPurchaseUnit && !item.stockQuantity && productPackageSize <= 0) {
+      throw new AppError(
+        `${product?.name || "Product"} needs a conversion: how many ${stockUnit} are in one ${purchaseUnit}`
+      );
+    }
+
+    return {
+      ...item,
+      unit: purchaseUnit,
+      stockUnit,
+      stockUnitsPerPurchaseUnit,
+      stockQuantity,
+    };
+  });
 
 const applySupplierOrderStock = async (tx, supplierOrder) => {
   if (supplierOrder.receivedAt || supplierOrder.status !== "delivered") {
@@ -197,13 +244,13 @@ const applySupplierOrderStock = async (tx, supplierOrder) => {
   }
 
   for (const item of supplierOrder.items) {
+    const stockQuantity = Number(item.stockQuantity || item.quantity || 0);
     const product = await tx.product.update({
       where: { id: item.productId },
       data: {
         stock: {
-          increment: item.quantity,
+          increment: stockQuantity,
         },
-        stockUnit: item.unit || "cope",
       },
     });
 

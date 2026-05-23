@@ -38,7 +38,13 @@ const normalizeOptionalString = (value) => {
   return normalizedValue ? normalizedValue : null;
 };
 
-const normalizeStockUnit = (value) => normalizeOptionalString(value) || "cope";
+const PRODUCT_STOCK_UNITS = new Set(["cope", "shishe", "litra", "kg"]);
+
+const normalizeStockUnit = (value) => {
+  const normalizedValue = normalizeOptionalString(value) || "cope";
+
+  return PRODUCT_STOCK_UNITS.has(normalizedValue) ? normalizedValue : null;
+};
 
 const parsePrice = (value) => {
   const price = Number(value);
@@ -58,6 +64,20 @@ const parseStock = (value) => {
   }
 
   return stock;
+};
+
+const parseOptionalPositiveInteger = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isInteger(numericValue) || numericValue <= 0) {
+    return null;
+  }
+
+  return numericValue;
 };
 
 exports.getAllProducts = async (req, res) => {
@@ -109,6 +129,7 @@ exports.createProduct = async (req, res) => {
       price,
       stock,
       stockUnit,
+      unitsPerPackage,
       imageUrl,
       categoryId,
       isAvailable,
@@ -118,6 +139,8 @@ exports.createProduct = async (req, res) => {
     const normalizedPrice = parsePrice(price);
     const normalizedCategoryId = parseId(categoryId);
     const normalizedStock = stock !== undefined ? parseStock(stock) : 0;
+    const normalizedStockUnit = normalizeStockUnit(stockUnit);
+    const normalizedUnitsPerPackage = parseOptionalPositiveInteger(unitsPerPackage);
 
     if (!normalizedName || price === undefined || !normalizedCategoryId) {
       return res.status(400).json({
@@ -134,6 +157,23 @@ exports.createProduct = async (req, res) => {
     if (stock !== undefined && normalizedStock === null) {
       return res.status(400).json({
         error: "Stock must be a whole number greater than or equal to 0",
+      });
+    }
+
+    if (!normalizedStockUnit) {
+      return res.status(400).json({
+        error: "Stock unit must be one of: cope, shishe, litra, kg",
+      });
+    }
+
+    if (
+      unitsPerPackage !== undefined &&
+      unitsPerPackage !== null &&
+      unitsPerPackage !== "" &&
+      normalizedUnitsPerPackage === null
+    ) {
+      return res.status(400).json({
+        error: "Units per package must be a positive whole number",
       });
     }
 
@@ -178,7 +218,8 @@ exports.createProduct = async (req, res) => {
           description !== undefined ? normalizeOptionalString(description) : null,
         price: normalizedPrice,
         stock: normalizedStock,
-        stockUnit: normalizeStockUnit(stockUnit),
+        stockUnit: normalizedStockUnit,
+        unitsPerPackage: normalizedUnitsPerPackage,
         imageUrl: imageUrl !== undefined ? normalizeOptionalString(imageUrl) : null,
         categoryId: normalizedCategoryId,
         isAvailable: isAvailable !== undefined ? isAvailable : true,
@@ -220,6 +261,7 @@ exports.updateProduct = async (req, res) => {
       price,
       stock,
       stockUnit,
+      unitsPerPackage,
       imageUrl,
       categoryId,
       isAvailable,
@@ -272,7 +314,31 @@ exports.updateProduct = async (req, res) => {
     }
 
     if (stockUnit !== undefined) {
-      data.stockUnit = normalizeStockUnit(stockUnit);
+      const normalizedStockUnit = normalizeStockUnit(stockUnit);
+
+      if (!normalizedStockUnit) {
+        return res.status(400).json({
+          error: "Stock unit must be one of: cope, shishe, litra, kg",
+        });
+      }
+
+      data.stockUnit = normalizedStockUnit;
+    }
+
+    if (unitsPerPackage !== undefined) {
+      const normalizedUnitsPerPackage = parseOptionalPositiveInteger(unitsPerPackage);
+
+      if (
+        unitsPerPackage !== null &&
+        unitsPerPackage !== "" &&
+        normalizedUnitsPerPackage === null
+      ) {
+        return res.status(400).json({
+          error: "Units per package must be a positive whole number",
+        });
+      }
+
+      data.unitsPerPackage = normalizedUnitsPerPackage;
     }
 
     if (imageUrl !== undefined) {

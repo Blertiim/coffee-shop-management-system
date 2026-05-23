@@ -17,6 +17,8 @@ const testState = {
   managerId: null,
   waiterId: null,
   productIds: [],
+  supplierIds: [],
+  supplierOrderIds: [],
   tableIds: [],
   orderIds: [],
 };
@@ -60,7 +62,7 @@ const expectOk = async (path, options) => {
   return result.data;
 };
 
-const createProduct = async ({ name, stock, price = 2.5 }) => {
+const createProduct = async ({ name, stock, price = 2.5, unitsPerPackage = null }) => {
   const product = await prisma.product.create({
     data: {
       name: `${name} ${runId}`,
@@ -68,6 +70,7 @@ const createProduct = async ({ name, stock, price = 2.5 }) => {
       price,
       stock,
       stockUnit: "cope",
+      unitsPerPackage,
       categoryId: testState.categoryId,
       isAvailable: true,
     },
@@ -169,6 +172,9 @@ after(async () => {
       ],
     },
   });
+  await prisma.supplierOrder.deleteMany({
+    where: { id: { in: testState.supplierOrderIds } },
+  });
   await prisma.tableAccessToken.deleteMany({
     where: { tableId: { in: testState.tableIds } },
   });
@@ -177,6 +183,9 @@ after(async () => {
   });
   await prisma.product.deleteMany({
     where: { id: { in: testState.productIds } },
+  });
+  await prisma.supplier.deleteMany({
+    where: { id: { in: testState.supplierIds } },
   });
   await prisma.category.deleteMany({
     where: { id: testState.categoryId || 0 },
@@ -333,5 +342,55 @@ describe("critical API flows", () => {
       where: { id: table.id },
     });
     assert.equal(occupiedTable.status, "occupied");
+  });
+
+  it("applies incoming invoice package conversion to sellable product stock", async () => {
+    const product = await createProduct({
+      name: "Package Flow Juice",
+      stock: 5,
+      price: 2,
+      unitsPerPackage: 10,
+    });
+    const supplier = await prisma.supplier.create({
+      data: {
+        companyName: `Supplier ${runId}`,
+        contactName: "Integration Supplier",
+        phone: "+38344123456",
+        productType: "Soft Drinks",
+      },
+    });
+    testState.supplierIds.push(supplier.id);
+
+    const supplierOrder = await expectOk("/api/supplier-orders", {
+      token: managerToken,
+      method: "POST",
+      body: {
+        supplierId: supplier.id,
+        status: "delivered",
+        invoiceNumber: `PKG-${runId}`,
+        items: [
+          {
+            productId: product.id,
+            quantity: 20,
+            unit: "paketa",
+            unitPrice: 10,
+            stockUnitsPerPurchaseUnit: 10,
+          },
+        ],
+      },
+    });
+    testState.supplierOrderIds.push(supplierOrder.id);
+
+    assert.equal(supplierOrder.total, 200);
+    assert.equal(supplierOrder.items[0].quantity, 20);
+    assert.equal(supplierOrder.items[0].unit, "paketa");
+    assert.equal(supplierOrder.items[0].stockQuantity, 200);
+    assert.equal(supplierOrder.items[0].stockUnit, "cope");
+
+    const stockedProduct = await prisma.product.findUnique({
+      where: { id: product.id },
+    });
+    assert.equal(stockedProduct.stock, 205);
+    assert.equal(stockedProduct.stockUnit, "cope");
   });
 });

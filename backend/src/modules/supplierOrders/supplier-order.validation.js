@@ -64,6 +64,21 @@ const normalizeSupplierOrderItems = (items, { required = false } = {}) => {
 
     productIds.add(productId);
 
+    const stockUnitsPerPurchaseUnit =
+      item?.stockUnitsPerPurchaseUnit === undefined
+        ? undefined
+        : ensurePositiveInteger(
+            item.stockUnitsPerPurchaseUnit,
+            `Supplier order item ${index + 1} stock units per purchase unit`
+          );
+    const stockQuantity =
+      item?.stockQuantity === undefined
+        ? undefined
+        : ensurePositiveInteger(
+            item.stockQuantity,
+            `Supplier order item ${index + 1} stock quantity`
+          );
+
     return {
       productId,
       quantity: ensurePositiveInteger(
@@ -75,6 +90,8 @@ const normalizeSupplierOrderItems = (items, { required = false } = {}) => {
         `Supplier order item ${index + 1} unit price`
       ),
       unit: ensureOptionalString(item?.unit, `Supplier order item ${index + 1} unit`),
+      stockUnitsPerPurchaseUnit,
+      stockQuantity,
     };
   });
 };

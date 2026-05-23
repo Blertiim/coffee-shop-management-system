@@ -85,6 +85,7 @@ const defaultProductForm = {
   price: "",
   stock: "1",
   stockUnit: "cope",
+  unitsPerPackage: "",
   imageUrl: "",
   description: "",
   isAvailable: true,
@@ -111,7 +112,15 @@ const defaultSupplierInvoiceForm = {
   expectedDate: "",
   status: "pending",
   notes: "",
-  items: [{ productId: "", quantity: "1", unit: "cope", unitPrice: "" }],
+  items: [
+    {
+      productId: "",
+      quantity: "1",
+      unit: "",
+      stockUnitsPerPurchaseUnit: "",
+      unitPrice: "",
+    },
+  ],
 };
 
 const defaultSupplierForm = {
@@ -127,6 +136,10 @@ const STOCK_UNITS = [
   { value: "shishe", label: "shishe" },
   { value: "litra", label: "litra" },
   { value: "kg", label: "kg" },
+];
+
+const PURCHASE_UNITS = [
+  ...STOCK_UNITS,
   { value: "paketa", label: "paketa" },
 ];
 
@@ -182,10 +195,37 @@ const ensureArray = (value) => (Array.isArray(value) ? value : []);
 
 const formatProductOption = (product) => {
   const categoryName = product.category?.name || "Uncategorized";
-  return `${product.name} #${product.id} | ${categoryName} | Stock ${product.stock} ${product.stockUnit || "cope"}`;
+  const stockUnit = product.stockUnit || "cope";
+  const packageText = product.unitsPerPackage
+    ? ` | 1 paketa = ${product.unitsPerPackage} ${stockUnit}`
+    : "";
+
+  return `${product.name} #${product.id} | ${categoryName} | Stock ${product.stock} ${stockUnit}${packageText}`;
 };
 
 const formatStock = (product) => `${product.stock} ${product.stockUnit || "cope"}`;
+
+const getProductStockUnit = (product) => product?.stockUnit || "cope";
+
+const getDefaultPurchaseUnitForProduct = (product) =>
+  product?.unitsPerPackage && ["cope", "shishe"].includes(getProductStockUnit(product))
+    ? "paketa"
+    : getProductStockUnit(product);
+
+const getDefaultStockUnitsPerPurchaseUnit = (product, purchaseUnit) =>
+  purchaseUnit === "paketa" ? String(product?.unitsPerPackage || "") : "1";
+
+const calculateInvoiceItemStockQuantity = (item) =>
+  Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0);
+
+const formatInvoiceItemStockImpact = (item, product) => {
+  const stockQuantity = Number(
+    item.stockQuantity || calculateInvoiceItemStockQuantity(item)
+  );
+  const stockUnit = item.stockUnit || getProductStockUnit(product);
+
+  return stockQuantity > 0 ? `${stockQuantity} ${stockUnit}` : `0 ${stockUnit}`;
+};
 
 const isAuthError = (error) => error?.status === 401 || error?.status === 403;
 
@@ -654,21 +694,30 @@ export default function ManagerDashboard({ session, onLogout }) {
         current.supplierId || (suppliers[0]?.id ? String(suppliers[0].id) : "");
 
       let didChangeItem = false;
-      const nextItems = current.items.map((item) => ({
-        ...item,
-        productId:
-          item.productId ||
-          (() => {
-            const nextProductId = products[0]?.id ? String(products[0].id) : "";
-            didChangeItem = didChangeItem || Boolean(nextProductId);
-            return nextProductId;
-          })(),
-        unit:
-          item.unit ||
-          products.find((product) => String(product.id) === String(item.productId))?.stockUnit ||
-          products[0]?.stockUnit ||
-          "cope",
-      }));
+      const nextItems = current.items.map((item) => {
+        const nextProductId = item.productId || (products[0]?.id ? String(products[0].id) : "");
+        const selectedProduct =
+          products.find((product) => String(product.id) === String(nextProductId)) || null;
+        const nextUnit = item.unit || getDefaultPurchaseUnitForProduct(selectedProduct);
+        const nextStockUnitsPerPurchaseUnit =
+          item.stockUnitsPerPurchaseUnit ||
+          getDefaultStockUnitsPerPurchaseUnit(selectedProduct, nextUnit);
+
+        if (
+          nextProductId !== item.productId ||
+          nextUnit !== item.unit ||
+          nextStockUnitsPerPurchaseUnit !== item.stockUnitsPerPurchaseUnit
+        ) {
+          didChangeItem = true;
+        }
+
+        return {
+          ...item,
+          productId: nextProductId,
+          unit: nextUnit,
+          stockUnitsPerPurchaseUnit: nextStockUnitsPerPurchaseUnit,
+        };
+      });
 
       if (nextSupplierId === current.supplierId && !didChangeItem) {
         return current;
@@ -819,6 +868,7 @@ export default function ManagerDashboard({ session, onLogout }) {
       price: String(product.price ?? ""),
       stock: String(product.stock ?? ""),
       stockUnit: product.stockUnit || "cope",
+      unitsPerPackage: product.unitsPerPackage ? String(product.unitsPerPackage) : "",
       imageUrl: product.imageUrl || "",
       description: product.description || "",
       isAvailable: Boolean(product.isAvailable),
@@ -859,14 +909,18 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const resetSupplierInvoiceForm = () => {
+    const product = products[0] || null;
+    const unit = getDefaultPurchaseUnitForProduct(product);
+
     setSupplierInvoiceForm({
       ...defaultSupplierInvoiceForm,
       supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
       items: [
         {
-          productId: products[0]?.id ? String(products[0].id) : "",
+          productId: product?.id ? String(product.id) : "",
           quantity: "1",
-          unit: products[0]?.stockUnit || "cope",
+          unit,
+          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
           unitPrice: "",
         },
       ],
@@ -887,9 +941,21 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const addSupplierInvoiceItem = () => {
+    const product = products[0] || null;
+    const unit = getDefaultPurchaseUnitForProduct(product);
+
     setSupplierInvoiceForm((current) => ({
       ...current,
-      items: [...current.items, { productId: "", quantity: "1", unit: "cope", unitPrice: "" }],
+      items: [
+        ...current.items,
+        {
+          productId: product?.id ? String(product.id) : "",
+          quantity: "1",
+          unit,
+          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
+          unitPrice: "",
+        },
+      ],
     }));
   };
 
@@ -904,6 +970,8 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const startIncomingInvoiceForProduct = (product) => {
+    const unit = getDefaultPurchaseUnitForProduct(product);
+
     setSupplierInvoiceForm({
       ...defaultSupplierInvoiceForm,
       supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
@@ -911,7 +979,8 @@ export default function ManagerDashboard({ session, onLogout }) {
         {
           productId: String(product.id),
           quantity: "1",
-          unit: product.stockUnit || "cope",
+          unit,
+          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
           unitPrice: "",
         },
       ],
@@ -923,6 +992,8 @@ export default function ManagerDashboard({ session, onLogout }) {
     event.preventDefault();
     const normalizedStock =
       productForm.stock === "" ? undefined : Number(productForm.stock);
+    const normalizedUnitsPerPackage =
+      productForm.unitsPerPackage === "" ? null : Number(productForm.unitsPerPackage);
     const normalizedCategoryId =
       productForm.categoryId === "uncategorized"
         ? null
@@ -933,6 +1004,7 @@ export default function ManagerDashboard({ session, onLogout }) {
       name: productForm.name.trim(),
       price: Number(productForm.price),
       stockUnit: productForm.stockUnit || "cope",
+      unitsPerPackage: normalizedUnitsPerPackage,
       imageUrl: productForm.imageUrl || null,
       description: productForm.description || null,
       isAvailable: Boolean(productForm.isAvailable),
@@ -965,10 +1037,24 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     if (
       supplierInvoiceForm.items.some(
-        (item) => Number(item.quantity) <= 0 || Number(item.unitPrice) <= 0
+        (item) =>
+          Number(item.quantity) <= 0 ||
+          Number(item.unitPrice) <= 0 ||
+          Number(item.stockUnitsPerPurchaseUnit) <= 0
       )
     ) {
-      setError("Quantity and unit price must be greater than 0 for every item.");
+      setError("Quantity, conversion, and unit price must be greater than 0 for every item.");
+      return;
+    }
+
+    if (
+      supplierInvoiceForm.items.some(
+        (item) =>
+          !Number.isInteger(Number(item.quantity)) ||
+          !Number.isInteger(Number(item.stockUnitsPerPurchaseUnit))
+      )
+    ) {
+      setError("Purchase quantity and stock conversion must be whole numbers.");
       return;
     }
 
@@ -984,6 +1070,8 @@ export default function ManagerDashboard({ session, onLogout }) {
         quantity: Number(item.quantity),
         unitPrice: Number(item.unitPrice),
         unit: item.unit || "cope",
+        stockUnitsPerPurchaseUnit: Number(item.stockUnitsPerPurchaseUnit),
+        stockQuantity: calculateInvoiceItemStockQuantity(item),
       })),
     };
 
@@ -1000,8 +1088,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           return receivedItem
             ? {
                 ...product,
-                stock: Number(product.stock || 0) + Number(receivedItem.quantity || 0),
-                stockUnit: receivedItem.unit || product.stockUnit || "cope",
+                stock: Number(product.stock || 0) + Number(receivedItem.stockQuantity || 0),
               }
             : product;
         })
@@ -1624,6 +1711,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     >
+                      {productForm.stockUnit &&
+                      !STOCK_UNITS.some((unit) => unit.value === productForm.stockUnit) ? (
+                        <option value={productForm.stockUnit}>{productForm.stockUnit}</option>
+                      ) : null}
                       {STOCK_UNITS.map((unit) => (
                         <option key={unit.value} value={unit.value}>
                           {unit.label}
@@ -1631,6 +1722,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                       ))}
                     </select>
                   </div>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="Units per package"
+                    value={productForm.unitsPerPackage}
+                    onChange={(event) =>
+                      setProductForm((current) => ({
+                        ...current,
+                        unitsPerPackage: event.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                  />
                   <input
                     placeholder="Image URL"
                     value={productForm.imageUrl}
@@ -1706,7 +1811,15 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {product.category?.name || "Uncategorized"}
                           </td>
                           <td className="px-3 py-2 text-pos-muted">{formatMoney(product.price)} EUR</td>
-                          <td className="px-3 py-2 text-pos-muted">{formatStock(product)}</td>
+                          <td className="px-3 py-2 text-pos-muted">
+                            {formatStock(product)}
+                            {product.unitsPerPackage ? (
+                              <span className="ml-2 text-[11px] text-pos-muted">
+                                1 paketa = {product.unitsPerPackage}{" "}
+                                {product.stockUnit || "cope"}
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="px-3 py-2">
                             <span
                               className={`rounded-full border px-2 py-1 text-xs ${
@@ -2176,89 +2289,148 @@ export default function ManagerDashboard({ session, onLogout }) {
                     />
                   </div>
                   <div className="grid gap-2">
-                    {supplierInvoiceForm.items.map((item, index) => (
-                      <div
-                        key={index}
-                        className="grid grid-cols-[1fr_74px_74px_104px_34px] gap-2 rounded-lg border border-white/10 bg-black/15 p-2"
-                      >
-                        <select
-                          required
-                          value={item.productId}
-                          onChange={(event) =>
-                            setSupplierInvoiceForm((current) => ({
-                              ...current,
-                              items: current.items.map((entry, itemIndex) => {
-                                if (itemIndex !== index) {
-                                  return entry;
+                    {supplierInvoiceForm.items.map((item, index) => {
+                      const selectedProduct =
+                        products.find((product) => String(product.id) === String(item.productId)) ||
+                        null;
+                      const stockUnit = getProductStockUnit(selectedProduct);
+
+                      return (
+                        <div
+                          key={index}
+                          className="grid gap-2 rounded-lg border border-white/10 bg-black/15 p-2"
+                        >
+                          <select
+                            required
+                            value={item.productId}
+                            onChange={(event) =>
+                              setSupplierInvoiceForm((current) => ({
+                                ...current,
+                                items: current.items.map((entry, itemIndex) => {
+                                  if (itemIndex !== index) {
+                                    return entry;
+                                  }
+
+                                  const nextProduct = products.find(
+                                    (product) => String(product.id) === String(event.target.value)
+                                  );
+                                  const nextUnit = getDefaultPurchaseUnitForProduct(nextProduct);
+
+                                  return {
+                                    ...entry,
+                                    productId: event.target.value,
+                                    unit: nextUnit,
+                                    stockUnitsPerPurchaseUnit:
+                                      getDefaultStockUnitsPerPurchaseUnit(nextProduct, nextUnit),
+                                  };
+                                }),
+                              }))
+                            }
+                            className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                          >
+                            <option value="">Product</option>
+                            {products.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {formatProductOption(product)}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="grid grid-cols-[72px_86px_1fr_96px_34px] gap-2">
+                            <input
+                              required
+                              type="number"
+                              min="1"
+                              step="1"
+                              placeholder="Qty"
+                              value={item.quantity}
+                              onChange={(event) =>
+                                updateSupplierInvoiceItem(index, "quantity", event.target.value)
+                              }
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                            />
+                            <select
+                              value={item.unit || "cope"}
+                              onChange={(event) => {
+                                const nextUnit = event.target.value;
+
+                                setSupplierInvoiceForm((current) => ({
+                                  ...current,
+                                  items: current.items.map((entry, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...entry,
+                                          unit: nextUnit,
+                                          stockUnitsPerPurchaseUnit:
+                                            getDefaultStockUnitsPerPurchaseUnit(
+                                              selectedProduct,
+                                              nextUnit
+                                            ),
+                                        }
+                                      : entry
+                                  ),
+                                }));
+                              }}
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                            >
+                              {PURCHASE_UNITS.map((unit) => (
+                                <option key={unit.value} value={unit.value}>
+                                  {unit.label}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-white/15 bg-pos-panelSoft">
+                              <input
+                                required
+                                type="number"
+                                min="1"
+                                step="1"
+                                placeholder="Stock/unit"
+                                value={item.stockUnitsPerPurchaseUnit}
+                                onChange={(event) =>
+                                  updateSupplierInvoiceItem(
+                                    index,
+                                    "stockUnitsPerPurchaseUnit",
+                                    event.target.value
+                                  )
                                 }
-
-                                const selectedProduct = products.find(
-                                  (product) => String(product.id) === String(event.target.value)
-                                );
-
-                                return {
-                                  ...entry,
-                                  productId: event.target.value,
-                                  unit: selectedProduct?.stockUnit || entry.unit || "cope",
-                                };
-                              }),
-                            }))
-                          }
-                          className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                        >
-                          <option value="">Product</option>
-                          {products.map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {formatProductOption(product)}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          required
-                          type="number"
-                          min="1"
-                          step="1"
-                          placeholder="Qty"
-                          value={item.quantity}
-                          onChange={(event) =>
-                            updateSupplierInvoiceItem(index, "quantity", event.target.value)
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                        />
-                        <select
-                          value={item.unit || "cope"}
-                          onChange={(event) =>
-                            updateSupplierInvoiceItem(index, "unit", event.target.value)
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                        >
-                          {STOCK_UNITS.map((unit) => (
-                            <option key={unit.value} value={unit.value}>
-                              {unit.label}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          required
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          placeholder="Price/unit"
-                          value={item.unitPrice}
-                          onChange={(event) =>
-                            updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                        />
-                        <button
-                          type="button"
-                          className="rounded-lg border border-red-300/40 bg-red-500/15 text-sm text-red-200"
-                          onClick={() => removeSupplierInvoiceItem(index)}
-                        >
-                          x
-                        </button>
-                      </div>
-                    ))}
+                                className="min-w-0 border-0 bg-transparent px-2 py-2 text-sm text-white outline-none"
+                              />
+                              <span className="flex items-center px-2 text-xs text-pos-muted">
+                                {stockUnit}
+                              </span>
+                            </div>
+                            <input
+                              required
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              placeholder="Price/unit"
+                              value={item.unitPrice}
+                              onChange={(event) =>
+                                updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
+                              }
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                            />
+                            <button
+                              type="button"
+                              className="rounded-lg border border-red-300/40 bg-red-500/15 text-sm text-red-200"
+                              onClick={() => removeSupplierInvoiceItem(index)}
+                            >
+                              x
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-pos-muted">
+                              1 {item.unit || "cope"} ={" "}
+                              {Number(item.stockUnitsPerPurchaseUnit || 0)} {stockUnit}
+                            </span>
+                            <span className="font-semibold text-emerald-200">
+                              Stock + {formatInvoiceItemStockImpact(item, selectedProduct)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <button
                     type="button"
@@ -2329,7 +2501,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {ensureArray(supplierOrder.items)
                               .map(
                                 (item) =>
-                                  `${item.product?.name || "Product"} #${item.productId} x${item.quantity} ${item.unit || item.product?.stockUnit || "cope"}`
+                                  `${item.product?.name || "Product"} #${item.productId} x${item.quantity} ${item.unit || item.product?.stockUnit || "cope"} -> ${formatInvoiceItemStockImpact(item, item.product)}`
                               )
                               .join(", ")}
                           </td>

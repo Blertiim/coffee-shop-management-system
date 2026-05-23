@@ -249,9 +249,9 @@ const buildOpenApiSpec = (baseUrl) => ({
       }),
       post: operation({
         tag: "Stock",
-        summary: "Create incoming invoice and increase stock when delivered",
+        summary: "Create incoming invoice and apply package-to-stock conversion when delivered",
         flow: "Stock and Invoices",
-        keywords: ["save invoice", "incoming invoice", "stock", "kg", "liter", "cope"],
+        keywords: ["save invoice", "incoming invoice", "stock", "package", "kg", "liter", "cope"],
         code: code("backend/src/modules/supplierOrders/supplier-order.routes.js", 15),
       }),
     },
