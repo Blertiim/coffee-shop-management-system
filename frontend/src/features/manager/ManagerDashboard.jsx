@@ -46,12 +46,14 @@ import {
   updateWaiterStatus,
 } from "./managerApi";
 
+const STOCK_INTAKE_ENABLED = false;
+
 const SECTIONS = [
   { key: "overview", label: "Dashboard" },
   { key: "products", label: "Products" },
   { key: "categories", label: "Categories" },
   { key: "stock", label: "Stock" },
-  { key: "incoming", label: "Incoming Invoices" },
+  ...(STOCK_INTAKE_ENABLED ? [{ key: "incoming", label: "Incoming Invoices" }] : []),
   { key: "employees", label: "Staff & Tables" },
   { key: "orders", label: "Orders" },
   { key: "reports", label: "Reports" },
@@ -484,11 +486,15 @@ export default function ManagerDashboard({ session, onLogout }) {
             label: "suppliers",
             load: () => getSuppliers(session.token, controller.signal),
           },
-          {
-            key: "supplierOrders",
-            label: "incoming invoices",
-            load: () => getSupplierOrders(session.token, controller.signal),
-          },
+          ...(STOCK_INTAKE_ENABLED
+            ? [
+                {
+                  key: "supplierOrders",
+                  label: "incoming invoices",
+                  load: () => getSupplierOrders(session.token, controller.signal),
+                },
+              ]
+            : []),
           {
             key: "waiters",
             label: "waiters",
@@ -2128,13 +2134,17 @@ export default function ManagerDashboard({ session, onLogout }) {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right">
-                            <button
-                              type="button"
-                              className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
-                              onClick={() => startIncomingInvoiceForProduct(product)}
-                            >
-                              Add invoice
-                            </button>
+                            {STOCK_INTAKE_ENABLED ? (
+                              <button
+                                type="button"
+                                className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
+                                onClick={() => startIncomingInvoiceForProduct(product)}
+                              >
+                                Add invoice
+                              </button>
+                            ) : (
+                              <span className="text-xs text-pos-muted">-</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2181,7 +2191,7 @@ export default function ManagerDashboard({ session, onLogout }) {
             </section>
           ) : null}
 
-          {activeSection === "incoming" ? (
+          {STOCK_INTAKE_ENABLED && activeSection === "incoming" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[520px_minmax(0,1fr)]">
               <article className="pos-panel rounded-xl p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
