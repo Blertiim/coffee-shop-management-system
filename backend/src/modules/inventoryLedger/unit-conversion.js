@@ -5,10 +5,10 @@ const UNIT_DEFINITIONS = {
   kg: { family: "mass", toBase: 1000 },
   ml: { family: "volume", toBase: 1 },
   l: { family: "volume", toBase: 1000 },
-  piece: { family: "piece", toBase: 1 },
-  pieces: { family: "piece", toBase: 1 },
-  cope: { family: "piece", toBase: 1 },
+  pcs: { family: "piece", toBase: 1 },
 };
+
+const BASE_UNITS = new Set(["g", "ml", "pcs"]);
 
 const normalizeUnit = (unit) => {
   const normalized = String(unit || "").trim().toLowerCase();
@@ -25,6 +25,16 @@ const normalizeUnit = (unit) => {
     return "kg";
   }
 
+  if (
+    normalized === "piece" ||
+    normalized === "pieces" ||
+    normalized === "pc" ||
+    normalized === "pcs" ||
+    normalized === "cope"
+  ) {
+    return "pcs";
+  }
+
   return normalized;
 };
 
@@ -32,7 +42,17 @@ const assertKnownUnit = (unit, fieldName = "Unit") => {
   const normalized = normalizeUnit(unit);
 
   if (!UNIT_DEFINITIONS[normalized]) {
-    throw new AppError(`${fieldName} must be one of: g, kg, ml, l, piece`);
+    throw new AppError(`${fieldName} must be one of: g, kg, ml, l, pcs`);
+  }
+
+  return normalized;
+};
+
+const assertBaseUnit = (unit, fieldName = "Base unit") => {
+  const normalized = assertKnownUnit(unit, fieldName);
+
+  if (!BASE_UNITS.has(normalized)) {
+    throw new AppError(`${fieldName} must be stored as one of: g, ml, pcs`);
   }
 
   return normalized;
@@ -49,7 +69,7 @@ const assertCompatibleUnits = (fromUnit, toUnit) => {
 
 const convertToBaseQuantity = (quantity, fromUnit, baseUnit) => {
   const normalizedFromUnit = assertKnownUnit(fromUnit, "Purchased unit");
-  const normalizedBaseUnit = assertKnownUnit(baseUnit, "Base unit");
+  const normalizedBaseUnit = assertBaseUnit(baseUnit, "Base unit");
   assertCompatibleUnits(normalizedFromUnit, normalizedBaseUnit);
 
   const from = UNIT_DEFINITIONS[normalizedFromUnit];
@@ -59,6 +79,7 @@ const convertToBaseQuantity = (quantity, fromUnit, baseUnit) => {
 };
 
 module.exports = {
+  assertBaseUnit,
   assertCompatibleUnits,
   assertKnownUnit,
   convertToBaseQuantity,

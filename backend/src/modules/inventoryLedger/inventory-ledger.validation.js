@@ -6,7 +6,7 @@ const {
   ensurePositiveNumber,
   ensureRequiredString,
 } = require("../../utils/validation");
-const { assertKnownUnit, normalizeUnit } = require("./unit-conversion");
+const { assertBaseUnit, assertKnownUnit, normalizeUnit } = require("./unit-conversion");
 
 const parsePageParams = (query = {}) => {
   const page = Math.max(1, Number.parseInt(query.page || "1", 10) || 1);
@@ -26,7 +26,7 @@ const parsePageParams = (query = {}) => {
 const validateCreateIngredientPayload = (body = {}) => ({
   name: ensureRequiredString(body.name, "Ingredient name"),
   sku: ensureOptionalString(body.sku, "Ingredient SKU"),
-  baseUnit: assertKnownUnit(body.baseUnit, "Ingredient base unit"),
+  baseUnit: assertBaseUnit(body.baseUnit, "Ingredient base unit"),
   minimumQuantity:
     body.minimumQuantity === undefined
       ? 0

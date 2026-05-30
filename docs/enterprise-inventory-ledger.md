@@ -4,12 +4,31 @@ This design treats inventory as ingredients, not menu products. Products are sol
 
 ## Core Rules
 
-- Stock is stored in base units: `g`, `ml`, or `piece`.
-- Purchases can arrive in larger units: `kg`, `l`, `piece`.
+- Stock is stored in base units only: `g`, `ml`, or `pcs`.
+- Purchases can arrive as `kg`, `g`, `l`, `ml`, or `pcs`, but the database ledger stores the converted base quantity.
 - Every stock change creates an immutable `stock_movements` row.
 - Stock intakes and ingredient deductions run inside database transactions.
 - Menu products consume ingredients through recipes.
 - Never assume `1 kg coffee = 1 espresso`.
+
+## Backend Modules
+
+The implementation is split by responsibility so UI screens cannot decide inventory rules:
+
+```txt
+backend/src/modules/inventoryLedger/
+  inventory-engine.service.js    # core stock mutation engine, movement + stock update
+  stock-intake.service.js        # supplier receiving workflow
+  recipe.service.js              # product -> ingredient mapping
+  stock-movement.service.js      # immutable movement query API
+  ingredient.service.js          # ingredient master data
+  inventory-ledger.repository.js # Prisma repository layer
+  inventory-ledger.validation.js # request validation and unit checks
+  inventory-ledger.controller.js # HTTP controllers
+  inventory-ledger.routes.js     # Express routes
+```
+
+Only `inventory-engine.service.js` is allowed to update `ingredients.current_quantity`. It updates stock and creates the matching `stock_movements` row inside the same transaction.
 
 ## Example Flow
 
@@ -46,7 +65,7 @@ CREATE TABLE ingredients (
   id BIGSERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   sku TEXT UNIQUE,
-  base_unit TEXT NOT NULL CHECK (base_unit IN ('g', 'ml', 'piece')),
+  base_unit TEXT NOT NULL CHECK (base_unit IN ('g', 'ml', 'pcs')),
   current_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
   minimum_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
   average_cost NUMERIC(12,4) NOT NULL DEFAULT 0,
@@ -70,7 +89,7 @@ CREATE TABLE recipe_items (
   recipe_id BIGINT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
   ingredient_id BIGINT NOT NULL REFERENCES ingredients(id),
   quantity NUMERIC(14,3) NOT NULL CHECK (quantity > 0),
-  unit TEXT NOT NULL CHECK (unit IN ('g', 'ml', 'piece')),
+  unit TEXT NOT NULL CHECK (unit IN ('g', 'ml', 'pcs')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(recipe_id, ingredient_id)
 );
@@ -93,9 +112,9 @@ CREATE TABLE stock_intake_items (
   stock_intake_id BIGINT NOT NULL REFERENCES stock_intakes(id) ON DELETE CASCADE,
   ingredient_id BIGINT NOT NULL REFERENCES ingredients(id),
   purchased_quantity NUMERIC(14,3) NOT NULL CHECK (purchased_quantity > 0),
-  purchased_unit TEXT NOT NULL CHECK (purchased_unit IN ('kg', 'g', 'l', 'ml', 'piece')),
+  purchased_unit TEXT NOT NULL CHECK (purchased_unit IN ('g', 'ml', 'pcs')),
   base_quantity NUMERIC(14,3) NOT NULL CHECK (base_quantity > 0),
-  base_unit TEXT NOT NULL CHECK (base_unit IN ('g', 'ml', 'piece')),
+  base_unit TEXT NOT NULL CHECK (base_unit IN ('g', 'ml', 'pcs')),
   unit_cost NUMERIC(12,4) NOT NULL CHECK (unit_cost > 0),
   line_total NUMERIC(12,2) NOT NULL CHECK (line_total >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -109,7 +128,7 @@ CREATE TABLE stock_movements (
   source_type TEXT NOT NULL,
   source_id TEXT,
   quantity NUMERIC(14,3) NOT NULL CHECK (quantity > 0),
-  unit TEXT NOT NULL CHECK (unit IN ('g', 'ml', 'piece')),
+  unit TEXT NOT NULL CHECK (unit IN ('g', 'ml', 'pcs')),
   previous_stock NUMERIC(14,3) NOT NULL,
   new_stock NUMERIC(14,3) NOT NULL,
   unit_cost NUMERIC(12,4),
@@ -190,8 +209,8 @@ Response shape:
     "items": [
       {
         "ingredientId": 1,
-        "purchasedQuantity": "13",
-        "purchasedUnit": "kg",
+        "purchasedQuantity": "13000",
+        "purchasedUnit": "g",
         "baseQuantity": "13000",
         "baseUnit": "g"
       }

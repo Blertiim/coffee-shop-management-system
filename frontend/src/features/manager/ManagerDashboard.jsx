@@ -191,10 +191,10 @@ const LEDGER_UNITS = [
   { value: "kg", label: "kilograms" },
   { value: "ml", label: "milliliters" },
   { value: "l", label: "liters" },
-  { value: "piece", label: "pieces" },
+  { value: "pcs", label: "pieces" },
 ];
 
-const BASE_UNITS = LEDGER_UNITS.filter((unit) => ["g", "ml", "piece"].includes(unit.value));
+const BASE_UNITS = LEDGER_UNITS.filter((unit) => ["g", "ml", "pcs"].includes(unit.value));
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -1206,7 +1206,7 @@ export default function ManagerDashboard({ session, onLogout }) {
         {
           ingredientId: ingredient?.id ? String(ingredient.id) : "",
           purchasedQuantity: "",
-          purchasedUnit: ingredient?.baseUnit === "piece" ? "piece" : "kg",
+          purchasedUnit: ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
           unitCost: "",
         },
       ],
@@ -1231,7 +1231,7 @@ export default function ManagerDashboard({ session, onLogout }) {
         {
           ingredientId: ingredient?.id ? String(ingredient.id) : "",
           purchasedQuantity: "",
-          purchasedUnit: ingredient?.baseUnit === "piece" ? "piece" : "kg",
+          purchasedUnit: ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
           unitCost: "",
         },
       ],
@@ -2939,7 +2939,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                               updateStockIntakeItem(
                                 index,
                                 "purchasedUnit",
-                                ingredient?.baseUnit === "piece" ? "piece" : "kg"
+                                ingredient?.baseUnit === "pcs" ? "pcs" : "kg"
                               );
                             }}
                             className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
