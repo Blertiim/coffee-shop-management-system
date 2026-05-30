@@ -2577,55 +2577,70 @@ export default function ManagerDashboard({ session, onLogout }) {
                   </div>
 
                   <form className="mt-4 grid gap-3" onSubmit={onIngredientSubmit}>
-                    <input
-                      required
-                      placeholder="Ingredient name, e.g. Coffee Beans"
-                      value={ingredientForm.name}
-                      onChange={(event) =>
-                        setIngredientForm((current) => ({ ...current, name: event.target.value }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <div className="grid grid-cols-2 gap-2">
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Ingredient name
                       <input
-                        placeholder="SKU optional"
-                        value={ingredientForm.sku}
+                        required
+                        placeholder="Coffee Beans"
+                        value={ingredientForm.name}
                         onChange={(event) =>
-                          setIngredientForm((current) => ({ ...current, sku: event.target.value }))
+                          setIngredientForm((current) => ({ ...current, name: event.target.value }))
                         }
-                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                       />
-                      <select
-                        value={ingredientForm.baseUnit}
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                        SKU
+                        <input
+                          placeholder="Optional"
+                          value={ingredientForm.sku}
+                          onChange={(event) =>
+                            setIngredientForm((current) => ({ ...current, sku: event.target.value }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                        Base unit
+                        <select
+                          value={ingredientForm.baseUnit}
+                          onChange={(event) =>
+                            setIngredientForm((current) => ({
+                              ...current,
+                              baseUnit: event.target.value,
+                            }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                        >
+                          {BASE_UNITS.map((unit) => (
+                            <option key={unit.value} value={unit.value}>
+                              {unit.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Low stock alert level
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        placeholder="Example: 2000 for 2kg coffee"
+                        value={ingredientForm.minimumQuantity}
                         onChange={(event) =>
                           setIngredientForm((current) => ({
                             ...current,
-                            baseUnit: event.target.value,
+                            minimumQuantity: event.target.value,
                           }))
                         }
-                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                      >
-                        {BASE_UNITS.map((unit) => (
-                          <option key={unit.value} value={unit.value}>
-                            Base: {unit.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.001"
-                      placeholder="Minimum quantity"
-                      value={ingredientForm.minimumQuantity}
-                      onChange={(event) =>
-                        setIngredientForm((current) => ({
-                          ...current,
-                          minimumQuantity: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                      />
+                      <span className="text-[11px] normal-case tracking-normal text-pos-muted">
+                        Optional. Leave 0 if you do not want low-stock alerts for this ingredient yet.
+                      </span>
+                    </label>
                     <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
                       Add Ingredient
                     </button>
