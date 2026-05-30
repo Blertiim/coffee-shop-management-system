@@ -6,9 +6,11 @@ import {
   assignTableToWaiter,
   buildRealtimeStreamUrl,
   createCategory,
+  createIngredient,
   createProduct,
   createSupplier,
   createSupplierOrder,
+  createStockIntake,
   createTable,
   createWaiter,
   deleteCategory,
@@ -26,9 +28,13 @@ import {
   getDashboardInvoices,
   getDashboardOrders,
   getGuestQrAccess,
+  getIngredients,
   getLowStockProducts,
   getManagerStats,
   getProducts,
+  getRecipes,
+  getStockIntakes,
+  getStockMovements,
   getSupplierOrders,
   getSuppliers,
   getSystemAlerts,
@@ -38,6 +44,7 @@ import {
   getWaiters,
   getWaiterPerformance,
   rotateGuestQrAccess,
+  saveRecipe,
   setWaiterTableAssignments,
   updateCategory,
   updateProduct,
@@ -46,14 +53,14 @@ import {
   updateWaiterStatus,
 } from "./managerApi";
 
-const STOCK_INTAKE_ENABLED = false;
+const STOCK_INTAKE_ENABLED = true;
 
 const SECTIONS = [
   { key: "overview", label: "Dashboard" },
   { key: "products", label: "Products" },
   { key: "categories", label: "Categories" },
   { key: "stock", label: "Stock" },
-  ...(STOCK_INTAKE_ENABLED ? [{ key: "incoming", label: "Incoming Invoices" }] : []),
+  ...(STOCK_INTAKE_ENABLED ? [{ key: "incoming", label: "Stock In" }] : []),
   { key: "employees", label: "Staff & Tables" },
   { key: "orders", label: "Orders" },
   { key: "reports", label: "Reports" },
@@ -125,6 +132,40 @@ const defaultSupplierInvoiceForm = {
   ],
 };
 
+const defaultIngredientForm = {
+  name: "",
+  sku: "",
+  baseUnit: "g",
+  minimumQuantity: "0",
+};
+
+const defaultRecipeForm = {
+  productId: "",
+  notes: "",
+  items: [
+    {
+      ingredientId: "",
+      quantity: "",
+      unit: "g",
+    },
+  ],
+};
+
+const defaultStockIntakeForm = {
+  supplierId: "",
+  invoiceNumber: "",
+  notes: "",
+  confirm: true,
+  items: [
+    {
+      ingredientId: "",
+      purchasedQuantity: "",
+      purchasedUnit: "kg",
+      unitCost: "",
+    },
+  ],
+};
+
 const defaultSupplierForm = {
   companyName: "",
   contactName: "",
@@ -144,6 +185,16 @@ const PURCHASE_UNITS = [
   ...STOCK_UNITS,
   { value: "paketa", label: "paketa" },
 ];
+
+const LEDGER_UNITS = [
+  { value: "g", label: "grams" },
+  { value: "kg", label: "kilograms" },
+  { value: "ml", label: "milliliters" },
+  { value: "l", label: "liters" },
+  { value: "piece", label: "pieces" },
+];
+
+const BASE_UNITS = LEDGER_UNITS.filter((unit) => ["g", "ml", "piece"].includes(unit.value));
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -245,6 +296,14 @@ const calculateInvoiceItemLineTotal = (item) =>
 
 const calculateInvoiceItemStockAfter = (item, product) =>
   Number(product?.stock || 0) + calculateInvoiceItemStockQuantity(item);
+
+const formatQuantity = (quantity, unit) =>
+  `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 3,
+  }).format(Number(quantity || 0))} ${unit || ""}`.trim();
+
+const calculateStockIntakeLineTotal = (item) =>
+  Number(item.purchasedQuantity || 0) * Number(item.unitCost || 0);
 
 const isAuthError = (error) => error?.status === 401 || error?.status === 403;
 
@@ -362,6 +421,10 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [supplierOrders, setSupplierOrders] = useState([]);
+  const [ingredients, setIngredients] = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [stockIntakes, setStockIntakes] = useState([]);
+  const [stockMovements, setStockMovements] = useState([]);
   const [waiters, setWaiters] = useState([]);
   const [tables, setTables] = useState([]);
   const [selectedWaiterForTables, setSelectedWaiterForTables] = useState(null);
@@ -379,6 +442,9 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [waiterForm, setWaiterForm] = useState(defaultWaiterForm);
   const [tableForm, setTableForm] = useState(defaultTableForm);
   const [supplierInvoiceForm, setSupplierInvoiceForm] = useState(defaultSupplierInvoiceForm);
+  const [ingredientForm, setIngredientForm] = useState(defaultIngredientForm);
+  const [recipeForm, setRecipeForm] = useState(defaultRecipeForm);
+  const [stockIntakeForm, setStockIntakeForm] = useState(defaultStockIntakeForm);
   const [supplierForm, setSupplierForm] = useState(defaultSupplierForm);
 
   const refreshAll = () => setRefreshTick((value) => value + 1);
@@ -493,6 +559,29 @@ export default function ManagerDashboard({ session, onLogout }) {
                   label: "incoming invoices",
                   load: () => getSupplierOrders(session.token, controller.signal),
                 },
+                {
+                  key: "ingredients",
+                  label: "ingredients",
+                  load: () =>
+                    getIngredients(session.token, { pageSize: 100 }, controller.signal),
+                },
+                {
+                  key: "recipes",
+                  label: "recipes",
+                  load: () => getRecipes(session.token, { pageSize: 100 }, controller.signal),
+                },
+                {
+                  key: "stockIntakes",
+                  label: "stock intakes",
+                  load: () =>
+                    getStockIntakes(session.token, { pageSize: 50 }, controller.signal),
+                },
+                {
+                  key: "stockMovements",
+                  label: "stock movements",
+                  load: () =>
+                    getStockMovements(session.token, { pageSize: 50 }, controller.signal),
+                },
               ]
             : []),
           {
@@ -548,6 +637,10 @@ export default function ManagerDashboard({ session, onLogout }) {
         const nextCategories = getResultValue("categories", []);
         const nextSuppliers = getResultValue("suppliers", []);
         const nextSupplierOrders = getResultValue("supplierOrders", []);
+        const nextIngredients = getResultValue("ingredients", { items: [] });
+        const nextRecipes = getResultValue("recipes", { items: [] });
+        const nextStockIntakes = getResultValue("stockIntakes", { items: [] });
+        const nextStockMovements = getResultValue("stockMovements", { items: [] });
         const nextWaiters = getResultValue("waiters", []);
         const nextTables = getResultValue("tables", []);
 
@@ -572,6 +665,10 @@ export default function ManagerDashboard({ session, onLogout }) {
         setCategories(ensureArray(nextCategories));
         setSuppliers(ensureArray(nextSuppliers));
         setSupplierOrders(ensureArray(nextSupplierOrders));
+        setIngredients(ensureArray(nextIngredients?.items || nextIngredients));
+        setRecipes(ensureArray(nextRecipes?.items || nextRecipes));
+        setStockIntakes(ensureArray(nextStockIntakes?.items || nextStockIntakes));
+        setStockMovements(ensureArray(nextStockMovements?.items || nextStockMovements));
         setWaiters(ensureArray(nextWaiters));
         setTables(ensureArray(nextTables));
 
@@ -752,6 +849,77 @@ export default function ManagerDashboard({ session, onLogout }) {
       };
     });
   }, [products, suppliers]);
+
+  useEffect(() => {
+    setStockIntakeForm((current) => {
+      const nextSupplierId =
+        current.supplierId || (suppliers[0]?.id ? String(suppliers[0].id) : "");
+      let didChangeItem = false;
+      const nextItems = current.items.map((item) => {
+        const nextIngredientId =
+          item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
+        const selectedIngredient =
+          ingredients.find((ingredient) => String(ingredient.id) === String(nextIngredientId)) ||
+          null;
+        const nextUnit = item.purchasedUnit || selectedIngredient?.baseUnit || "kg";
+
+        if (nextIngredientId !== item.ingredientId || nextUnit !== item.purchasedUnit) {
+          didChangeItem = true;
+        }
+
+        return {
+          ...item,
+          ingredientId: nextIngredientId,
+          purchasedUnit: nextUnit,
+        };
+      });
+
+      if (nextSupplierId === current.supplierId && !didChangeItem) {
+        return current;
+      }
+
+      return {
+        ...current,
+        supplierId: nextSupplierId,
+        items: nextItems,
+      };
+    });
+
+    setRecipeForm((current) => {
+      let didChangeItem = false;
+      const nextItems = current.items.map((item) => {
+        const nextIngredientId =
+          item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
+        const selectedIngredient =
+          ingredients.find((ingredient) => String(ingredient.id) === String(nextIngredientId)) ||
+          null;
+        const nextUnit = item.unit || selectedIngredient?.baseUnit || "g";
+
+        if (nextIngredientId !== item.ingredientId || nextUnit !== item.unit) {
+          didChangeItem = true;
+        }
+
+        return {
+          ...item,
+          ingredientId: nextIngredientId,
+          unit: nextUnit,
+        };
+      });
+
+      const nextProductId =
+        current.productId || (products[0]?.id ? String(products[0].id) : "");
+
+      if (nextProductId === current.productId && !didChangeItem) {
+        return current;
+      }
+
+      return {
+        ...current,
+        productId: nextProductId,
+        items: nextItems,
+      };
+    });
+  }, [ingredients, products, suppliers]);
 
   useEffect(() => {
     if (!tables.length) {
@@ -1010,6 +1178,110 @@ export default function ManagerDashboard({ session, onLogout }) {
     setActiveSection("incoming");
   };
 
+  const resetIngredientForm = () => {
+    setIngredientForm(defaultIngredientForm);
+  };
+
+  const resetRecipeForm = () => {
+    const ingredient = ingredients[0] || null;
+    setRecipeForm({
+      ...defaultRecipeForm,
+      productId: products[0]?.id ? String(products[0].id) : "",
+      items: [
+        {
+          ingredientId: ingredient?.id ? String(ingredient.id) : "",
+          quantity: "",
+          unit: ingredient?.baseUnit || "g",
+        },
+      ],
+    });
+  };
+
+  const resetStockIntakeForm = () => {
+    const ingredient = ingredients[0] || null;
+    setStockIntakeForm({
+      ...defaultStockIntakeForm,
+      supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
+      items: [
+        {
+          ingredientId: ingredient?.id ? String(ingredient.id) : "",
+          purchasedQuantity: "",
+          purchasedUnit: ingredient?.baseUnit === "piece" ? "piece" : "kg",
+          unitCost: "",
+        },
+      ],
+    });
+  };
+
+  const updateStockIntakeItem = (index, field, value) => {
+    setStockIntakeForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item
+      ),
+    }));
+  };
+
+  const addStockIntakeItem = () => {
+    const ingredient = ingredients[0] || null;
+    setStockIntakeForm((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        {
+          ingredientId: ingredient?.id ? String(ingredient.id) : "",
+          purchasedQuantity: "",
+          purchasedUnit: ingredient?.baseUnit === "piece" ? "piece" : "kg",
+          unitCost: "",
+        },
+      ],
+    }));
+  };
+
+  const removeStockIntakeItem = (index) => {
+    setStockIntakeForm((current) => ({
+      ...current,
+      items:
+        current.items.length === 1
+          ? current.items
+          : current.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const updateRecipeItem = (index, field, value) => {
+    setRecipeForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, [field]: value } : item
+      ),
+    }));
+  };
+
+  const addRecipeItem = () => {
+    const ingredient = ingredients[0] || null;
+    setRecipeForm((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        {
+          ingredientId: ingredient?.id ? String(ingredient.id) : "",
+          quantity: "",
+          unit: ingredient?.baseUnit || "g",
+        },
+      ],
+    }));
+  };
+
+  const removeRecipeItem = (index) => {
+    setRecipeForm((current) => ({
+      ...current,
+      items:
+        current.items.length === 1
+          ? current.items
+          : current.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
   const onProductSubmit = async (event) => {
     event.preventDefault();
     const normalizedStock =
@@ -1042,6 +1314,103 @@ export default function ManagerDashboard({ session, onLogout }) {
       }
       resetProductForm();
     }, editingProductId ? "Product updated." : "Product created.");
+  };
+
+  const onIngredientSubmit = async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      name: ingredientForm.name.trim(),
+      sku: ingredientForm.sku || null,
+      baseUnit: ingredientForm.baseUnit,
+      minimumQuantity: Number(ingredientForm.minimumQuantity || 0),
+    };
+
+    await runAction(async () => {
+      const ingredient = await createIngredient(session.token, payload);
+      setIngredients((current) =>
+        [...current, ingredient].sort((left, right) => left.name.localeCompare(right.name))
+      );
+      resetIngredientForm();
+    }, "Ingredient created.");
+  };
+
+  const onRecipeSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!recipeForm.productId) {
+      setError("Choose a product for the recipe.");
+      return;
+    }
+
+    if (
+      recipeForm.items.some(
+        (item) => !item.ingredientId || Number(item.quantity || 0) <= 0 || !item.unit
+      )
+    ) {
+      setError("Every recipe item needs an ingredient, quantity, and unit.");
+      return;
+    }
+
+    const payload = {
+      productId: Number(recipeForm.productId),
+      notes: recipeForm.notes || null,
+      items: recipeForm.items.map((item) => ({
+        ingredientId: Number(item.ingredientId),
+        quantity: Number(item.quantity),
+        unit: item.unit,
+      })),
+    };
+
+    await runAction(async () => {
+      const recipe = await saveRecipe(session.token, payload);
+      setRecipes((current) => {
+        const next = current.filter((entry) => entry.id !== recipe.id);
+        return [recipe, ...next];
+      });
+      resetRecipeForm();
+    }, "Recipe saved. Future sales will deduct ingredients.");
+  };
+
+  const onStockIntakeSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!stockIntakeForm.supplierId) {
+      setError("Choose a supplier before saving stock intake.");
+      return;
+    }
+
+    if (
+      stockIntakeForm.items.some(
+        (item) =>
+          !item.ingredientId ||
+          Number(item.purchasedQuantity || 0) <= 0 ||
+          Number(item.unitCost || 0) <= 0 ||
+          !item.purchasedUnit
+      )
+    ) {
+      setError("Every stock intake item needs ingredient, quantity, unit, and unit cost.");
+      return;
+    }
+
+    const payload = {
+      supplierId: Number(stockIntakeForm.supplierId),
+      invoiceNumber: stockIntakeForm.invoiceNumber || null,
+      notes: stockIntakeForm.notes || null,
+      confirm: Boolean(stockIntakeForm.confirm),
+      items: stockIntakeForm.items.map((item) => ({
+        ingredientId: Number(item.ingredientId),
+        purchasedQuantity: Number(item.purchasedQuantity),
+        purchasedUnit: item.purchasedUnit,
+        unitCost: Number(item.unitCost),
+      })),
+    };
+
+    await runAction(async () => {
+      const stockIntake = await createStockIntake(session.token, payload);
+      setStockIntakes((current) => [stockIntake, ...current]);
+      resetStockIntakeForm();
+    }, payload.confirm ? "Stock intake confirmed and ingredient stock updated." : "Stock intake saved as draft.");
   };
 
   const onSupplierInvoiceSubmit = async (event) => {
@@ -2138,9 +2507,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <button
                                 type="button"
                                 className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
-                                onClick={() => startIncomingInvoiceForProduct(product)}
+                                onClick={() => setActiveSection("incoming")}
                               >
-                                Add invoice
+                                Stock In
                               </button>
                             ) : (
                               <span className="text-xs text-pos-muted">-</span>
@@ -2192,6 +2561,629 @@ export default function ManagerDashboard({ session, onLogout }) {
           ) : null}
 
           {STOCK_INTAKE_ENABLED && activeSection === "incoming" ? (
+            <section className="grid min-h-0 grid-cols-1 gap-4 2xl:grid-cols-[420px_520px_minmax(0,1fr)]">
+              <div className="grid min-h-0 gap-4">
+                <article className="pos-panel rounded-xl p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-semibold text-white">Ingredients</h3>
+                      <p className="m-0 mt-1 text-xs text-pos-muted">
+                        Track raw stock in base units: grams, milliliters, or pieces.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
+                      {ingredients.length}
+                    </span>
+                  </div>
+
+                  <form className="mt-4 grid gap-3" onSubmit={onIngredientSubmit}>
+                    <input
+                      required
+                      placeholder="Ingredient name, e.g. Coffee Beans"
+                      value={ingredientForm.name}
+                      onChange={(event) =>
+                        setIngredientForm((current) => ({ ...current, name: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        placeholder="SKU optional"
+                        value={ingredientForm.sku}
+                        onChange={(event) =>
+                          setIngredientForm((current) => ({ ...current, sku: event.target.value }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <select
+                        value={ingredientForm.baseUnit}
+                        onChange={(event) =>
+                          setIngredientForm((current) => ({
+                            ...current,
+                            baseUnit: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      >
+                        {BASE_UNITS.map((unit) => (
+                          <option key={unit.value} value={unit.value}>
+                            Base: {unit.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      placeholder="Minimum quantity"
+                      value={ingredientForm.minimumQuantity}
+                      onChange={(event) =>
+                        setIngredientForm((current) => ({
+                          ...current,
+                          minimumQuantity: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
+                      Add Ingredient
+                    </button>
+                  </form>
+
+                  <div className="scroll-y mt-4 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                        <tr>
+                          <th className="px-3 py-2">Ingredient</th>
+                          <th className="px-3 py-2 text-right">Stock</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ingredients.map((ingredient) => (
+                          <tr key={ingredient.id} className="border-t border-white/10">
+                            <td className="px-3 py-2 text-white">
+                              {ingredient.name}
+                              <p className="m-0 text-xs text-pos-muted">
+                                #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold text-pos-text">
+                              {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                            </td>
+                          </tr>
+                        ))}
+                        {ingredients.length === 0 ? (
+                          <tr>
+                            <td colSpan="2" className="px-3 py-6 text-center text-pos-muted">
+                              Add Coffee Beans, Milk, cups, bottles, or other ingredients.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Recipe Builder</h3>
+                  <p className="m-0 mt-1 text-xs text-pos-muted">
+                    Connect sale products to ingredient consumption, e.g. Espresso = 8g coffee.
+                  </p>
+                  <form className="mt-4 grid gap-3" onSubmit={onRecipeSubmit}>
+                    <select
+                      required
+                      value={recipeForm.productId}
+                      onChange={(event) =>
+                        setRecipeForm((current) => ({ ...current, productId: event.target.value }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    >
+                      <option value="">Select product</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name} #{product.id}
+                        </option>
+                      ))}
+                    </select>
+
+                    {recipeForm.items.map((item, index) => (
+                      <div key={index} className="grid gap-2 rounded-xl border border-white/10 bg-black/15 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                            Recipe item {index + 1}
+                          </p>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200"
+                            disabled={recipeForm.items.length === 1}
+                            onClick={() => removeRecipeItem(index)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <select
+                          required
+                          value={item.ingredientId}
+                          onChange={(event) => {
+                            const ingredient = ingredients.find(
+                              (entry) => String(entry.id) === String(event.target.value)
+                            );
+                            updateRecipeItem(index, "ingredientId", event.target.value);
+                            updateRecipeItem(index, "unit", ingredient?.baseUnit || "g");
+                          }}
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        >
+                          <option value="">Ingredient</option>
+                          {ingredients.map((ingredient) => (
+                            <option key={ingredient.id} value={ingredient.id}>
+                              {ingredient.name} ({ingredient.baseUnit})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="grid grid-cols-[1fr_130px] gap-2">
+                          <input
+                            required
+                            type="number"
+                            min="0.001"
+                            step="0.001"
+                            placeholder="Quantity per sale"
+                            value={item.quantity}
+                            onChange={(event) =>
+                              updateRecipeItem(index, "quantity", event.target.value)
+                            }
+                            className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                          />
+                          <select
+                            value={item.unit}
+                            onChange={(event) => updateRecipeItem(index, "unit", event.target.value)}
+                            className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                          >
+                            {LEDGER_UNITS.map((unit) => (
+                              <option key={unit.value} value={unit.value}>
+                                {unit.value}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
+                      onClick={addRecipeItem}
+                    >
+                      Add recipe item
+                    </button>
+                    <textarea
+                      placeholder="Recipe notes optional"
+                      value={recipeForm.notes}
+                      onChange={(event) =>
+                        setRecipeForm((current) => ({ ...current, notes: event.target.value }))
+                      }
+                      className="min-h-[64px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
+                        Save Recipe
+                      </button>
+                      <button className="pos-button pos-button-muted" type="button" onClick={resetRecipeForm}>
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                </article>
+              </div>
+
+              <article className="pos-panel rounded-xl p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">Stock Intake</h3>
+                    <p className="m-0 mt-1 text-xs text-pos-muted">
+                      Receive ingredients from suppliers. Confirmed intake updates stock and writes movements.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-sky-300/25 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
+                    Transaction safe
+                  </span>
+                </div>
+
+                <form className="mt-4 grid gap-4" onSubmit={onStockIntakeSubmit}>
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                    Supplier
+                    <select
+                      required
+                      value={stockIntakeForm.supplierId}
+                      onChange={(event) =>
+                        setStockIntakeForm((current) => ({
+                          ...current,
+                          supplierId: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                    >
+                      <option value="">Select supplier</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.companyName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <details className="rounded-lg border border-white/10 bg-black/15 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-pos-text">
+                      Add supplier
+                    </summary>
+                    <div className="mt-3 grid gap-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          placeholder="Company"
+                          value={supplierForm.companyName}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({ ...current, companyName: event.target.value }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                        <input
+                          placeholder="Contact"
+                          value={supplierForm.contactName}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({ ...current, contactName: event.target.value }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          placeholder="Phone"
+                          value={supplierForm.phone}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({ ...current, phone: event.target.value }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                        <input
+                          type="email"
+                          placeholder="Email"
+                          value={supplierForm.email}
+                          onChange={(event) =>
+                            setSupplierForm((current) => ({ ...current, email: event.target.value }))
+                          }
+                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="pos-button pos-button-muted"
+                        disabled={isSaving}
+                        onClick={onSupplierSubmit}
+                      >
+                        Save Supplier
+                      </button>
+                    </div>
+                  </details>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Invoice number
+                      <input
+                        placeholder="INV-2026-001"
+                        value={stockIntakeForm.invoiceNumber}
+                        onChange={(event) =>
+                          setStockIntakeForm((current) => ({
+                            ...current,
+                            invoiceNumber: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-sm text-pos-text">
+                      <input
+                        type="checkbox"
+                        checked={stockIntakeForm.confirm}
+                        onChange={(event) =>
+                          setStockIntakeForm((current) => ({
+                            ...current,
+                            confirm: event.target.checked,
+                          }))
+                        }
+                      />
+                      Confirm and apply stock
+                    </label>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="m-0 text-sm font-semibold text-white">Items</p>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
+                        onClick={addStockIntakeItem}
+                      >
+                        Add item
+                      </button>
+                    </div>
+
+                    {stockIntakeForm.items.map((item, index) => {
+                      const selectedIngredient =
+                        ingredients.find((ingredient) => String(ingredient.id) === String(item.ingredientId)) ||
+                        null;
+                      const lineTotal = calculateStockIntakeLineTotal(item);
+
+                      return (
+                        <div key={index} className="grid gap-3 rounded-xl border border-white/10 bg-black/15 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Intake item {index + 1}
+                            </p>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-red-300/40 bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200"
+                              onClick={() => removeStockIntakeItem(index)}
+                              disabled={stockIntakeForm.items.length === 1}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <select
+                            required
+                            value={item.ingredientId}
+                            onChange={(event) => {
+                              const ingredient = ingredients.find(
+                                (entry) => String(entry.id) === String(event.target.value)
+                              );
+                              updateStockIntakeItem(index, "ingredientId", event.target.value);
+                              updateStockIntakeItem(
+                                index,
+                                "purchasedUnit",
+                                ingredient?.baseUnit === "piece" ? "piece" : "kg"
+                              );
+                            }}
+                            className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                          >
+                            <option value="">Ingredient</option>
+                            {ingredients.map((ingredient) => (
+                              <option key={ingredient.id} value={ingredient.id}>
+                                {ingredient.name} | Stock {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                              </option>
+                            ))}
+                          </select>
+
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <input
+                              required
+                              type="number"
+                              min="0.001"
+                              step="0.001"
+                              placeholder="Quantity bought"
+                              value={item.purchasedQuantity}
+                              onChange={(event) =>
+                                updateStockIntakeItem(index, "purchasedQuantity", event.target.value)
+                              }
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                            />
+                            <select
+                              value={item.purchasedUnit}
+                              onChange={(event) =>
+                                updateStockIntakeItem(index, "purchasedUnit", event.target.value)
+                              }
+                              className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                            >
+                              {LEDGER_UNITS.map((unit) => (
+                                <option key={unit.value} value={unit.value}>
+                                  {unit.value}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              required
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              placeholder="Cost per bought unit"
+                              value={item.unitCost}
+                              onChange={(event) =>
+                                updateStockIntakeItem(index, "unitCost", event.target.value)
+                              }
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                            />
+                          </div>
+
+                          <div className="grid gap-2 text-xs sm:grid-cols-3">
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                              <p className="m-0 text-pos-muted">Line total</p>
+                              <p className="m-0 mt-1 font-semibold text-white">{formatMoney(lineTotal)} EUR</p>
+                            </div>
+                            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
+                              <p className="m-0 text-emerald-100/80">Internal stock</p>
+                              <p className="m-0 mt-1 font-semibold text-emerald-200">
+                                {selectedIngredient
+                                  ? `${item.purchasedQuantity || 0} ${item.purchasedUnit} converts to ${selectedIngredient.baseUnit}`
+                                  : "Choose ingredient"}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                              <p className="m-0 text-pos-muted">Movement</p>
+                              <p className="m-0 mt-1 font-semibold text-white">
+                                {stockIntakeForm.confirm ? "IN history created" : "Draft only"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <textarea
+                    placeholder="Notes optional"
+                    value={stockIntakeForm.notes}
+                    onChange={(event) =>
+                      setStockIntakeForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                  />
+
+                  <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-pos-muted">Intake total</span>
+                      <span className="text-base font-semibold text-white">
+                        {formatMoney(
+                          stockIntakeForm.items.reduce(
+                            (sum, item) => sum + calculateStockIntakeLineTotal(item),
+                            0
+                          )
+                        )}{" "}
+                        EUR
+                      </span>
+                    </div>
+                    <p className="m-0 text-xs text-pos-muted">
+                      Confirmed intakes update ingredient stock and create immutable stock movements.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
+                      {stockIntakeForm.confirm ? "Save & Apply Stock" : "Save Draft"}
+                    </button>
+                    <button className="pos-button pos-button-muted" type="button" onClick={resetStockIntakeForm}>
+                      Clear
+                    </button>
+                  </div>
+                </form>
+              </article>
+
+              <div className="grid min-h-0 gap-4">
+                <article className="pos-panel min-h-0 rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Stock Intakes</h3>
+                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                        <tr>
+                          <th className="px-3 py-2">Invoice</th>
+                          <th className="px-3 py-2">Supplier</th>
+                          <th className="px-3 py-2">Items</th>
+                          <th className="px-3 py-2 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockIntakes.map((intake) => (
+                          <tr key={intake.id} className="border-t border-white/10 align-top">
+                            <td className="px-3 py-2 text-white">
+                              {intake.invoiceNumber || `#${intake.id}`}
+                              <p className="m-0 mt-1 text-xs text-pos-muted">{formatDate(intake.createdAt)}</p>
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {intake.supplier?.companyName || "Supplier"}
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {ensureArray(intake.items).map((item) => (
+                                <p key={item.id} className="m-0">
+                                  {item.ingredient?.name || "Ingredient"} +{" "}
+                                  {formatQuantity(item.baseQuantity, item.baseUnit)}
+                                </p>
+                              ))}
+                            </td>
+                            <td className="px-3 py-2 text-right text-pos-text">
+                              {formatMoney(intake.totalCost)} EUR
+                            </td>
+                          </tr>
+                        ))}
+                        {stockIntakes.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
+                              No stock intakes yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article className="pos-panel min-h-0 rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Stock Movements</h3>
+                  <p className="m-0 mt-1 text-xs text-pos-muted">
+                    Every IN or OUT stock change is stored here.
+                  </p>
+                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                        <tr>
+                          <th className="px-3 py-2">Type</th>
+                          <th className="px-3 py-2">Ingredient</th>
+                          <th className="px-3 py-2">Change</th>
+                          <th className="px-3 py-2">After</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockMovements.map((movement) => (
+                          <tr key={movement.id} className="border-t border-white/10">
+                            <td className="px-3 py-2">
+                              <span
+                                className={`rounded-full border px-2 py-1 text-xs ${
+                                  movement.type === "IN"
+                                    ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                                    : "border-orange-400/30 bg-orange-500/15 text-orange-200"
+                                }`}
+                              >
+                                {movement.type}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-white">
+                              {movement.ingredient?.name || "Ingredient"}
+                              <p className="m-0 text-xs text-pos-muted">{movement.sourceType}</p>
+                            </td>
+                            <td className="px-3 py-2 text-pos-text">
+                              {movement.type === "IN" ? "+" : "-"}
+                              {formatQuantity(movement.quantity, movement.unit)}
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {formatQuantity(movement.newStock, movement.unit)}
+                            </td>
+                          </tr>
+                        ))}
+                        {stockMovements.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
+                              No stock movement history yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Active Recipes</h3>
+                  <div className="mt-3 grid gap-2">
+                    {recipes.map((recipe) => (
+                      <div key={recipe.id} className="rounded-xl border border-white/10 bg-black/15 p-3">
+                        <p className="m-0 text-sm font-semibold text-white">
+                          {recipe.product?.name || `Product #${recipe.productId}`}
+                        </p>
+                        <p className="m-0 mt-1 text-xs text-pos-muted">
+                          {ensureArray(recipe.items)
+                            .map((item) =>
+                              `${formatQuantity(item.quantity, item.unit)} ${item.ingredient?.name || "ingredient"}`
+                            )
+                            .join(" + ")}
+                        </p>
+                      </div>
+                    ))}
+                    {recipes.length === 0 ? (
+                      <p className="text-sm text-pos-muted">No recipes configured yet.</p>
+                    ) : null}
+                  </div>
+                </article>
+              </div>
+            </section>
+          ) : null}
+
+          {false && STOCK_INTAKE_ENABLED && activeSection === "incoming" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[520px_minmax(0,1fr)]">
               <article className="pos-panel rounded-xl p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">

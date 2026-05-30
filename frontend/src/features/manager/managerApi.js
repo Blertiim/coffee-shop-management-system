@@ -133,6 +133,69 @@ export const getSupplierOrders = async (token, signal) =>
     })
   );
 
+export const getIngredients = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/ingredients${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
+export const createIngredient = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/inventory-ledger/ingredients", {
+      method: "POST",
+      token,
+      body: payload,
+    })
+  );
+
+export const getRecipes = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/recipes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
+export const saveRecipe = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/inventory-ledger/recipes", {
+      method: "PUT",
+      token,
+      body: payload,
+    })
+  );
+
+export const getStockIntakes = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/stock-intakes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
+export const createStockIntake = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/inventory-ledger/stock-intakes", {
+      method: "POST",
+      token,
+      body: payload,
+    })
+  );
+
+export const getStockMovements = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/stock-movements${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
+      method: "GET",
+      token,
+      signal,
+    })
+  );
+
 export const createSupplierOrder = async (token, payload) =>
   unwrapApiData(
     await apiRequest("/supplier-orders", {
