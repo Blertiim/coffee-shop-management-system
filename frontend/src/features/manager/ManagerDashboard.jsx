@@ -117,7 +117,7 @@ const defaultSupplierInvoiceForm = {
       productId: "",
       quantity: "1",
       unit: "",
-      stockUnitsPerPurchaseUnit: "",
+      stockQuantity: "",
       unitPrice: "",
     },
   ],
@@ -215,28 +215,17 @@ const getDefaultPurchaseUnitForProduct = (product) =>
 const getDefaultStockUnitsPerPurchaseUnit = (product, purchaseUnit) =>
   purchaseUnit === "paketa" ? String(product?.unitsPerPackage || "") : "1";
 
-const isPackagePurchaseUnit = (unit) => unit === "paketa";
-
-const hasStockUnitMismatch = (item, product) => {
-  if (!product) {
-    return false;
-  }
-
-  const purchaseUnit = item.unit || getProductStockUnit(product);
-  const stockUnit = getProductStockUnit(product);
-
-  return purchaseUnit !== stockUnit && !isPackagePurchaseUnit(purchaseUnit);
-};
-
-const getStockUnitMismatchMessage = (item, product) => {
-  const purchaseUnit = item.unit || getProductStockUnit(product);
-  const stockUnit = getProductStockUnit(product);
-
-  return `${product?.name || "This product"} is stocked in ${stockUnit}, but you selected ${purchaseUnit}. Create or edit a product with stock unit ${purchaseUnit}, or buy this product as ${stockUnit}${product?.unitsPerPackage ? " / paketa" : ""}.`;
-};
+const getDefaultStockQuantity = (product, purchaseUnit, quantity = "1") =>
+  String(
+    Number(quantity || 0) *
+      Number(getDefaultStockUnitsPerPurchaseUnit(product, purchaseUnit) || 1)
+  );
 
 const calculateInvoiceItemStockQuantity = (item) =>
-  Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0);
+  Number(
+    item.stockQuantity ||
+      Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0)
+  );
 
 const formatInvoiceItemStockImpact = (item, product) => {
   const stockQuantity = Number(
@@ -248,7 +237,9 @@ const formatInvoiceItemStockImpact = (item, product) => {
 };
 
 const calculateInvoiceItemLineTotal = (item) =>
-  Number(item.quantity || 0) * Number(item.unitPrice || 0);
+  item.id || item.supplierOrderId
+    ? Number(item.quantity || 0) * Number(item.unitPrice || 0)
+    : Number(item.unitPrice || 0);
 
 const calculateInvoiceItemStockAfter = (item, product) =>
   Number(product?.stock || 0) + calculateInvoiceItemStockQuantity(item);
@@ -640,7 +631,7 @@ export default function ManagerDashboard({ session, onLogout }) {
   const supplierInvoiceTotal = useMemo(
     () =>
       supplierInvoiceForm.items.reduce(
-        (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
+        (sum, item) => sum + calculateInvoiceItemLineTotal(item),
         0
       ),
     [supplierInvoiceForm.items]
@@ -725,14 +716,13 @@ export default function ManagerDashboard({ session, onLogout }) {
         const selectedProduct =
           products.find((product) => String(product.id) === String(nextProductId)) || null;
         const nextUnit = item.unit || getDefaultPurchaseUnitForProduct(selectedProduct);
-        const nextStockUnitsPerPurchaseUnit =
-          item.stockUnitsPerPurchaseUnit ||
-          getDefaultStockUnitsPerPurchaseUnit(selectedProduct, nextUnit);
+        const nextStockQuantity =
+          item.stockQuantity || getDefaultStockQuantity(selectedProduct, nextUnit, item.quantity);
 
         if (
           nextProductId !== item.productId ||
           nextUnit !== item.unit ||
-          nextStockUnitsPerPurchaseUnit !== item.stockUnitsPerPurchaseUnit
+          nextStockQuantity !== item.stockQuantity
         ) {
           didChangeItem = true;
         }
@@ -741,7 +731,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           ...item,
           productId: nextProductId,
           unit: nextUnit,
-          stockUnitsPerPurchaseUnit: nextStockUnitsPerPurchaseUnit,
+          stockQuantity: nextStockQuantity,
         };
       });
 
@@ -946,7 +936,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           productId: product?.id ? String(product.id) : "",
           quantity: "1",
           unit,
-          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
+          stockQuantity: getDefaultStockQuantity(product, unit),
           unitPrice: "",
         },
       ],
@@ -978,7 +968,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           productId: product?.id ? String(product.id) : "",
           quantity: "1",
           unit,
-          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
+          stockQuantity: getDefaultStockQuantity(product, unit),
           unitPrice: "",
         },
       ],
@@ -1006,7 +996,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           productId: String(product.id),
           quantity: "1",
           unit,
-          stockUnitsPerPurchaseUnit: getDefaultStockUnitsPerPurchaseUnit(product, unit),
+          stockQuantity: getDefaultStockQuantity(product, unit),
           unitPrice: "",
         },
       ],
@@ -1066,10 +1056,10 @@ export default function ManagerDashboard({ session, onLogout }) {
         (item) =>
           Number(item.quantity) <= 0 ||
           Number(item.unitPrice) <= 0 ||
-          Number(item.stockUnitsPerPurchaseUnit) <= 0
+          Number(item.stockQuantity) <= 0
       )
     ) {
-      setError("Every item needs a purchase quantity, stock conversion, and unit cost greater than 0.");
+      setError("Every item needs a purchase quantity, total stock to add, and total paid greater than 0.");
       return;
     }
 
@@ -1077,27 +1067,10 @@ export default function ManagerDashboard({ session, onLogout }) {
       supplierInvoiceForm.items.some(
         (item) =>
           !Number.isInteger(Number(item.quantity)) ||
-          !Number.isInteger(Number(item.stockUnitsPerPurchaseUnit))
+          !Number.isInteger(Number(item.stockQuantity))
       )
     ) {
-      setError("Purchase quantity and stock conversion must be whole numbers.");
-      return;
-    }
-
-    const mismatchedItem = supplierInvoiceForm.items.find((item) => {
-      const selectedProduct = products.find(
-        (product) => String(product.id) === String(item.productId)
-      );
-
-      return hasStockUnitMismatch(item, selectedProduct);
-    });
-
-    if (mismatchedItem) {
-      const selectedProduct = products.find(
-        (product) => String(product.id) === String(mismatchedItem.productId)
-      );
-
-      setError(getStockUnitMismatchMessage(mismatchedItem, selectedProduct));
+      setError("Purchase quantity and stock quantity must be whole numbers.");
       return;
     }
 
@@ -1107,13 +1080,13 @@ export default function ManagerDashboard({ session, onLogout }) {
       orderDate: supplierInvoiceForm.orderDate,
       expectedDate: supplierInvoiceForm.expectedDate || null,
       status: supplierInvoiceForm.status,
+      total: Number(supplierInvoiceTotal.toFixed(2)),
       notes: supplierInvoiceForm.notes || null,
       items: supplierInvoiceForm.items.map((item) => ({
         productId: Number(item.productId),
         quantity: Number(item.quantity),
-        unitPrice: Number(item.unitPrice),
+        unitPrice: Number((Number(item.unitPrice) / Number(item.quantity)).toFixed(4)),
         unit: item.unit || "cope",
-        stockUnitsPerPurchaseUnit: Number(item.stockUnitsPerPurchaseUnit),
         stockQuantity: calculateInvoiceItemStockQuantity(item),
       })),
     };
@@ -2426,7 +2399,6 @@ export default function ManagerDashboard({ session, onLogout }) {
                       const stockUnit = getProductStockUnit(selectedProduct);
                       const lineTotal = calculateInvoiceItemLineTotal(item);
                       const stockAfter = calculateInvoiceItemStockAfter(item, selectedProduct);
-                      const hasUnitMismatch = hasStockUnitMismatch(item, selectedProduct);
 
                       return (
                         <div
@@ -2469,8 +2441,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                                       ...entry,
                                       productId: event.target.value,
                                       unit: nextUnit,
-                                      stockUnitsPerPurchaseUnit:
-                                        getDefaultStockUnitsPerPurchaseUnit(nextProduct, nextUnit),
+                                      stockQuantity: getDefaultStockQuantity(
+                                        nextProduct,
+                                        nextUnit,
+                                        entry.quantity
+                                      ),
                                     };
                                   }),
                                 }))
@@ -2487,16 +2462,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                           </label>
 
                           {selectedProduct ? (
-                            <div
-                              className={`rounded-lg border p-2 text-xs ${
-                                hasUnitMismatch
-                                  ? "border-orange-300/40 bg-orange-500/15 text-orange-100"
-                                  : "border-white/10 bg-black/20 text-pos-muted"
-                              }`}
-                            >
-                              {hasUnitMismatch
-                                ? getStockUnitMismatchMessage(item, selectedProduct)
-                                : `This product stock is tracked in ${stockUnit}. Incoming stock will be added in ${stockUnit}.`}
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2 text-xs text-pos-muted">
+                              Buying as {item.unit || stockUnit}; stock will be added to{" "}
+                              {selectedProduct.name} in {stockUnit}. For coffee in kg, enter how
+                              many espresso portions that kg purchase should add.
                             </div>
                           ) : null}
 
@@ -2511,7 +2480,22 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 placeholder="Qty"
                                 value={item.quantity}
                                 onChange={(event) =>
-                                  updateSupplierInvoiceItem(index, "quantity", event.target.value)
+                                  setSupplierInvoiceForm((current) => ({
+                                    ...current,
+                                    items: current.items.map((entry, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...entry,
+                                            quantity: event.target.value,
+                                            stockQuantity: getDefaultStockQuantity(
+                                              selectedProduct,
+                                              entry.unit || stockUnit,
+                                              event.target.value
+                                            ),
+                                          }
+                                        : entry
+                                    ),
+                                  }))
                                 }
                                 className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                               />
@@ -2531,11 +2515,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                                         ? {
                                             ...entry,
                                             unit: nextUnit,
-                                            stockUnitsPerPurchaseUnit:
-                                              getDefaultStockUnitsPerPurchaseUnit(
-                                                selectedProduct,
-                                                nextUnit
-                                              ),
+                                            stockQuantity: getDefaultStockQuantity(
+                                              selectedProduct,
+                                              nextUnit,
+                                              entry.quantity
+                                            ),
                                           }
                                         : entry
                                     ),
@@ -2552,23 +2536,19 @@ export default function ManagerDashboard({ session, onLogout }) {
                             </label>
 
                             <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                              Stock added per bought unit
-                              <div
-                                className={`grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border bg-pos-panelSoft normal-case tracking-normal ${
-                                  hasUnitMismatch ? "border-orange-300/60" : "border-white/15"
-                                }`}
-                              >
+                              Total stock to add
+                              <div className="grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-white/15 bg-pos-panelSoft normal-case tracking-normal">
                                 <input
                                   required
                                   type="number"
                                   min="1"
                                   step="1"
-                                  placeholder="How many"
-                                  value={item.stockUnitsPerPurchaseUnit}
+                                  placeholder="Total"
+                                  value={item.stockQuantity}
                                   onChange={(event) =>
                                     updateSupplierInvoiceItem(
                                       index,
-                                      "stockUnitsPerPurchaseUnit",
+                                      "stockQuantity",
                                       event.target.value
                                     )
                                   }
@@ -2581,13 +2561,13 @@ export default function ManagerDashboard({ session, onLogout }) {
                             </label>
 
                             <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                              Cost per bought unit
+                              Total paid for this item
                               <input
                                 required
                                 type="number"
                                 min="0.01"
                                 step="0.01"
-                                placeholder="EUR"
+                                placeholder="EUR total"
                                 value={item.unitPrice}
                                 onChange={(event) =>
                                   updateSupplierInvoiceItem(index, "unitPrice", event.target.value)

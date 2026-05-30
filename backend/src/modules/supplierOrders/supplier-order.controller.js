@@ -98,7 +98,7 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
   doc.text("Product", columns.product, tableTop);
   doc.text("Bought", columns.quantity, tableTop);
   doc.text("Stock +", columns.stockQuantity, tableTop);
-  doc.text("Unit Price", columns.unitPrice, tableTop);
+  doc.text("Unit Cost", columns.unitPrice, tableTop);
   doc.text("Line Total", columns.total, tableTop);
   doc.moveTo(36, tableTop + 14).lineTo(558, tableTop + 14).strokeColor("#cccccc").stroke();
 
@@ -197,31 +197,13 @@ const withItemUnits = (items, productsById) =>
     const stockUnit = product?.stockUnit || "cope";
     const purchaseUnit = item.unit || stockUnit;
     const productPackageSize = Number(product?.unitsPerPackage || 0);
-    let stockUnitsPerPurchaseUnit =
+    const fallbackStockUnitsPerPurchaseUnit =
+      purchaseUnit === "paketa" && productPackageSize > 0 ? productPackageSize : 1;
+    const stockQuantity =
+      item.stockQuantity || item.quantity * (item.stockUnitsPerPurchaseUnit || fallbackStockUnitsPerPurchaseUnit);
+    const stockUnitsPerPurchaseUnit =
       item.stockUnitsPerPurchaseUnit ||
-      (purchaseUnit === "paketa" && productPackageSize > 0 ? productPackageSize : 1);
-    let stockQuantity = item.stockQuantity || item.quantity * stockUnitsPerPurchaseUnit;
-
-    if (
-      item.stockQuantity &&
-      item.stockUnitsPerPurchaseUnit &&
-      item.stockQuantity !== item.quantity * item.stockUnitsPerPurchaseUnit
-    ) {
-      throw new AppError(
-        `${product?.name || "Product"} stock quantity must match quantity x stock units per purchase unit`
-      );
-    }
-
-    if (item.stockQuantity && !item.stockUnitsPerPurchaseUnit) {
-      if (item.stockQuantity % item.quantity !== 0) {
-        throw new AppError(
-          `${product?.name || "Product"} stock quantity must divide evenly by purchase quantity`
-        );
-      }
-
-      stockUnitsPerPurchaseUnit = item.stockQuantity / item.quantity;
-      stockQuantity = item.stockQuantity;
-    }
+      Math.max(1, Math.round(stockQuantity / Math.max(item.quantity, 1)));
 
     if (purchaseUnit !== stockUnit && !item.stockUnitsPerPurchaseUnit && !item.stockQuantity && productPackageSize <= 0) {
       throw new AppError(
