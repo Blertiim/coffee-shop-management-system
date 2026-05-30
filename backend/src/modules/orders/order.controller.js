@@ -5,6 +5,10 @@ const AppError = require("../../utils/app-error");
 const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const { normalizeRole } = require("../../middlewares/role.middleware");
 const {
+  consumeIngredientsForOrderItems,
+  restoreIngredientsForOrderItems,
+} = require("../inventoryLedger/inventory-ledger.service");
+const {
   validateCreateOrderPayload,
   validateAppendOrderItemsPayload,
   validateCompletePaymentPayload,
@@ -233,7 +237,9 @@ const buildOrderItems = (products, normalizedItems) => {
       throw new AppError(`Product "${product.name}" is not available for ordering`);
     }
 
-    if (product.stock < item.quantity) {
+    const hasRecipe = Boolean(product.recipe && product.recipe.items && product.recipe.items.length);
+
+    if (!hasRecipe && product.stock < item.quantity) {
       throw new AppError(`Not enough stock for product "${product.name}"`);
     }
 
@@ -252,8 +258,24 @@ const buildOrderItems = (products, normalizedItems) => {
   };
 };
 
-const restoreStockForOrder = async (tx, items) => {
+const restoreStockForOrder = async (tx, items, options = {}) => {
+  await restoreIngredientsForOrderItems({
+    tx,
+    orderItems: items,
+    sourceId: options.sourceId || items[0]?.orderId || "",
+    actorId: options.actorId || null,
+  });
+
   for (const item of items) {
+    const recipe = await tx.recipe.findUnique({
+      where: { productId: item.productId },
+      include: { items: true },
+    });
+
+    if (recipe && recipe.items.length) {
+      continue;
+    }
+
     const updatedProduct = await tx.product.update({
       where: { id: item.productId },
       data: {
@@ -267,8 +289,24 @@ const restoreStockForOrder = async (tx, items) => {
   }
 };
 
-const deductStockForOrderItems = async (tx, orderItems) => {
+const deductStockForOrderItems = async (tx, orderItems, options = {}) => {
+  await consumeIngredientsForOrderItems({
+    tx,
+    orderItems,
+    sourceId: options.sourceId || "pending-order",
+    actorId: options.actorId || null,
+  });
+
   for (const item of orderItems) {
+    const recipe = await tx.recipe.findUnique({
+      where: { productId: item.productId },
+      include: { items: true },
+    });
+
+    if (recipe && recipe.items.length) {
+      continue;
+    }
+
     const updatedProduct = await tx.product.updateMany({
       where: {
         id: item.productId,
@@ -322,7 +360,10 @@ const applyOrderStatusTransition = async (
       throw new AppError("Only admin or manager can cancel orders", 403);
     }
 
-    await restoreStockForOrder(tx, existingOrder.items);
+    await restoreStockForOrder(tx, existingOrder.items, {
+      sourceId: existingOrder.id,
+      actorId: req.user?.id || null,
+    });
     await setTableStatusForOrder(tx, existingOrder, "available");
 
     return tx.order.update({
@@ -443,6 +484,13 @@ exports.createOrder = async (req, res) => {
               in: items.map((item) => item.productId),
             },
           },
+          include: {
+            recipe: {
+              include: {
+                items: true,
+              },
+            },
+          },
         }),
         tx.order.findFirst({
           where: {
@@ -477,8 +525,6 @@ exports.createOrder = async (req, res) => {
       const { orderItems, total: subtotal } = buildOrderItems(products, items);
       const totals = buildDiscountTotals(subtotal, discountType, discountValue);
 
-      await deductStockForOrderItems(tx, orderItems);
-
       await tx.table.update({
         where: { id: tableId },
         data: {
@@ -486,7 +532,7 @@ exports.createOrder = async (req, res) => {
         },
       });
 
-      return tx.order.create({
+      const order = await tx.order.create({
         data: {
           userId,
           tableId,
@@ -504,6 +550,13 @@ exports.createOrder = async (req, res) => {
         },
         include: orderInclude,
       });
+
+      await deductStockForOrderItems(tx, orderItems, {
+        sourceId: order.id,
+        actorId: userId,
+      });
+
+      return order;
     });
 
     return sendSuccess(res, 201, "Order created successfully", createdOrder);
@@ -592,10 +645,20 @@ exports.appendItemsToOrder = async (req, res) => {
             in: items.map((item) => item.productId),
           },
         },
+        include: {
+          recipe: {
+            include: {
+              items: true,
+            },
+          },
+        },
       });
 
       const { orderItems, total: addedSubtotal } = buildOrderItems(products, items);
-      await deductStockForOrderItems(tx, orderItems);
+      await deductStockForOrderItems(tx, orderItems, {
+        sourceId: existingOrder.id,
+        actorId: req.user?.id || null,
+      });
 
       await tx.orderItem.createMany({
         data: orderItems.map((item) => ({

@@ -19,6 +19,8 @@ model User {
   orders         Order[]
   assignedTables Table[]    @relation("TableAssignments")
   auditLogs      AuditLog[] @relation("AuditActor")
+  stockIntakes   StockIntake[] @relation("StockIntakeCreator")
+  stockMovements StockMovement[] @relation("StockMovementCreator")
 }
 
 model Category {
@@ -43,6 +45,7 @@ model Product {
   category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   orderItems         OrderItem[]
   supplierOrderItems SupplierOrderItem[]
+  recipe             Recipe?
   isAvailable        Boolean             @default(true)
   deletedAt          DateTime?
   createdAt          DateTime            @default(now())
@@ -145,6 +148,117 @@ model Supplier {
   updatedAt      DateTime        @updatedAt
   inventories    Inventory[]
   supplierOrders SupplierOrder[]
+  stockIntakes   StockIntake[]
+}
+
+model Ingredient {
+  id              Int               @id @default(autoincrement())
+  name            String            @unique
+  sku             String?           @unique
+  baseUnit        String
+  currentQuantity Decimal           @default(0) @db.Decimal(14, 3)
+  minimumQuantity Decimal           @default(0) @db.Decimal(14, 3)
+  averageCost     Decimal           @default(0) @db.Decimal(12, 4)
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  recipeItems     RecipeItem[]
+  stockIntakeItems StockIntakeItem[]
+  stockMovements  StockMovement[]
+
+  @@index([baseUnit])
+  @@index([isActive])
+}
+
+model Recipe {
+  id        Int          @id @default(autoincrement())
+  productId Int         @unique
+  version   Int         @default(1)
+  isActive  Boolean     @default(true)
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items     RecipeItem[]
+}
+
+model RecipeItem {
+  id           Int        @id @default(autoincrement())
+  recipeId     Int
+  ingredientId Int
+  quantity     Decimal    @db.Decimal(14, 3)
+  unit         String
+  createdAt    DateTime   @default(now())
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+
+  @@unique([recipeId, ingredientId])
+  @@index([ingredientId])
+}
+
+model StockIntake {
+  id            Int               @id @default(autoincrement())
+  supplierId    Int
+  invoiceNumber String?
+  notes         String?
+  status        String            @default("draft")
+  totalCost     Decimal           @default(0) @db.Decimal(12, 2)
+  confirmedAt   DateTime?
+  createdById   Int
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  supplier      Supplier          @relation(fields: [supplierId], references: [id])
+  createdBy     User              @relation("StockIntakeCreator", fields: [createdById], references: [id])
+  items         StockIntakeItem[]
+  movements     StockMovement[]
+
+  @@index([supplierId, createdAt])
+  @@index([createdById])
+  @@index([status, createdAt])
+}
+
+model StockIntakeItem {
+  id               Int          @id @default(autoincrement())
+  stockIntakeId    Int
+  ingredientId      Int
+  purchasedQuantity Decimal     @db.Decimal(14, 3)
+  purchasedUnit     String
+  baseQuantity      Decimal     @db.Decimal(14, 3)
+  baseUnit          String
+  unitCost          Decimal     @db.Decimal(12, 4)
+  lineTotal         Decimal     @db.Decimal(12, 2)
+  createdAt         DateTime    @default(now())
+  stockIntake       StockIntake @relation(fields: [stockIntakeId], references: [id], onDelete: Cascade)
+  ingredient        Ingredient  @relation(fields: [ingredientId], references: [id])
+
+  @@index([stockIntakeId])
+  @@index([ingredientId])
+}
+
+model StockMovement {
+  id              Int        @id @default(autoincrement())
+  ingredientId    Int
+  stockIntakeId   Int?
+  type            String
+  sourceType      String
+  sourceId        String?
+  quantity        Decimal    @db.Decimal(14, 3)
+  unit            String
+  previousStock   Decimal    @db.Decimal(14, 3)
+  newStock        Decimal    @db.Decimal(14, 3)
+  unitCost        Decimal?   @db.Decimal(12, 4)
+  totalCost       Decimal?   @db.Decimal(12, 2)
+  reason          String?
+  createdById     Int?
+  createdAt       DateTime   @default(now())
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id])
+  stockIntake     StockIntake? @relation(fields: [stockIntakeId], references: [id])
+  createdBy       User?      @relation("StockMovementCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([ingredientId, createdAt])
+  @@index([stockIntakeId])
+  @@index([type, createdAt])
+  @@index([sourceType, sourceId])
 }
 
 model Inventory {
