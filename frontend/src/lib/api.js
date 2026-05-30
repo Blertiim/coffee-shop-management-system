@@ -78,7 +78,7 @@ const parseResponse = async (response) => {
 export const unwrapApiData = (payload) => payload?.data ?? payload;
 
 export const apiRequest = async (path, options = {}) => {
-  const { token, headers, body, signal, timeoutMs = 10000, ...rest } = options;
+  const { token, headers, body, signal, timeoutMs = 45000, ...rest } = options;
   const resolvedHeaders = new Headers(headers || {});
   let resolvedBody = body;
   const abortController = new AbortController();
@@ -133,7 +133,7 @@ export const apiRequest = async (path, options = {}) => {
       } catch (error) {
         if (didTimeout) {
           const timeoutError = new Error(
-            "Request timed out. Check that the backend server is running."
+            "Backend is waking up. Wait a few seconds and try again."
           );
           timeoutError.name = "TimeoutError";
           timeoutError.status = 408;

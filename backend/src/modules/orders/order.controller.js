@@ -238,8 +238,9 @@ const buildOrderItems = (products, normalizedItems) => {
     }
 
     const hasRecipe = Boolean(product.recipe && product.recipe.items && product.recipe.items.length);
+    const hasDirectStockIngredient = Boolean(product.directStockIngredientId);
 
-    if (!hasRecipe && product.stock < item.quantity) {
+    if (!hasRecipe && !hasDirectStockIngredient && product.stock < item.quantity) {
       throw new AppError(`Not enough stock for product "${product.name}"`);
     }
 
@@ -271,8 +272,12 @@ const restoreStockForOrder = async (tx, items, options = {}) => {
       where: { productId: item.productId },
       include: { items: true },
     });
+    const product = await tx.product.findUnique({
+      where: { id: item.productId },
+      select: { directStockIngredientId: true },
+    });
 
-    if (recipe && recipe.items.length) {
+    if ((recipe && recipe.items.length) || product?.directStockIngredientId) {
       continue;
     }
 
@@ -302,8 +307,12 @@ const deductStockForOrderItems = async (tx, orderItems, options = {}) => {
       where: { productId: item.productId },
       include: { items: true },
     });
+    const productWithDirectStock = await tx.product.findUnique({
+      where: { id: item.productId },
+      select: { directStockIngredientId: true },
+    });
 
-    if (recipe && recipe.items.length) {
+    if ((recipe && recipe.items.length) || productWithDirectStock?.directStockIngredientId) {
       continue;
     }
 
@@ -490,6 +499,7 @@ exports.createOrder = async (req, res) => {
                 items: true,
               },
             },
+            directStockIngredient: true,
           },
         }),
         tx.order.findFirst({
@@ -651,6 +661,7 @@ exports.appendItemsToOrder = async (req, res) => {
               items: true,
             },
           },
+          directStockIngredient: true,
         },
       });
 

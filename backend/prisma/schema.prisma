@@ -42,7 +42,9 @@ model Product {
   unitsPerPackage    Int?
   imageUrl           String?
   categoryId         Int?
+  directStockIngredientId Int?
   category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  directStockIngredient Ingredient?       @relation("DirectStockProducts", fields: [directStockIngredientId], references: [id], onDelete: SetNull)
   orderItems         OrderItem[]
   supplierOrderItems SupplierOrderItem[]
   recipe             Recipe?
@@ -163,6 +165,7 @@ model Ingredient {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   recipeItems     RecipeItem[]
+  directStockProducts Product[]     @relation("DirectStockProducts")
   stockIntakeItems StockIntakeItem[]
   stockMovements  StockMovement[]
 

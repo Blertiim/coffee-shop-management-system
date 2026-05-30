@@ -95,6 +95,7 @@ const defaultProductForm = {
   stock: "1",
   stockUnit: "cope",
   unitsPerPackage: "",
+  directStockIngredientId: "",
   imageUrl: "",
   description: "",
   isAvailable: true,
@@ -1059,6 +1060,9 @@ export default function ManagerDashboard({ session, onLogout }) {
       stock: String(product.stock ?? ""),
       stockUnit: product.stockUnit || "cope",
       unitsPerPackage: product.unitsPerPackage ? String(product.unitsPerPackage) : "",
+      directStockIngredientId: product.directStockIngredientId
+        ? String(product.directStockIngredientId)
+        : "",
       imageUrl: product.imageUrl || "",
       description: product.description || "",
       isAvailable: Boolean(product.isAvailable),
@@ -1294,11 +1298,16 @@ export default function ManagerDashboard({ session, onLogout }) {
         : productForm.categoryId === ""
           ? undefined
           : Number(productForm.categoryId);
+    const normalizedDirectStockIngredientId =
+      productForm.directStockIngredientId === ""
+        ? null
+        : Number(productForm.directStockIngredientId);
     const payload = {
       name: productForm.name.trim(),
       price: Number(productForm.price),
       stockUnit: productForm.stockUnit || "cope",
       unitsPerPackage: normalizedUnitsPerPackage,
+      directStockIngredientId: normalizedDirectStockIngredientId,
       imageUrl: productForm.imageUrl || null,
       description: productForm.description || null,
       isAvailable: Boolean(productForm.isAvailable),
@@ -2153,6 +2162,31 @@ export default function ManagerDashboard({ session, onLogout }) {
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   />
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                    Direct stock ingredient
+                    <select
+                      value={productForm.directStockIngredientId}
+                      onChange={(event) =>
+                        setProductForm((current) => ({
+                          ...current,
+                          directStockIngredientId: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                    >
+                      <option value="">None - use recipe or product stock</option>
+                      {ingredients
+                        .filter((ingredient) => ingredient.baseUnit === "pcs")
+                        .map((ingredient) => (
+                          <option key={ingredient.id} value={ingredient.id}>
+                            {ingredient.name} | {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                          </option>
+                        ))}
+                    </select>
+                    <span className="text-[11px] normal-case tracking-normal text-pos-muted">
+                      For direct sale items like orange juice, cola, water, cans, and snacks.
+                    </span>
+                  </label>
                   <input
                     placeholder="Image URL"
                     value={productForm.imageUrl}
@@ -3016,7 +3050,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <p className="m-0 text-emerald-100/80">Internal stock</p>
                               <p className="m-0 mt-1 font-semibold text-emerald-200">
                                 {selectedIngredient
-                                  ? `${item.purchasedQuantity || 0} ${item.purchasedUnit} converts to ${selectedIngredient.baseUnit}`
+                                  ? item.purchasedQuantity
+                                    ? `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${selectedIngredient.baseUnit}`
+                                    : `Enter quantity; it will be stored as ${selectedIngredient.baseUnit}`
                                   : "Choose ingredient"}
                               </p>
                             </div>

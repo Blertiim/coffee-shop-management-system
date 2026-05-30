@@ -9,6 +9,7 @@ This design treats inventory as ingredients, not menu products. Products are sol
 - Every stock change creates an immutable `stock_movements` row.
 - Stock intakes and ingredient deductions run inside database transactions.
 - Menu products consume ingredients through recipes.
+- Direct-sale products can consume one counted ingredient automatically without a recipe.
 - Never assume `1 kg coffee = 1 espresso`.
 
 ## Backend Modules
@@ -38,6 +39,17 @@ Only `inventory-engine.service.js` is allowed to update `ingredients.current_qua
 4. System stores `13000g`.
 5. One Espresso sale creates movement `OUT 8g`.
 6. Remaining stock becomes `12992g`.
+
+## Direct Stock Product Flow
+
+Some cafe items do not need a recipe. Orange juice, bottled water, cola, cans, and packaged snacks are direct-stock products.
+
+1. Create ingredient: `Orange Juice Bottle`, base unit `pcs`.
+2. Link product `Orange Juice` to direct stock ingredient `Orange Juice Bottle`.
+3. Stock intake receives `96 pcs`.
+4. One Orange Juice sale creates movement `OUT 1 pcs`.
+
+This avoids fake recipes like `Orange Juice = 1 Orange Juice`.
 
 ## PostgreSQL Schema
 
@@ -73,6 +85,9 @@ CREATE TABLE ingredients (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE products
+  ADD COLUMN direct_stock_ingredient_id BIGINT REFERENCES ingredients(id);
 
 CREATE TABLE recipes (
   id BIGSERIAL PRIMARY KEY,

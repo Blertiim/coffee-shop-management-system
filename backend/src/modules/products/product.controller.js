@@ -86,7 +86,7 @@ exports.getAllProducts = async (req, res) => {
       where: {
         deletedAt: null,
       },
-      include: { category: true },
+      include: { category: true, directStockIngredient: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -107,7 +107,7 @@ exports.getProductById = async (req, res) => {
 
     const product = await prisma.product.findUnique({
       where: { id },
-      include: { category: true },
+      include: { category: true, directStockIngredient: true },
     });
 
     if (!product || product.deletedAt) {
@@ -132,12 +132,17 @@ exports.createProduct = async (req, res) => {
       unitsPerPackage,
       imageUrl,
       categoryId,
+      directStockIngredientId,
       isAvailable,
     } = req.body;
 
     const normalizedName = normalizeRequiredString(name);
     const normalizedPrice = parsePrice(price);
     const normalizedCategoryId = parseId(categoryId);
+    const normalizedDirectStockIngredientId =
+      directStockIngredientId === undefined || directStockIngredientId === null || directStockIngredientId === ""
+        ? null
+        : parseId(directStockIngredientId);
     const normalizedStock = stock !== undefined ? parseStock(stock) : 0;
     const normalizedStockUnit = normalizeStockUnit(stockUnit);
     const normalizedUnitsPerPackage = parseOptionalPositiveInteger(unitsPerPackage);
@@ -157,6 +162,17 @@ exports.createProduct = async (req, res) => {
     if (stock !== undefined && normalizedStock === null) {
       return res.status(400).json({
         error: "Stock must be a whole number greater than or equal to 0",
+      });
+    }
+
+    if (
+      directStockIngredientId !== undefined &&
+      directStockIngredientId !== null &&
+      directStockIngredientId !== "" &&
+      !normalizedDirectStockIngredientId
+    ) {
+      return res.status(400).json({
+        error: "directStockIngredientId must be a valid positive integer or empty",
       });
     }
 
@@ -211,6 +227,16 @@ exports.createProduct = async (req, res) => {
       return res.status(404).json({ error: "Category not found" });
     }
 
+    if (normalizedDirectStockIngredientId) {
+      const ingredient = await prisma.ingredient.findFirst({
+        where: { id: normalizedDirectStockIngredientId, isActive: true },
+      });
+
+      if (!ingredient) {
+        return res.status(404).json({ error: "Direct stock ingredient not found" });
+      }
+    }
+
     const product = await prisma.product.create({
       data: {
         name: normalizedName,
@@ -222,9 +248,10 @@ exports.createProduct = async (req, res) => {
         unitsPerPackage: normalizedUnitsPerPackage,
         imageUrl: imageUrl !== undefined ? normalizeOptionalString(imageUrl) : null,
         categoryId: normalizedCategoryId,
+        directStockIngredientId: normalizedDirectStockIngredientId,
         isAvailable: isAvailable !== undefined ? isAvailable : true,
       },
-      include: { category: true },
+      include: { category: true, directStockIngredient: true },
     });
 
     await syncProductStockAlert(product);
@@ -264,6 +291,7 @@ exports.updateProduct = async (req, res) => {
       unitsPerPackage,
       imageUrl,
       categoryId,
+      directStockIngredientId,
       isAvailable,
     } = req.body;
 
@@ -375,6 +403,30 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
+    if (directStockIngredientId !== undefined) {
+      if (directStockIngredientId === null || directStockIngredientId === "") {
+        data.directStockIngredientId = null;
+      } else {
+        const normalizedDirectStockIngredientId = parseId(directStockIngredientId);
+
+        if (!normalizedDirectStockIngredientId) {
+          return res.status(400).json({
+            error: "directStockIngredientId must be a valid positive integer or null",
+          });
+        }
+
+        const ingredient = await prisma.ingredient.findFirst({
+          where: { id: normalizedDirectStockIngredientId, isActive: true },
+        });
+
+        if (!ingredient) {
+          return res.status(404).json({ error: "Direct stock ingredient not found" });
+        }
+
+        data.directStockIngredientId = normalizedDirectStockIngredientId;
+      }
+    }
+
     if (isAvailable !== undefined) {
       if (typeof isAvailable !== "boolean") {
         return res.status(400).json({
@@ -394,7 +446,7 @@ exports.updateProduct = async (req, res) => {
     const updatedProduct = await prisma.product.update({
       where: { id },
       data,
-      include: { category: true },
+      include: { category: true, directStockIngredient: true },
     });
 
     await syncProductStockAlert(updatedProduct);
@@ -512,7 +564,7 @@ exports.updateProductStock = async (req, res) => {
       data: {
         stock: nextStock,
       },
-      include: { category: true },
+      include: { category: true, directStockIngredient: true },
     });
 
     await syncProductStockAlert(updatedProduct);
