@@ -1,6 +1,7 @@
 const resolveAutoApiBaseUrls = () => {
   const apiPort = String(import.meta.env.VITE_API_PORT || "5000").trim() || "5000";
   const sameOriginCandidate = "/api";
+  const productionBackendCandidate = "https://coffee-shop-management-backend.onrender.com/api";
   const localCandidates = [
     sameOriginCandidate,
     `http://127.0.0.1:${apiPort}/api`,
@@ -8,17 +9,24 @@ const resolveAutoApiBaseUrls = () => {
   ];
 
   if (typeof window === "undefined") {
-    return localCandidates;
+    return [...localCandidates, productionBackendCandidate];
   }
 
+  const isProductionHost =
+    window.location.hostname.endsWith(".netlify.app") ||
+    window.location.hostname === "coffee-shop-pos-blertim.netlify.app";
   const currentHostCandidate =
     window.location.hostname && window.location.protocol
       ? `${window.location.protocol}//${window.location.hostname}:${apiPort}/api`
       : null;
 
-  return [sameOriginCandidate, currentHostCandidate, ...localCandidates].filter(
-    (candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index
-  );
+  return [
+    sameOriginCandidate,
+    ...(isProductionHost ? [productionBackendCandidate] : []),
+    currentHostCandidate,
+    ...localCandidates,
+    productionBackendCandidate,
+  ].filter((candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index);
 };
 
 const isAutoApiBaseUrl =

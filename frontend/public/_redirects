@@ -1,0 +1,3 @@
+/apis https://coffee-shop-management-backend.onrender.com/api/system/api-catalog 200!
+/api/* https://coffee-shop-management-backend.onrender.com/api/:splat 200!
+/* /index.html 200
