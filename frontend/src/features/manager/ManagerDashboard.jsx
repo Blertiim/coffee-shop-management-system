@@ -215,6 +215,26 @@ const getDefaultPurchaseUnitForProduct = (product) =>
 const getDefaultStockUnitsPerPurchaseUnit = (product, purchaseUnit) =>
   purchaseUnit === "paketa" ? String(product?.unitsPerPackage || "") : "1";
 
+const isPackagePurchaseUnit = (unit) => unit === "paketa";
+
+const hasStockUnitMismatch = (item, product) => {
+  if (!product) {
+    return false;
+  }
+
+  const purchaseUnit = item.unit || getProductStockUnit(product);
+  const stockUnit = getProductStockUnit(product);
+
+  return purchaseUnit !== stockUnit && !isPackagePurchaseUnit(purchaseUnit);
+};
+
+const getStockUnitMismatchMessage = (item, product) => {
+  const purchaseUnit = item.unit || getProductStockUnit(product);
+  const stockUnit = getProductStockUnit(product);
+
+  return `${product?.name || "This product"} is stocked in ${stockUnit}, but you selected ${purchaseUnit}. Create or edit a product with stock unit ${purchaseUnit}, or buy this product as ${stockUnit}${product?.unitsPerPackage ? " / paketa" : ""}.`;
+};
+
 const calculateInvoiceItemStockQuantity = (item) =>
   Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0);
 
@@ -1061,6 +1081,23 @@ export default function ManagerDashboard({ session, onLogout }) {
       )
     ) {
       setError("Purchase quantity and stock conversion must be whole numbers.");
+      return;
+    }
+
+    const mismatchedItem = supplierInvoiceForm.items.find((item) => {
+      const selectedProduct = products.find(
+        (product) => String(product.id) === String(item.productId)
+      );
+
+      return hasStockUnitMismatch(item, selectedProduct);
+    });
+
+    if (mismatchedItem) {
+      const selectedProduct = products.find(
+        (product) => String(product.id) === String(mismatchedItem.productId)
+      );
+
+      setError(getStockUnitMismatchMessage(mismatchedItem, selectedProduct));
       return;
     }
 
@@ -2389,6 +2426,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                       const stockUnit = getProductStockUnit(selectedProduct);
                       const lineTotal = calculateInvoiceItemLineTotal(item);
                       const stockAfter = calculateInvoiceItemStockAfter(item, selectedProduct);
+                      const hasUnitMismatch = hasStockUnitMismatch(item, selectedProduct);
 
                       return (
                         <div
@@ -2448,6 +2486,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                             </select>
                           </label>
 
+                          {selectedProduct ? (
+                            <div
+                              className={`rounded-lg border p-2 text-xs ${
+                                hasUnitMismatch
+                                  ? "border-orange-300/40 bg-orange-500/15 text-orange-100"
+                                  : "border-white/10 bg-black/20 text-pos-muted"
+                              }`}
+                            >
+                              {hasUnitMismatch
+                                ? getStockUnitMismatchMessage(item, selectedProduct)
+                                : `This product stock is tracked in ${stockUnit}. Incoming stock will be added in ${stockUnit}.`}
+                            </div>
+                          ) : null}
+
                           <div className="grid gap-3 md:grid-cols-2">
                             <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
                               Bought quantity
@@ -2501,7 +2553,11 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                             <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
                               Stock added per bought unit
-                              <div className="grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-white/15 bg-pos-panelSoft normal-case tracking-normal">
+                              <div
+                                className={`grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border bg-pos-panelSoft normal-case tracking-normal ${
+                                  hasUnitMismatch ? "border-orange-300/60" : "border-white/15"
+                                }`}
+                              >
                                 <input
                                   required
                                   type="number"
