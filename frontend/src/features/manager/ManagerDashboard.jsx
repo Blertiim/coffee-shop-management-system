@@ -110,7 +110,7 @@ const defaultSupplierInvoiceForm = {
   invoiceNumber: "",
   orderDate: todayDate,
   expectedDate: "",
-  status: "pending",
+  status: "delivered",
   notes: "",
   items: [
     {
@@ -226,6 +226,12 @@ const formatInvoiceItemStockImpact = (item, product) => {
 
   return stockQuantity > 0 ? `${stockQuantity} ${stockUnit}` : `0 ${stockUnit}`;
 };
+
+const calculateInvoiceItemLineTotal = (item) =>
+  Number(item.quantity || 0) * Number(item.unitPrice || 0);
+
+const calculateInvoiceItemStockAfter = (item, product) =>
+  Number(product?.stock || 0) + calculateInvoiceItemStockQuantity(item);
 
 const isAuthError = (error) => error?.status === 401 || error?.status === 403;
 
@@ -1043,7 +1049,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           Number(item.stockUnitsPerPurchaseUnit) <= 0
       )
     ) {
-      setError("Quantity, conversion, and unit price must be greater than 0 for every item.");
+      setError("Every item needs a purchase quantity, stock conversion, and unit cost greater than 0.");
       return;
     }
 
@@ -1099,12 +1105,38 @@ export default function ManagerDashboard({ session, onLogout }) {
       } catch (pdfError) {
         setError(`Invoice saved, but PDF could not download: ${pdfError.message || "PDF failed."}`);
       }
-    }, payload.status === "delivered" ? "Incoming invoice saved, stock increased, and PDF downloaded." : "Incoming invoice saved and PDF downloaded.");
+    }, payload.status === "delivered" ? "Incoming invoice saved, stock increased, and PDF downloaded." : "Incoming invoice saved as a draft and PDF downloaded.");
   };
 
   const markSupplierInvoiceDelivered = async (supplierOrder) => {
     await runAction(
-      () => updateSupplierOrder(session.token, supplierOrder.id, { status: "delivered" }),
+      async () => {
+        const updatedSupplierOrder = await updateSupplierOrder(session.token, supplierOrder.id, {
+          status: "delivered",
+        });
+
+        setSupplierOrders((current) =>
+          current.map((entry) =>
+            entry.id === updatedSupplierOrder.id ? updatedSupplierOrder : entry
+          )
+        );
+        setProducts((current) =>
+          current.map((product) => {
+            const receivedItem = ensureArray(updatedSupplierOrder.items).find(
+              (item) => item.productId === product.id
+            );
+
+            return receivedItem
+              ? {
+                  ...product,
+                  stock: Number(product.stock || 0) + Number(receivedItem.stockQuantity || 0),
+                }
+              : product;
+          })
+        );
+
+        return updatedSupplierOrder;
+      },
       "Incoming invoice delivered. Stock increased from invoice items."
     );
   };
@@ -2140,28 +2172,51 @@ export default function ManagerDashboard({ session, onLogout }) {
           ) : null}
 
           {activeSection === "incoming" ? (
-            <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
+            <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[520px_minmax(0,1fr)]">
               <article className="pos-panel rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Incoming Invoice</h3>
-                <form className="mt-3 grid gap-2" onSubmit={onSupplierInvoiceSubmit}>
-                  <select
-                    required
-                    value={supplierInvoiceForm.supplierId}
-                    onChange={(event) =>
-                      setSupplierInvoiceForm((current) => ({
-                        ...current,
-                        supplierId: event.target.value,
-                      }))
-                    }
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">Stock Intake</h3>
+                    <p className="m-0 mt-1 text-xs text-pos-muted">
+                      Enter what arrived from a supplier. Delivered invoices apply stock once.
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                      supplierInvoiceForm.status === "delivered"
+                        ? "border-emerald-300/30 bg-emerald-500/15 text-emerald-200"
+                        : "border-orange-300/30 bg-orange-500/15 text-orange-200"
+                    }`}
                   >
-                    <option value="">Select supplier</option>
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.id}>
-                        {supplier.companyName}
-                      </option>
-                    ))}
-                  </select>
+                    {supplierInvoiceForm.status === "delivered"
+                      ? "Stock will update"
+                      : "Draft only"}
+                  </span>
+                </div>
+
+                <form className="mt-4 grid gap-4" onSubmit={onSupplierInvoiceSubmit}>
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                    Supplier
+                    <select
+                      required
+                      value={supplierInvoiceForm.supplierId}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          supplierId: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                    >
+                      <option value="">Select supplier</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.companyName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <details className="rounded-lg border border-white/10 bg-black/15 p-3">
                     <summary className="cursor-pointer text-sm font-semibold text-pos-text">
                       Add supplier
@@ -2237,228 +2292,316 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </button>
                     </div>
                   </details>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      placeholder="Invoice number"
-                      value={supplierInvoiceForm.invoiceNumber}
-                      onChange={(event) =>
-                        setSupplierInvoiceForm((current) => ({
-                          ...current,
-                          invoiceNumber: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <select
-                      value={supplierInvoiceForm.status}
-                      onChange={(event) =>
-                        setSupplierInvoiceForm((current) => ({
-                          ...current,
-                          status: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="approved">Approved</option>
-                      <option value="delivered">Delivered</option>
-                    </select>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Invoice number
+                      <input
+                        placeholder="Optional"
+                        value={supplierInvoiceForm.invoiceNumber}
+                        onChange={(event) =>
+                          setSupplierInvoiceForm((current) => ({
+                            ...current,
+                            invoiceNumber: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                      />
+                    </label>
+
+                    <div className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Stock action
+                      <div className="grid grid-cols-3 gap-2 normal-case tracking-normal">
+                        {[
+                          { value: "pending", label: "Draft" },
+                          { value: "approved", label: "Ordered" },
+                          { value: "delivered", label: "Delivered" },
+                        ].map((statusOption) => (
+                          <button
+                            key={statusOption.value}
+                            type="button"
+                            className={`rounded-lg border px-2 py-2 text-xs font-semibold transition ${
+                              supplierInvoiceForm.status === statusOption.value
+                                ? "border-emerald-300/40 bg-emerald-400/80 text-[#052016]"
+                                : "border-white/15 bg-pos-panelSoft text-pos-text hover:bg-white/10"
+                            }`}
+                            onClick={() =>
+                              setSupplierInvoiceForm((current) => ({
+                                ...current,
+                                status: statusOption.value,
+                              }))
+                            }
+                          >
+                            {statusOption.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="date"
-                      value={supplierInvoiceForm.orderDate}
-                      onChange={(event) =>
-                        setSupplierInvoiceForm((current) => ({
-                          ...current,
-                          orderDate: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <input
-                      type="date"
-                      value={supplierInvoiceForm.expectedDate}
-                      onChange={(event) =>
-                        setSupplierInvoiceForm((current) => ({
-                          ...current,
-                          expectedDate: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Invoice date
+                      <input
+                        type="date"
+                        value={supplierInvoiceForm.orderDate}
+                        onChange={(event) =>
+                          setSupplierInvoiceForm((current) => ({
+                            ...current,
+                            orderDate: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                      Expected date
+                      <input
+                        type="date"
+                        value={supplierInvoiceForm.expectedDate}
+                        onChange={(event) =>
+                          setSupplierInvoiceForm((current) => ({
+                            ...current,
+                            expectedDate: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                      />
+                    </label>
                   </div>
+
                   <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="m-0 text-sm font-semibold text-white">Items</p>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
+                        onClick={addSupplierInvoiceItem}
+                      >
+                        Add item
+                      </button>
+                    </div>
+
                     {supplierInvoiceForm.items.map((item, index) => {
                       const selectedProduct =
                         products.find((product) => String(product.id) === String(item.productId)) ||
                         null;
                       const stockUnit = getProductStockUnit(selectedProduct);
+                      const lineTotal = calculateInvoiceItemLineTotal(item);
+                      const stockAfter = calculateInvoiceItemStockAfter(item, selectedProduct);
 
                       return (
                         <div
                           key={index}
-                          className="grid gap-2 rounded-lg border border-white/10 bg-black/15 p-2"
+                          className="grid gap-3 rounded-xl border border-white/10 bg-black/15 p-3"
                         >
-                          <select
-                            required
-                            value={item.productId}
-                            onChange={(event) =>
-                              setSupplierInvoiceForm((current) => ({
-                                ...current,
-                                items: current.items.map((entry, itemIndex) => {
-                                  if (itemIndex !== index) {
-                                    return entry;
-                                  }
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Item {index + 1}
+                            </p>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-red-300/40 bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200"
+                              onClick={() => removeSupplierInvoiceItem(index)}
+                              disabled={supplierInvoiceForm.items.length === 1}
+                            >
+                              Remove
+                            </button>
+                          </div>
 
-                                  const nextProduct = products.find(
-                                    (product) => String(product.id) === String(event.target.value)
-                                  );
-                                  const nextUnit = getDefaultPurchaseUnitForProduct(nextProduct);
-
-                                  return {
-                                    ...entry,
-                                    productId: event.target.value,
-                                    unit: nextUnit,
-                                    stockUnitsPerPurchaseUnit:
-                                      getDefaultStockUnitsPerPurchaseUnit(nextProduct, nextUnit),
-                                  };
-                                }),
-                              }))
-                            }
-                            className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                          >
-                            <option value="">Product</option>
-                            {products.map((product) => (
-                              <option key={product.id} value={product.id}>
-                                {formatProductOption(product)}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="grid grid-cols-[72px_86px_1fr_96px_34px] gap-2">
-                            <input
-                              required
-                              type="number"
-                              min="1"
-                              step="1"
-                              placeholder="Qty"
-                              value={item.quantity}
-                              onChange={(event) =>
-                                updateSupplierInvoiceItem(index, "quantity", event.target.value)
-                              }
-                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                            />
+                          <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                            Product
                             <select
-                              value={item.unit || "cope"}
-                              onChange={(event) => {
-                                const nextUnit = event.target.value;
-
+                              required
+                              value={item.productId}
+                              onChange={(event) =>
                                 setSupplierInvoiceForm((current) => ({
                                   ...current,
-                                  items: current.items.map((entry, itemIndex) =>
-                                    itemIndex === index
-                                      ? {
-                                          ...entry,
-                                          unit: nextUnit,
-                                          stockUnitsPerPurchaseUnit:
-                                            getDefaultStockUnitsPerPurchaseUnit(
-                                              selectedProduct,
-                                              nextUnit
-                                            ),
-                                        }
-                                      : entry
-                                  ),
-                                }));
-                              }}
-                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
+                                  items: current.items.map((entry, itemIndex) => {
+                                    if (itemIndex !== index) {
+                                      return entry;
+                                    }
+
+                                    const nextProduct = products.find(
+                                      (product) => String(product.id) === String(event.target.value)
+                                    );
+                                    const nextUnit = getDefaultPurchaseUnitForProduct(nextProduct);
+
+                                    return {
+                                      ...entry,
+                                      productId: event.target.value,
+                                      unit: nextUnit,
+                                      stockUnitsPerPurchaseUnit:
+                                        getDefaultStockUnitsPerPurchaseUnit(nextProduct, nextUnit),
+                                    };
+                                  }),
+                                }))
+                              }
+                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                             >
-                              {PURCHASE_UNITS.map((unit) => (
-                                <option key={unit.value} value={unit.value}>
-                                  {unit.label}
+                              <option value="">Product</option>
+                              {products.map((product) => (
+                                <option key={product.id} value={product.id}>
+                                  {formatProductOption(product)}
                                 </option>
                               ))}
                             </select>
-                            <div className="grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-white/15 bg-pos-panelSoft">
+                          </label>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Bought quantity
                               <input
                                 required
                                 type="number"
                                 min="1"
                                 step="1"
-                                placeholder="Stock/unit"
-                                value={item.stockUnitsPerPurchaseUnit}
+                                placeholder="Qty"
+                                value={item.quantity}
                                 onChange={(event) =>
-                                  updateSupplierInvoiceItem(
-                                    index,
-                                    "stockUnitsPerPurchaseUnit",
-                                    event.target.value
-                                  )
+                                  updateSupplierInvoiceItem(index, "quantity", event.target.value)
                                 }
-                                className="min-w-0 border-0 bg-transparent px-2 py-2 text-sm text-white outline-none"
+                                className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                               />
-                              <span className="flex items-center px-2 text-xs text-pos-muted">
-                                {stockUnit}
-                              </span>
-                            </div>
-                            <input
-                              required
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              placeholder="Price/unit"
-                              value={item.unitPrice}
-                              onChange={(event) =>
-                                updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
-                              }
-                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-2 text-sm text-white"
-                            />
-                            <button
-                              type="button"
-                              className="rounded-lg border border-red-300/40 bg-red-500/15 text-sm text-red-200"
-                              onClick={() => removeSupplierInvoiceItem(index)}
-                            >
-                              x
-                            </button>
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Bought as
+                              <select
+                                value={item.unit || "cope"}
+                                onChange={(event) => {
+                                  const nextUnit = event.target.value;
+
+                                  setSupplierInvoiceForm((current) => ({
+                                    ...current,
+                                    items: current.items.map((entry, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...entry,
+                                            unit: nextUnit,
+                                            stockUnitsPerPurchaseUnit:
+                                              getDefaultStockUnitsPerPurchaseUnit(
+                                                selectedProduct,
+                                                nextUnit
+                                              ),
+                                          }
+                                        : entry
+                                    ),
+                                  }));
+                                }}
+                                className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                              >
+                                {PURCHASE_UNITS.map((unit) => (
+                                  <option key={unit.value} value={unit.value}>
+                                    {unit.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Stock added per bought unit
+                              <div className="grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-white/15 bg-pos-panelSoft normal-case tracking-normal">
+                                <input
+                                  required
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  placeholder="How many"
+                                  value={item.stockUnitsPerPurchaseUnit}
+                                  onChange={(event) =>
+                                    updateSupplierInvoiceItem(
+                                      index,
+                                      "stockUnitsPerPurchaseUnit",
+                                      event.target.value
+                                    )
+                                  }
+                                  className="min-w-0 border-0 bg-transparent px-3 py-2 text-sm font-medium text-white outline-none"
+                                />
+                                <span className="flex items-center px-3 text-xs text-pos-muted">
+                                  {stockUnit}
+                                </span>
+                              </div>
+                            </label>
+
+                            <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                              Cost per bought unit
+                              <input
+                                required
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                placeholder="EUR"
+                                value={item.unitPrice}
+                                onChange={(event) =>
+                                  updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
+                                }
+                                className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                              />
+                            </label>
                           </div>
-                          <div className="flex items-center justify-between gap-2 text-xs">
-                            <span className="text-pos-muted">
-                              1 {item.unit || "cope"} ={" "}
-                              {Number(item.stockUnitsPerPurchaseUnit || 0)} {stockUnit}
-                            </span>
-                            <span className="font-semibold text-emerald-200">
-                              Stock + {formatInvoiceItemStockImpact(item, selectedProduct)}
-                            </span>
+
+                          <div className="grid gap-2 text-xs sm:grid-cols-3">
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                              <p className="m-0 text-pos-muted">Line total</p>
+                              <p className="m-0 mt-1 font-semibold text-white">
+                                {formatMoney(lineTotal)} EUR
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
+                              <p className="m-0 text-emerald-100/80">Stock increase</p>
+                              <p className="m-0 mt-1 font-semibold text-emerald-200">
+                                + {formatInvoiceItemStockImpact(item, selectedProduct)}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                              <p className="m-0 text-pos-muted">Stock after save</p>
+                              <p className="m-0 mt-1 font-semibold text-white">
+                                {supplierInvoiceForm.status === "delivered" && selectedProduct
+                                  ? `${stockAfter} ${stockUnit}`
+                                  : "No change yet"}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <button
-                    type="button"
-                    className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
-                    onClick={addSupplierInvoiceItem}
-                  >
-                    Add item
-                  </button>
-                  <textarea
-                    placeholder="Notes"
-                    value={supplierInvoiceForm.notes}
-                    onChange={(event) =>
-                      setSupplierInvoiceForm((current) => ({
-                        ...current,
-                        notes: event.target.value,
-                      }))
-                    }
-                    className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                    <span className="text-sm text-pos-muted">Total</span>
-                    <span className="text-sm font-semibold text-white">
-                      {formatMoney(supplierInvoiceTotal)} EUR
-                    </span>
+
+                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                    Notes
+                    <textarea
+                      placeholder="Optional notes for this invoice"
+                      value={supplierInvoiceForm.notes}
+                      onChange={(event) =>
+                        setSupplierInvoiceForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
+                    />
+                  </label>
+
+                  <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-pos-muted">Invoice total</span>
+                      <span className="text-base font-semibold text-white">
+                        {formatMoney(supplierInvoiceTotal)} EUR
+                      </span>
+                    </div>
+                    <p className="m-0 text-xs text-pos-muted">
+                      {supplierInvoiceForm.status === "delivered"
+                        ? "Saving will immediately add the stock quantities above."
+                        : "Saving keeps this invoice as a draft until you mark it delivered."}
+                    </p>
                   </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <button className="pos-button pos-button-primary" type="submit" disabled={isSaving}>
-                      Save Invoice
+                      {supplierInvoiceForm.status === "delivered"
+                        ? "Save & Apply Stock"
+                        : "Save Draft"}
                     </button>
                     <button
                       className="pos-button pos-button-muted"
@@ -2472,7 +2615,14 @@ export default function ManagerDashboard({ session, onLogout }) {
               </article>
 
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Incoming Invoice History</h3>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">Invoice History</h3>
+                    <p className="m-0 mt-1 text-xs text-pos-muted">
+                      Pending entries do not change stock until delivered.
+                    </p>
+                  </div>
+                </div>
                 <div className="scroll-y mt-3 max-h-[64vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
@@ -2498,12 +2648,25 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {supplierOrder.supplier?.companyName || "Supplier"}
                           </td>
                           <td className="px-3 py-2 text-pos-muted">
-                            {ensureArray(supplierOrder.items)
-                              .map(
-                                (item) =>
-                                  `${item.product?.name || "Product"} #${item.productId} x${item.quantity} ${item.unit || item.product?.stockUnit || "cope"} -> ${formatInvoiceItemStockImpact(item, item.product)}`
-                              )
-                              .join(", ")}
+                            <div className="grid gap-1">
+                              {ensureArray(supplierOrder.items).map((item) => {
+                                const itemUnit = item.unit || item.product?.stockUnit || "cope";
+                                const itemLineTotal = calculateInvoiceItemLineTotal(item);
+
+                                return (
+                                  <div key={item.id || item.productId} className="grid gap-0.5">
+                                    <span className="font-medium text-pos-text">
+                                      {item.product?.name || "Product"} #{item.productId}
+                                    </span>
+                                    <span className="text-xs text-pos-muted">
+                                      Bought {item.quantity} {itemUnit} | Stock +{" "}
+                                      {formatInvoiceItemStockImpact(item, item.product)} |{" "}
+                                      {formatMoney(itemLineTotal)} EUR
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-pos-muted">
                             {formatMoney(supplierOrder.total)} EUR
