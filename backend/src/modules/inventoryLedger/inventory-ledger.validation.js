@@ -6,6 +6,7 @@ const {
   ensurePositiveNumber,
   ensureRequiredString,
 } = require("../../utils/validation");
+const AppError = require("../../utils/app-error");
 const { assertBaseUnit, assertKnownUnit, normalizeUnit } = require("./unit-conversion");
 
 const parsePageParams = (query = {}) => {
@@ -33,16 +34,46 @@ const validateCreateIngredientPayload = (body = {}) => ({
       : ensureNonNegativeNumber(body.minimumQuantity, "Minimum quantity"),
 });
 
+const validatePurchasedUnit = (unit, fieldName) => {
+  const normalized = normalizeUnit(unit);
+
+  if (normalized === "paketa") {
+    return normalized;
+  }
+
+  return assertKnownUnit(normalized, fieldName);
+};
+
 const validateStockIntakePayload = (body = {}) => {
-  const items = ensureArray(body.items, "Stock intake items").map((item, index) => ({
-    ingredientId: ensureId(item?.ingredientId, `Item ${index + 1} ingredient id`),
-    purchasedQuantity: ensurePositiveNumber(
-      item?.purchasedQuantity,
-      `Item ${index + 1} purchased quantity`
-    ),
-    purchasedUnit: assertKnownUnit(item?.purchasedUnit, `Item ${index + 1} purchased unit`),
-    unitCost: ensurePositiveNumber(item?.unitCost, `Item ${index + 1} unit cost`),
-  }));
+  const items = ensureArray(body.items, "Stock intake items").map((item, index) => {
+    const ingredientId =
+      item?.ingredientId === undefined || item?.ingredientId === null || item?.ingredientId === ""
+        ? null
+        : ensureId(item.ingredientId, `Item ${index + 1} ingredient id`);
+    const productId =
+      item?.productId === undefined || item?.productId === null || item?.productId === ""
+        ? null
+        : ensureId(item.productId, `Item ${index + 1} product id`);
+
+    if (!ingredientId && !productId) {
+      throw new AppError(`Item ${index + 1} needs a product or ingredient`);
+    }
+
+    if (ingredientId && productId) {
+      throw new AppError(`Item ${index + 1} cannot use product and ingredient together`);
+    }
+
+    return {
+      ingredientId,
+      productId,
+      purchasedQuantity: ensurePositiveNumber(
+        item?.purchasedQuantity,
+        `Item ${index + 1} purchased quantity`
+      ),
+      purchasedUnit: validatePurchasedUnit(item?.purchasedUnit, `Item ${index + 1} purchased unit`),
+      unitCost: ensurePositiveNumber(item?.unitCost, `Item ${index + 1} unit cost`),
+    };
+  });
 
   return {
     supplierId: ensureId(body.supplierId, "Supplier id"),

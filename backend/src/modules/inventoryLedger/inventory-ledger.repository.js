@@ -39,6 +39,14 @@ const createInventoryLedgerRepository = (client) => ({
 
   createIngredient: (data) => client.ingredient.create({ data }),
 
+  findIngredientByName: (name) =>
+    client.ingredient.findFirst({
+      where: {
+        name,
+        isActive: true,
+      },
+    }),
+
   listIngredients: ({ skip, take }) =>
     client.ingredient.findMany({
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
@@ -101,7 +109,7 @@ const createInventoryLedgerRepository = (client) => ({
   findProductById: (id) =>
     client.product.findUnique({
       where: { id },
-      select: { id: true, name: true, deletedAt: true },
+      include: { directStockIngredient: true },
     }),
 
   upsertRecipe: ({ productId, items, notes }) =>

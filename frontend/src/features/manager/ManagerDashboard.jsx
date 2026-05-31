@@ -309,8 +309,7 @@ const formatQuantity = (quantity, unit) =>
 const calculateStockIntakeLineTotal = (item) =>
   Number(item.purchasedQuantity || 0) * Number(item.unitCost || 0);
 
-const getDirectStockProducts = (productsList) =>
-  productsList.filter((product) => product.directStockIngredientId);
+const getDirectStockProducts = (productsList) => productsList;
 
 const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
   const selectedProduct =
@@ -329,6 +328,7 @@ const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
     isPackagePurchase && packageSize > 0 ? boughtQuantity * packageSize : boughtQuantity;
   const lineTotal = boughtQuantity * unitCost;
   const backendUnitCost = baseQuantity > 0 ? lineTotal / baseQuantity : unitCost;
+  const stockBaseUnit = selectedIngredient?.baseUnit || (selectedProduct ? "pcs" : "");
 
   return {
     baseQuantity,
@@ -337,6 +337,7 @@ const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
     packageSize,
     selectedIngredient,
     selectedProduct,
+    stockBaseUnit,
   };
 };
 
@@ -1464,8 +1465,11 @@ export default function ManagerDashboard({ session, onLogout }) {
       stockIntakeForm.items.some(
         (item) => {
           const resolved = resolveStockIntakeItem(item, products, ingredients);
+          const hasStockTarget = item.sourceType === "product"
+            ? Boolean(resolved.selectedProduct)
+            : Boolean(resolved.selectedIngredient);
           return (
-            !resolved.selectedIngredient ||
+            !hasStockTarget ||
             Number(item.purchasedQuantity || 0) <= 0 ||
             Number(item.unitCost || 0) <= 0 ||
             !item.purchasedUnit ||
@@ -1486,17 +1490,20 @@ export default function ManagerDashboard({ session, onLogout }) {
       items: stockIntakeForm.items.map((item) => {
         const resolved = resolveStockIntakeItem(item, products, ingredients);
 
+        if (item.sourceType === "product") {
+          return {
+            productId: Number(resolved.selectedProduct.id),
+            purchasedQuantity: Number(item.purchasedQuantity),
+            purchasedUnit: item.purchasedUnit,
+            unitCost: Number(item.unitCost),
+          };
+        }
+
         return {
           ingredientId: Number(resolved.selectedIngredient.id),
-          purchasedQuantity:
-            item.purchasedUnit === "paketa"
-              ? Number(resolved.baseQuantity.toFixed(3))
-              : Number(item.purchasedQuantity),
-          purchasedUnit:
-            item.purchasedUnit === "paketa"
-              ? resolved.selectedIngredient.baseUnit
-              : item.purchasedUnit,
-          unitCost: Number(resolved.backendUnitCost.toFixed(4)),
+          purchasedQuantity: Number(item.purchasedQuantity),
+          purchasedUnit: item.purchasedUnit,
+          unitCost: Number(item.unitCost),
         };
       }),
     };
@@ -3049,6 +3056,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                         packageSize,
                         selectedIngredient,
                         selectedProduct,
+                        stockBaseUnit,
                       } = resolveStockIntakeItem(item, products, ingredients);
 
                       return (
@@ -3096,9 +3104,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 "purchasedUnit",
                                 sourceType === "product" && product?.unitsPerPackage
                                   ? "paketa"
-                                  : ingredient?.baseUnit === "pcs"
+                                  : sourceType === "product"
                                     ? "pcs"
-                                    : "kg"
+                                    : ingredient?.baseUnit === "pcs"
+                                      ? "pcs"
+                                      : "kg"
                               );
                             }}
                             className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
@@ -3108,13 +3118,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <option
                                 key={`product-${product.id}`}
                                 value={`product:${product.id}`}
-                                disabled={!product.directStockIngredientId}
                               >
                                 Product: {product.name}
                                 {product.unitsPerPackage
                                   ? ` | 1 paketa = ${product.unitsPerPackage} pcs`
                                   : ""}
-                                {!product.directStockIngredientId ? " | link direct stock first" : ""}
+                                {!product.directStockIngredientId ? " | auto stock pcs" : ""}
                               </option>
                             ))}
                             {ingredients.map((ingredient) => (
@@ -3172,14 +3181,19 @@ export default function ManagerDashboard({ session, onLogout }) {
                             <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
                               <p className="m-0 text-emerald-100/80">Internal stock</p>
                               <p className="m-0 mt-1 font-semibold text-emerald-200">
-                                {selectedIngredient
+                                {selectedIngredient || selectedProduct
                                   ? item.purchasedQuantity
                                     ? item.purchasedUnit === "paketa"
-                                      ? `${item.purchasedQuantity} paketa x ${packageSize || 0} = ${formatQuantity(baseQuantity, selectedIngredient.baseUnit)}`
-                                      : `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${selectedIngredient.baseUnit}`
-                                    : `Enter quantity; it will be stored as ${selectedIngredient.baseUnit}`
-                                  : "Choose ingredient"}
+                                      ? `${item.purchasedQuantity} paketa x ${packageSize || 0} = ${formatQuantity(baseQuantity, stockBaseUnit)}`
+                                      : `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${stockBaseUnit}`
+                                    : `Enter quantity; it will be stored as ${stockBaseUnit || "base stock"}`
+                                  : "Choose product or ingredient"}
                               </p>
+                              {selectedProduct && !selectedProduct.directStockIngredientId ? (
+                                <p className="m-0 mt-1 text-[11px] text-emerald-100/80">
+                                  Backend will auto-create a stock item for this product.
+                                </p>
+                              ) : null}
                               {selectedProduct && !selectedProduct.unitsPerPackage ? (
                                 <p className="m-0 mt-1 text-[11px] text-orange-100">
                                   Set units per package on this product if you want to buy it as paketa.
