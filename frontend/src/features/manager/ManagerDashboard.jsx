@@ -217,6 +217,14 @@ const formatDate = (value) =>
     dateStyle: "medium",
   }).format(new Date(value));
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 const formatShortDay = (value) => {
   const date = new Date(value);
 
@@ -1345,6 +1353,105 @@ export default function ManagerDashboard({ session, onLogout }) {
         },
       ],
     }));
+  };
+
+  const printStockIntakeInvoice = (intake) => {
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+
+    if (!printWindow) {
+      setError("Popup blocked. Allow popups to print the stock intake invoice.");
+      return;
+    }
+
+    const rows = ensureArray(intake.items)
+      .map(
+        (item, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(item.ingredient?.name || "Stock item")}</td>
+            <td class="right">${escapeHtml(formatQuantity(item.baseQuantity, item.baseUnit))}</td>
+            <td class="right">${formatMoney(item.unitCost)} EUR</td>
+            <td class="right">${formatMoney(item.lineTotal)} EUR</td>
+          </tr>
+        `
+      )
+      .join("");
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Stock Intake ${escapeHtml(intake.invoiceNumber || `#${intake.id}`)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; padding: 32px; color: #111827; font-family: Arial, sans-serif; }
+            .header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #111827; padding-bottom: 18px; }
+            h1 { margin: 0; font-size: 28px; }
+            .muted { color: #6b7280; font-size: 13px; }
+            .meta { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+            .box { border: 1px solid #d1d5db; padding: 14px; border-radius: 8px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; font-size: 14px; }
+            th { background: #f3f4f6; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+            .right { text-align: right; }
+            .total { margin-top: 18px; display: flex; justify-content: flex-end; font-size: 20px; font-weight: 700; }
+            .notes { margin-top: 24px; white-space: pre-wrap; }
+            @media print { body { padding: 18px; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Stock Intake Invoice</h1>
+              <div class="muted">Cafe inventory receiving document</div>
+            </div>
+            <div class="right">
+              <strong>${escapeHtml(intake.invoiceNumber || `#${intake.id}`)}</strong>
+              <div class="muted">${escapeHtml(formatDateTime(intake.createdAt))}</div>
+            </div>
+          </div>
+
+          <div class="meta">
+            <div class="box">
+              <div class="muted">Supplier</div>
+              <strong>${escapeHtml(intake.supplier?.companyName || "Supplier")}</strong>
+            </div>
+            <div class="box">
+              <div class="muted">Status</div>
+              <strong>${escapeHtml(intake.status || "confirmed")}</strong>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Item</th>
+                <th class="right">Stock Added</th>
+                <th class="right">Unit Cost</th>
+                <th class="right">Line Total</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+
+          <div class="total">Total: ${formatMoney(intake.totalCost)} EUR</div>
+          ${
+            intake.notes
+              ? `<div class="notes"><div class="muted">Notes</div>${escapeHtml(intake.notes)}</div>`
+              : ""
+          }
+          <p class="muted">Generated from Stock In. Every confirmed item has immutable stock movement history.</p>
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const removeStockIntakeItem = (index) => {
@@ -3342,6 +3449,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                           <th className="px-3 py-2">Supplier</th>
                           <th className="px-3 py-2">Items</th>
                           <th className="px-3 py-2 text-right">Total</th>
+                          <th className="px-3 py-2 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3365,11 +3473,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                             <td className="px-3 py-2 text-right text-pos-text">
                               {formatMoney(intake.totalCost)} EUR
                             </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                className="rounded-md border border-white/20 bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/15"
+                                onClick={() => printStockIntakeInvoice(intake)}
+                              >
+                                Print
+                              </button>
+                            </td>
                           </tr>
                         ))}
                         {stockIntakes.length === 0 ? (
                           <tr>
-                            <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
+                            <td colSpan="5" className="px-3 py-6 text-center text-pos-muted">
                               No stock intakes yet.
                             </td>
                           </tr>
