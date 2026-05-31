@@ -8,6 +8,8 @@ const {
 } = require("./inventory-engine.service");
 const { assertBaseUnit } = require("./unit-conversion");
 
+const DEFAULT_PACKAGE_SIZE = 12;
+
 const resolveProductStockIngredient = async ({ tx, repository, productId }) => {
   const product = await repository.findProductById(productId);
 
@@ -56,22 +58,22 @@ const buildIntakeItem = ({ item, ingredient, product }) => {
     throw new AppError("Package purchases must be linked to a product");
   }
 
-  if (isPackagePurchase && Number(product.unitsPerPackage || 0) <= 0) {
-    throw new AppError(`Set units per package for ${product.name} before receiving paketa`);
-  }
+  const packageSize = Number(product?.unitsPerPackage || DEFAULT_PACKAGE_SIZE);
 
   if (isPackagePurchase && baseUnit !== "pcs") {
     throw new AppError("Package purchases can only update piece-based stock");
   }
 
   const baseQuantity = isPackagePurchase
-    ? Number((item.purchasedQuantity * product.unitsPerPackage).toFixed(3))
+    ? Number((item.purchasedQuantity * packageSize).toFixed(3))
     : resolveBaseQuantity({
         quantity: item.purchasedQuantity,
         unit: item.purchasedUnit,
         baseUnit,
       });
-  const lineTotal = Number((item.purchasedQuantity * item.unitCost).toFixed(2));
+  const lineTotal = Number(
+    (item.totalCost || item.purchasedQuantity * item.unitCost).toFixed(2)
+  );
   const baseUnitCost = Number((lineTotal / baseQuantity).toFixed(4));
 
   return {

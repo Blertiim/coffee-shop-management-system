@@ -307,7 +307,9 @@ const formatQuantity = (quantity, unit) =>
   }).format(Number(quantity || 0))} ${unit || ""}`.trim();
 
 const calculateStockIntakeLineTotal = (item) =>
-  Number(item.purchasedQuantity || 0) * Number(item.unitCost || 0);
+  Number(item.unitCost || 0);
+
+const DEFAULT_PACKAGE_SIZE = 12;
 
 const getDirectStockProducts = (productsList) => productsList;
 
@@ -320,14 +322,14 @@ const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
     selectedProduct?.directStockIngredient ||
     ingredientsList.find((ingredient) => String(ingredient.id) === String(item.ingredientId)) ||
     null;
-  const packageSize = Number(selectedProduct?.unitsPerPackage || 0);
+  const packageSize = Number(selectedProduct?.unitsPerPackage || DEFAULT_PACKAGE_SIZE);
   const boughtQuantity = Number(item.purchasedQuantity || 0);
-  const unitCost = Number(item.unitCost || 0);
+  const lineTotalInput = Number(item.unitCost || 0);
   const isPackagePurchase = item.purchasedUnit === "paketa";
   const baseQuantity =
     isPackagePurchase && packageSize > 0 ? boughtQuantity * packageSize : boughtQuantity;
-  const lineTotal = boughtQuantity * unitCost;
-  const backendUnitCost = baseQuantity > 0 ? lineTotal / baseQuantity : unitCost;
+  const lineTotal = lineTotalInput;
+  const backendUnitCost = boughtQuantity > 0 ? lineTotal / boughtQuantity : lineTotalInput;
   const stockBaseUnit = selectedIngredient?.baseUnit || (selectedProduct ? "pcs" : "");
 
   return {
@@ -1472,13 +1474,12 @@ export default function ManagerDashboard({ session, onLogout }) {
             !hasStockTarget ||
             Number(item.purchasedQuantity || 0) <= 0 ||
             Number(item.unitCost || 0) <= 0 ||
-            !item.purchasedUnit ||
-            (item.purchasedUnit === "paketa" && resolved.packageSize <= 0)
+            !item.purchasedUnit
           );
         }
       )
     ) {
-      setError("Every stock intake item needs a product/ingredient, quantity, unit, and cost. Package purchases need units per package.");
+      setError("Every stock intake item needs a product/ingredient, quantity, unit, and total cost.");
       return;
     }
 
@@ -1495,7 +1496,8 @@ export default function ManagerDashboard({ session, onLogout }) {
             productId: Number(resolved.selectedProduct.id),
             purchasedQuantity: Number(item.purchasedQuantity),
             purchasedUnit: item.purchasedUnit,
-            unitCost: Number(item.unitCost),
+            unitCost: Number(resolved.backendUnitCost.toFixed(4)),
+            totalCost: Number(item.unitCost),
           };
         }
 
@@ -1503,7 +1505,8 @@ export default function ManagerDashboard({ session, onLogout }) {
           ingredientId: Number(resolved.selectedIngredient.id),
           purchasedQuantity: Number(item.purchasedQuantity),
           purchasedUnit: item.purchasedUnit,
-          unitCost: Number(item.unitCost),
+          unitCost: Number(resolved.backendUnitCost.toFixed(4)),
+          totalCost: Number(item.unitCost),
         };
       }),
     };
@@ -3164,7 +3167,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                               type="number"
                               min="0.01"
                               step="0.01"
-                              placeholder="Cost per bought unit"
+                              placeholder="Total paid for this item"
                               value={item.unitCost}
                               onChange={(event) =>
                                 updateStockIntakeItem(index, "unitCost", event.target.value)
@@ -3194,9 +3197,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   Backend will auto-create a stock item for this product.
                                 </p>
                               ) : null}
-                              {selectedProduct && !selectedProduct.unitsPerPackage ? (
+                              {selectedProduct && item.purchasedUnit === "paketa" && !selectedProduct.unitsPerPackage ? (
                                 <p className="m-0 mt-1 text-[11px] text-orange-100">
-                                  Set units per package on this product if you want to buy it as paketa.
+                                  Package size is missing; using default 12 pcs per paketa.
                                 </p>
                               ) : null}
                             </div>

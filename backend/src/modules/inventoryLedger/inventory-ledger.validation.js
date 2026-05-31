@@ -72,6 +72,10 @@ const validateStockIntakePayload = (body = {}) => {
       ),
       purchasedUnit: validatePurchasedUnit(item?.purchasedUnit, `Item ${index + 1} purchased unit`),
       unitCost: ensurePositiveNumber(item?.unitCost, `Item ${index + 1} unit cost`),
+      totalCost:
+        item?.totalCost === undefined || item?.totalCost === null || item?.totalCost === ""
+          ? null
+          : ensurePositiveNumber(item.totalCost, `Item ${index + 1} total cost`),
     };
   });
 
