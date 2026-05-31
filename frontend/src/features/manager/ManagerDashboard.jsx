@@ -2382,7 +2382,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid gap-2">
                     <input
                       required
                       type="number"
@@ -2395,35 +2395,6 @@ export default function ManagerDashboard({ session, onLogout }) {
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="Stock"
-                      value={productForm.stock}
-                      onChange={(event) =>
-                        setProductForm((current) => ({ ...current, stock: event.target.value }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <select
-                      value={productForm.stockUnit}
-                      onChange={(event) =>
-                        setProductForm((current) => ({ ...current, stockUnit: event.target.value }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    >
-                      {productForm.stockUnit &&
-                      !STOCK_UNITS.some((unit) => unit.value === productForm.stockUnit) ? (
-                        <option value={productForm.stockUnit}>{productForm.stockUnit}</option>
-                      ) : null}
-                      {STOCK_UNITS.map((unit) => (
-                        <option key={unit.value} value={unit.value}>
-                          {unit.label}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                   <input
                     type="number"
@@ -2526,7 +2497,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                         <th className="px-3 py-2">Name</th>
                         <th className="px-3 py-2">Category</th>
                         <th className="px-3 py-2">Price</th>
-                        <th className="px-3 py-2">Stock</th>
+                        <th className="px-3 py-2">Inventory</th>
                         <th className="px-3 py-2">Status</th>
                         <th className="px-3 py-2 text-right">Actions</th>
                       </tr>
@@ -2539,15 +2510,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {product.category?.name || "Uncategorized"}
                           </td>
                           <td className="px-3 py-2 text-pos-muted">{formatMoney(product.price)} EUR</td>
-                          <td className="px-3 py-2 text-pos-muted">
-                            {formatStock(product, ingredients)}
-                            {product.unitsPerPackage ? (
-                              <span className="ml-2 text-[11px] text-pos-muted">
-                                1 paketa = {product.unitsPerPackage}{" "}
-                                {product.stockUnit || "cope"}
-                              </span>
-                            ) : null}
-                          </td>
+                          <td className="px-3 py-2 text-pos-muted">Recipe-driven</td>
                           <td className="px-3 py-2">
                             <span
                               className={`rounded-full border px-2 py-1 text-xs ${
@@ -2690,7 +2653,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 {product.name}
                               </p>
                               <p className="m-0 mt-1 text-xs text-pos-muted">
-                                {formatMoney(product.price)} EUR | Stock {formatStock(product, ingredients)}
+                                {formatMoney(product.price)} EUR | Recipe-driven inventory
                               </p>
                             </div>
                             <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
@@ -2781,57 +2744,55 @@ export default function ManagerDashboard({ session, onLogout }) {
           {activeSection === "stock" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Stock Management</h3>
+                <h3 className="m-0 text-base font-semibold text-white">Ingredient Stock</h3>
+                <p className="m-0 mt-1 text-xs text-pos-muted">
+                  Stock exists only for raw ingredients. Products consume these through recipes.
+                </p>
                 <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
-                        <th className="px-3 py-2">Product</th>
-                        <th className="px-3 py-2">Category</th>
+                        <th className="px-3 py-2">Ingredient</th>
+                        <th className="px-3 py-2">Base Unit</th>
                         <th className="px-3 py-2">Stock</th>
-                        <th className="px-3 py-2 text-right">Source</th>
+                        <th className="px-3 py-2 text-right">Minimum</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {products.map((product) => {
-                        const displayStock = getProductDisplayStock(product, ingredients);
-
-                        return (
-                          <tr key={product.id} className="border-t border-white/10">
-                            <td className="px-3 py-2 text-white">{product.name}</td>
-                            <td className="px-3 py-2 text-pos-muted">
-                              {product.category?.name || "Uncategorized"}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span
-                                className={`font-semibold ${
-                                  displayStock.quantity <= Number(lowStock.threshold || 5)
-                                    ? "text-red-300"
-                                    : "text-pos-text"
-                                }`}
-                              >
-                                {formatStock(product, ingredients)}
-                                <span className="ml-2 text-[11px] font-normal text-pos-muted">
-                                  #{product.id}
-                                </span>
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              {STOCK_INTAKE_ENABLED ? (
-                                <button
-                                  type="button"
-                                  className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
-                                  onClick={() => setActiveSection("incoming")}
-                                >
-                                  Stock In
-                                </button>
-                              ) : (
-                                <span className="text-xs text-pos-muted">-</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {ingredients.map((ingredient) => (
+                        <tr key={ingredient.id} className="border-t border-white/10">
+                          <td className="px-3 py-2 text-white">
+                            {ingredient.name}
+                            <p className="m-0 text-xs text-pos-muted">
+                              #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2 text-pos-muted">{ingredient.baseUnit}</td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`font-semibold ${
+                                Number(ingredient.minimumQuantity || 0) > 0 &&
+                                Number(ingredient.currentQuantity || 0) <=
+                                  Number(ingredient.minimumQuantity || 0)
+                                  ? "text-red-300"
+                                  : "text-pos-text"
+                              }`}
+                            >
+                              {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-pos-muted">
+                            {formatQuantity(ingredient.minimumQuantity, ingredient.baseUnit)}
+                          </td>
+                        </tr>
+                      ))}
+                      {ingredients.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
+                            Add ingredients from Stock In before tracking inventory.
+                          </td>
+                        </tr>
+                      ) : null}
                     </tbody>
                   </table>
                 </div>
@@ -2854,18 +2815,29 @@ export default function ManagerDashboard({ session, onLogout }) {
                     ))
                   ) : null}
 
-                  {ensureArray(lowStock.products).length === 0 &&
-                  ensureArray(lowStock.inventoryAlerts).length === 0 ? (
+                  {ingredients.filter(
+                    (ingredient) =>
+                      Number(ingredient.minimumQuantity || 0) > 0 &&
+                      Number(ingredient.currentQuantity || 0) <= Number(ingredient.minimumQuantity || 0)
+                  ).length === 0 && ensureArray(lowStock.inventoryAlerts).length === 0 ? (
                     <p className="text-sm text-pos-muted">No low-stock alerts right now.</p>
                   ) : (
-                    ensureArray(lowStock.products).map((product) => (
+                    ingredients
+                      .filter(
+                        (ingredient) =>
+                          Number(ingredient.minimumQuantity || 0) > 0 &&
+                          Number(ingredient.currentQuantity || 0) <=
+                            Number(ingredient.minimumQuantity || 0)
+                      )
+                      .map((ingredient) => (
                       <div
-                        key={product.id}
+                        key={ingredient.id}
                         className="rounded-xl border border-red-400/30 bg-red-500/10 p-3"
                       >
-                        <p className="m-0 text-sm font-semibold text-red-200">{product.name}</p>
+                        <p className="m-0 text-sm font-semibold text-red-200">{ingredient.name}</p>
                         <p className="m-0 mt-1 text-xs text-red-200/90">
-                          Stock: {formatStock(product, ingredients)} | Category: {product.category?.name || "N/A"}
+                          Stock: {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)} |
+                          Minimum: {formatQuantity(ingredient.minimumQuantity, ingredient.baseUnit)}
                         </p>
                       </div>
                     ))
