@@ -159,9 +159,11 @@ const defaultStockIntakeForm = {
   confirm: true,
   items: [
     {
+      sourceType: "product",
+      productId: "",
       ingredientId: "",
       purchasedQuantity: "",
-      purchasedUnit: "kg",
+      purchasedUnit: "paketa",
       unitCost: "",
     },
   ],
@@ -193,6 +195,7 @@ const LEDGER_UNITS = [
   { value: "ml", label: "milliliters" },
   { value: "l", label: "liters" },
   { value: "pcs", label: "pieces" },
+  { value: "paketa", label: "paketa" },
 ];
 
 const BASE_UNITS = LEDGER_UNITS.filter((unit) => ["g", "ml", "pcs"].includes(unit.value));
@@ -305,6 +308,37 @@ const formatQuantity = (quantity, unit) =>
 
 const calculateStockIntakeLineTotal = (item) =>
   Number(item.purchasedQuantity || 0) * Number(item.unitCost || 0);
+
+const getDirectStockProducts = (productsList) =>
+  productsList.filter((product) => product.directStockIngredientId);
+
+const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
+  const selectedProduct =
+    item.sourceType === "product"
+      ? productsList.find((product) => String(product.id) === String(item.productId)) || null
+      : null;
+  const selectedIngredient =
+    selectedProduct?.directStockIngredient ||
+    ingredientsList.find((ingredient) => String(ingredient.id) === String(item.ingredientId)) ||
+    null;
+  const packageSize = Number(selectedProduct?.unitsPerPackage || 0);
+  const boughtQuantity = Number(item.purchasedQuantity || 0);
+  const unitCost = Number(item.unitCost || 0);
+  const isPackagePurchase = item.purchasedUnit === "paketa";
+  const baseQuantity =
+    isPackagePurchase && packageSize > 0 ? boughtQuantity * packageSize : boughtQuantity;
+  const lineTotal = boughtQuantity * unitCost;
+  const backendUnitCost = baseQuantity > 0 ? lineTotal / baseQuantity : unitCost;
+
+  return {
+    baseQuantity,
+    backendUnitCost,
+    lineTotal,
+    packageSize,
+    selectedIngredient,
+    selectedProduct,
+  };
+};
 
 const isAuthError = (error) => error?.status === 401 || error?.status === 403;
 
@@ -856,20 +890,43 @@ export default function ManagerDashboard({ session, onLogout }) {
       const nextSupplierId =
         current.supplierId || (suppliers[0]?.id ? String(suppliers[0].id) : "");
       let didChangeItem = false;
+      const directProducts = getDirectStockProducts(products);
       const nextItems = current.items.map((item) => {
+        const nextSourceType = item.sourceType || (directProducts.length ? "product" : "ingredient");
+        const nextProductId =
+          nextSourceType === "product"
+            ? item.productId || (directProducts[0]?.id ? String(directProducts[0].id) : "")
+            : "";
+        const selectedProduct =
+          directProducts.find((product) => String(product.id) === String(nextProductId)) ||
+          null;
         const nextIngredientId =
-          item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
+          nextSourceType === "product"
+            ? selectedProduct?.directStockIngredientId
+              ? String(selectedProduct.directStockIngredientId)
+              : ""
+            : item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
         const selectedIngredient =
           ingredients.find((ingredient) => String(ingredient.id) === String(nextIngredientId)) ||
           null;
-        const nextUnit = item.purchasedUnit || selectedIngredient?.baseUnit || "kg";
+        const nextUnit =
+          item.purchasedUnit ||
+          (nextSourceType === "product" && selectedProduct?.unitsPerPackage ? "paketa" : null) ||
+          (selectedIngredient?.baseUnit === "pcs" ? "pcs" : "kg");
 
-        if (nextIngredientId !== item.ingredientId || nextUnit !== item.purchasedUnit) {
+        if (
+          nextSourceType !== item.sourceType ||
+          nextProductId !== item.productId ||
+          nextIngredientId !== item.ingredientId ||
+          nextUnit !== item.purchasedUnit
+        ) {
           didChangeItem = true;
         }
 
         return {
           ...item,
+          sourceType: nextSourceType,
+          productId: nextProductId,
           ingredientId: nextIngredientId,
           purchasedUnit: nextUnit,
         };
@@ -1202,15 +1259,22 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const resetStockIntakeForm = () => {
-    const ingredient = ingredients[0] || null;
+    const product = getDirectStockProducts(products)[0] || null;
+    const ingredient =
+      product?.directStockIngredient ||
+      ingredients.find((entry) => entry.id === product?.directStockIngredientId) ||
+      ingredients[0] ||
+      null;
     setStockIntakeForm({
       ...defaultStockIntakeForm,
       supplierId: suppliers[0]?.id ? String(suppliers[0].id) : "",
       items: [
         {
+          sourceType: product ? "product" : "ingredient",
+          productId: product?.id ? String(product.id) : "",
           ingredientId: ingredient?.id ? String(ingredient.id) : "",
           purchasedQuantity: "",
-          purchasedUnit: ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
+          purchasedUnit: product?.unitsPerPackage ? "paketa" : ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
           unitCost: "",
         },
       ],
@@ -1227,15 +1291,22 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const addStockIntakeItem = () => {
-    const ingredient = ingredients[0] || null;
+    const product = getDirectStockProducts(products)[0] || null;
+    const ingredient =
+      product?.directStockIngredient ||
+      ingredients.find((entry) => entry.id === product?.directStockIngredientId) ||
+      ingredients[0] ||
+      null;
     setStockIntakeForm((current) => ({
       ...current,
       items: [
         ...current.items,
         {
+          sourceType: product ? "product" : "ingredient",
+          productId: product?.id ? String(product.id) : "",
           ingredientId: ingredient?.id ? String(ingredient.id) : "",
           purchasedQuantity: "",
-          purchasedUnit: ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
+          purchasedUnit: product?.unitsPerPackage ? "paketa" : ingredient?.baseUnit === "pcs" ? "pcs" : "kg",
           unitCost: "",
         },
       ],
@@ -1391,14 +1462,19 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     if (
       stockIntakeForm.items.some(
-        (item) =>
-          !item.ingredientId ||
-          Number(item.purchasedQuantity || 0) <= 0 ||
-          Number(item.unitCost || 0) <= 0 ||
-          !item.purchasedUnit
+        (item) => {
+          const resolved = resolveStockIntakeItem(item, products, ingredients);
+          return (
+            !resolved.selectedIngredient ||
+            Number(item.purchasedQuantity || 0) <= 0 ||
+            Number(item.unitCost || 0) <= 0 ||
+            !item.purchasedUnit ||
+            (item.purchasedUnit === "paketa" && resolved.packageSize <= 0)
+          );
+        }
       )
     ) {
-      setError("Every stock intake item needs ingredient, quantity, unit, and unit cost.");
+      setError("Every stock intake item needs a product/ingredient, quantity, unit, and cost. Package purchases need units per package.");
       return;
     }
 
@@ -1407,12 +1483,22 @@ export default function ManagerDashboard({ session, onLogout }) {
       invoiceNumber: stockIntakeForm.invoiceNumber || null,
       notes: stockIntakeForm.notes || null,
       confirm: Boolean(stockIntakeForm.confirm),
-      items: stockIntakeForm.items.map((item) => ({
-        ingredientId: Number(item.ingredientId),
-        purchasedQuantity: Number(item.purchasedQuantity),
-        purchasedUnit: item.purchasedUnit,
-        unitCost: Number(item.unitCost),
-      })),
+      items: stockIntakeForm.items.map((item) => {
+        const resolved = resolveStockIntakeItem(item, products, ingredients);
+
+        return {
+          ingredientId: Number(resolved.selectedIngredient.id),
+          purchasedQuantity:
+            item.purchasedUnit === "paketa"
+              ? Number(resolved.baseQuantity.toFixed(3))
+              : Number(item.purchasedQuantity),
+          purchasedUnit:
+            item.purchasedUnit === "paketa"
+              ? resolved.selectedIngredient.baseUnit
+              : item.purchasedUnit,
+          unitCost: Number(resolved.backendUnitCost.toFixed(4)),
+        };
+      }),
     };
 
     await runAction(async () => {
@@ -2957,10 +3043,13 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </div>
 
                     {stockIntakeForm.items.map((item, index) => {
-                      const selectedIngredient =
-                        ingredients.find((ingredient) => String(ingredient.id) === String(item.ingredientId)) ||
-                        null;
-                      const lineTotal = calculateStockIntakeLineTotal(item);
+                      const {
+                        baseQuantity,
+                        lineTotal,
+                        packageSize,
+                        selectedIngredient,
+                        selectedProduct,
+                      } = resolveStockIntakeItem(item, products, ingredients);
 
                       return (
                         <div key={index} className="grid gap-3 rounded-xl border border-white/10 bg-black/15 p-3">
@@ -2979,24 +3068,58 @@ export default function ManagerDashboard({ session, onLogout }) {
                           </div>
                           <select
                             required
-                            value={item.ingredientId}
+                            value={
+                              item.sourceType === "ingredient"
+                                ? `ingredient:${item.ingredientId}`
+                                : `product:${item.productId}`
+                            }
                             onChange={(event) => {
-                              const ingredient = ingredients.find(
-                                (entry) => String(entry.id) === String(event.target.value)
-                              );
-                              updateStockIntakeItem(index, "ingredientId", event.target.value);
+                              const [sourceType, sourceId] = event.target.value.split(":");
+                              const product =
+                                sourceType === "product"
+                                  ? products.find((entry) => String(entry.id) === String(sourceId))
+                                  : null;
+                              const ingredient =
+                                sourceType === "product"
+                                  ? product?.directStockIngredient ||
+                                    ingredients.find(
+                                      (entry) =>
+                                        String(entry.id) === String(product?.directStockIngredientId)
+                                    )
+                                  : ingredients.find((entry) => String(entry.id) === String(sourceId));
+
+                              updateStockIntakeItem(index, "sourceType", sourceType);
+                              updateStockIntakeItem(index, "productId", product?.id ? String(product.id) : "");
+                              updateStockIntakeItem(index, "ingredientId", ingredient?.id ? String(ingredient.id) : "");
                               updateStockIntakeItem(
                                 index,
                                 "purchasedUnit",
-                                ingredient?.baseUnit === "pcs" ? "pcs" : "kg"
+                                sourceType === "product" && product?.unitsPerPackage
+                                  ? "paketa"
+                                  : ingredient?.baseUnit === "pcs"
+                                    ? "pcs"
+                                    : "kg"
                               );
                             }}
                             className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                           >
-                            <option value="">Ingredient</option>
+                            <option value="">Product or ingredient</option>
+                            {products.map((product) => (
+                              <option
+                                key={`product-${product.id}`}
+                                value={`product:${product.id}`}
+                                disabled={!product.directStockIngredientId}
+                              >
+                                Product: {product.name}
+                                {product.unitsPerPackage
+                                  ? ` | 1 paketa = ${product.unitsPerPackage} pcs`
+                                  : ""}
+                                {!product.directStockIngredientId ? " | link direct stock first" : ""}
+                              </option>
+                            ))}
                             {ingredients.map((ingredient) => (
-                              <option key={ingredient.id} value={ingredient.id}>
-                                {ingredient.name} | Stock {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                              <option key={`ingredient-${ingredient.id}`} value={`ingredient:${ingredient.id}`}>
+                                Ingredient: {ingredient.name} | Stock {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
                               </option>
                             ))}
                           </select>
@@ -3051,10 +3174,17 @@ export default function ManagerDashboard({ session, onLogout }) {
                               <p className="m-0 mt-1 font-semibold text-emerald-200">
                                 {selectedIngredient
                                   ? item.purchasedQuantity
-                                    ? `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${selectedIngredient.baseUnit}`
+                                    ? item.purchasedUnit === "paketa"
+                                      ? `${item.purchasedQuantity} paketa x ${packageSize || 0} = ${formatQuantity(baseQuantity, selectedIngredient.baseUnit)}`
+                                      : `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${selectedIngredient.baseUnit}`
                                     : `Enter quantity; it will be stored as ${selectedIngredient.baseUnit}`
                                   : "Choose ingredient"}
                               </p>
+                              {selectedProduct && !selectedProduct.unitsPerPackage ? (
+                                <p className="m-0 mt-1 text-[11px] text-orange-100">
+                                  Set units per package on this product if you want to buy it as paketa.
+                                </p>
+                              ) : null}
                             </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2">
                               <p className="m-0 text-pos-muted">Movement</p>
