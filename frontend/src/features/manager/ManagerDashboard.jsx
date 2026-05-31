@@ -522,12 +522,12 @@ export default function ManagerDashboard({ session, onLogout }) {
           {
             key: "topProducts",
             label: "top products",
-            load: () => getTopProducts(session.token, controller.signal),
+            load: () => getTopProducts(session.token, filters, controller.signal),
           },
           {
             key: "revenueTrend",
             label: "revenue trend",
-            load: () => getRevenueTrend(session.token, { days: 7 }, controller.signal),
+            load: () => getRevenueTrend(session.token, filters, controller.signal),
           },
           {
             key: "waiterPerformance",
@@ -4543,30 +4543,30 @@ export default function ManagerDashboard({ session, onLogout }) {
 
               <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
               <article className="pos-panel rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Daily Summary</h3>
+                <h3 className="m-0 text-base font-semibold text-white">Period Summary</h3>
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                     <p className="m-0 text-xs text-pos-muted">Revenue</p>
                     <p className="m-0 mt-1 text-xl font-bold text-white">
-                      {formatMoney(dailySummary?.totalRevenue)} EUR
+                      {formatMoney(advancedReport?.totals?.totalRevenue ?? dailySummary?.totalRevenue)} EUR
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                     <p className="m-0 text-xs text-pos-muted">Expenses</p>
                     <p className="m-0 mt-1 text-xl font-bold text-white">
-                      {formatMoney(dailySummary?.totalExpenses)} EUR
+                      {formatMoney(advancedReport?.totals?.totalExpenses ?? dailySummary?.totalExpenses)} EUR
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                     <p className="m-0 text-xs text-pos-muted">Net Revenue</p>
                     <p className="m-0 mt-1 text-xl font-bold text-white">
-                      {formatMoney(dailySummary?.netRevenue)} EUR
+                      {formatMoney(advancedReport?.totals?.netRevenue ?? dailySummary?.netRevenue)} EUR
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                     <p className="m-0 text-xs text-pos-muted">Paid Orders</p>
                     <p className="m-0 mt-1 text-xl font-bold text-white">
-                      {dailySummary?.paidOrders || 0}
+                      {advancedReport?.totals?.paidOrders ?? dailySummary?.paidOrders ?? 0}
                     </p>
                   </div>
                 </div>

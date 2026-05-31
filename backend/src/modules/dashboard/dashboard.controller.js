@@ -439,10 +439,12 @@ exports.getDashboardStats = async (req, res) => {
 exports.getTopProducts = async (req, res) => {
   try {
     const topProducts = await rememberDashboardResult("top-products", req, 30 * 1000, async () => {
+      const range = buildDateRange(req.query, { defaultDays: 31 });
       const groupedItems = await prisma.orderItem.groupBy({
         where: {
           order: {
             status: "paid",
+            ...buildRangeFilter("updatedAt", range),
           },
         },
         by: ["productId"],
@@ -575,16 +577,24 @@ exports.getOrdersByDate = async (req, res) => {
 exports.getRevenueTrend = async (req, res) => {
   try {
     const payload = await rememberDashboardResult("revenue-trend", req, 20 * 1000, async () => {
-      const days = Math.min(parsePositiveInteger(req.query.days, 7), 60);
-      const endDate = new Date();
-      const startDate = toStartOfDay(endDate);
-      startDate.setDate(startDate.getDate() - (days - 1));
-      const endExclusive = toEndExclusiveDay(endDate);
+      const hasExplicitRange = Boolean(req.query.from || req.query.to || req.query.startDate || req.query.endDate);
+      const range = hasExplicitRange
+        ? buildDateRange(req.query, { defaultDays: 31 })
+        : (() => {
+            const days = Math.min(parsePositiveInteger(req.query.days, 7), 60);
+            const endDate = new Date();
+            const startDate = toStartOfDay(endDate);
+            startDate.setDate(startDate.getDate() - (days - 1));
+            return {
+              from: startDate,
+              to: toEndExclusiveDay(endDate),
+            };
+          })();
 
       const paidOrders = await prisma.order.findMany({
         where: {
           status: "paid",
-          ...buildRangeFilter("updatedAt", { from: startDate, to: endExclusive }),
+          ...buildRangeFilter("updatedAt", range),
         },
         select: {
           id: true,
@@ -597,11 +607,13 @@ exports.getRevenueTrend = async (req, res) => {
       });
 
       const buckets = {};
-      for (let index = 0; index < days; index += 1) {
-        const day = new Date(startDate);
-        day.setDate(day.getDate() + index);
+      const cursor = new Date(range.from);
+
+      while (cursor < range.to) {
+        const day = new Date(cursor);
         const key = formatDateKey(day);
         buckets[key] = { date: key, revenue: 0, orders: 0 };
+        cursor.setDate(cursor.getDate() + 1);
       }
 
       paidOrders.forEach((order) => {

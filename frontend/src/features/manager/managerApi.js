@@ -18,9 +18,9 @@ export const getRevenueTrend = async (token, params = {}, signal) =>
     })
   );
 
-export const getTopProducts = async (token, signal) =>
+export const getTopProducts = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest("/dashboard/top-products", {
+    await apiRequest(`/dashboard/top-products${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
       method: "GET",
       token,
       signal,
