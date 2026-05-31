@@ -241,8 +241,12 @@ const buildOrderItems = (products, normalizedItems) => {
       product.recipe?.isActive && product.recipe.items && product.recipe.items.length
     );
 
-    if (!hasRecipe) {
+    if (!hasRecipe && isRecipeManagedProduct(product)) {
       throw new AppError(`Product "${product.name}" needs a recipe before it can be sold`);
+    }
+
+    if (!hasRecipe && product.stock < item.quantity) {
+      throw new AppError(`Not enough stock for product "${product.name}"`);
     }
 
     total += product.price * item.quantity;
@@ -260,6 +264,19 @@ const buildOrderItems = (products, normalizedItems) => {
   };
 };
 
+const isRecipeManagedProduct = (product) => {
+  const text = `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
+
+  return (
+    text.includes("coffee") ||
+    text.includes("kafe") ||
+    text.includes("espresso") ||
+    text.includes("cappuccino") ||
+    text.includes("ice cream") ||
+    text.includes("akullore")
+  );
+};
+
 const restoreStockForOrder = async (tx, items, options = {}) => {
   await restoreIngredientsForOrderItems({
     tx,
@@ -267,6 +284,28 @@ const restoreStockForOrder = async (tx, items, options = {}) => {
     sourceId: options.sourceId || items[0]?.orderId || "",
     actorId: options.actorId || null,
   });
+
+  for (const item of items) {
+    const recipe = await tx.recipe.findUnique({
+      where: { productId: item.productId },
+      include: { items: true },
+    });
+
+    if (recipe?.isActive && recipe.items.length) {
+      continue;
+    }
+
+    const updatedProduct = await tx.product.update({
+      where: { id: item.productId },
+      data: {
+        stock: {
+          increment: item.quantity,
+        },
+      },
+    });
+
+    await syncProductStockAlert(updatedProduct, undefined, tx);
+  }
 };
 
 const deductStockForOrderItems = async (tx, orderItems, options = {}) => {
@@ -276,6 +315,41 @@ const deductStockForOrderItems = async (tx, orderItems, options = {}) => {
     sourceId: options.sourceId || "pending-order",
     actorId: options.actorId || null,
   });
+
+  for (const item of orderItems) {
+    const recipe = await tx.recipe.findUnique({
+      where: { productId: item.productId },
+      include: { items: true },
+    });
+
+    if (recipe?.isActive && recipe.items.length) {
+      continue;
+    }
+
+    const updatedProduct = await tx.product.updateMany({
+      where: {
+        id: item.productId,
+        stock: {
+          gte: item.quantity,
+        },
+      },
+      data: {
+        stock: {
+          decrement: item.quantity,
+        },
+      },
+    });
+
+    if (updatedProduct.count === 0) {
+      throw new AppError("Stock changed while creating the order. Please try again.");
+    }
+
+    const product = await tx.product.findUnique({
+      where: { id: item.productId },
+    });
+
+    await syncProductStockAlert(product, undefined, tx);
+  }
 };
 
 const setTableStatusForOrder = async (tx, order, status) => {
@@ -436,6 +510,7 @@ exports.createOrder = async (req, res) => {
               },
             },
             directStockIngredient: true,
+            category: true,
           },
         }),
         tx.order.findFirst({
@@ -598,6 +673,7 @@ exports.appendItemsToOrder = async (req, res) => {
             },
           },
           directStockIngredient: true,
+          category: true,
         },
       });
 

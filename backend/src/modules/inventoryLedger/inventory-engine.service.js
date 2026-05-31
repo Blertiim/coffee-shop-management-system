@@ -114,20 +114,11 @@ const consumeIngredientsForOrderItems = async ({ tx, orderItems, actorId, source
     },
   });
   const recipesByProductId = new Map(recipes.map((recipe) => [recipe.productId, recipe]));
-  const products = await tx.product.findMany({
-    where: { id: { in: productIds } },
-    select: { id: true, name: true },
-  });
-  const productsById = new Map(products.map((product) => [product.id, product]));
-
   for (const orderItem of orderItems) {
     const recipe = recipesByProductId.get(orderItem.productId);
 
     if (!recipe || !recipe.items.length) {
-      const product = productsById.get(orderItem.productId);
-      throw new AppError(
-        `Product "${product?.name || orderItem.productId}" needs a recipe before it can be sold`
-      );
+      continue;
     }
 
     for (const recipeItem of recipe.items) {

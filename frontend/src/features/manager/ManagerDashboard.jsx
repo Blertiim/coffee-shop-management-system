@@ -301,6 +301,19 @@ const formatStock = (product, ingredientsList = []) => {
   return `${stock.quantity} ${stock.unit}`;
 };
 
+const isRecipeManagedProduct = (product) => {
+  const text = `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
+
+  return (
+    text.includes("coffee") ||
+    text.includes("kafe") ||
+    text.includes("espresso") ||
+    text.includes("cappuccino") ||
+    text.includes("ice cream") ||
+    text.includes("akullore")
+  );
+};
+
 const getProductAvailability = (product, recipesList, ingredientsList) => {
   const recipe = recipesList.find((entry) => String(entry.productId) === String(product.id));
   const recipeItems = ensureArray(recipe?.items);
@@ -2773,107 +2786,97 @@ export default function ManagerDashboard({ session, onLogout }) {
           {activeSection === "stock" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Ingredient Stock</h3>
+                <h3 className="m-0 text-base font-semibold text-white">Product Stock</h3>
                 <p className="m-0 mt-1 text-xs text-pos-muted">
-                  Stock exists only for raw ingredients. Products consume these through recipes.
+                  Vodka, beer, juices, water, and similar products show normal stock. Coffee and ice cream show recipe-based availability.
                 </p>
                 <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
-                        <th className="px-3 py-2">Ingredient</th>
-                        <th className="px-3 py-2">Base Unit</th>
+                        <th className="px-3 py-2">Product</th>
+                        <th className="px-3 py-2">Category</th>
                         <th className="px-3 py-2">Stock</th>
-                        <th className="px-3 py-2 text-right">Minimum</th>
+                        <th className="px-3 py-2 text-right">Type</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {ingredients.map((ingredient) => (
-                        <tr key={ingredient.id} className="border-t border-white/10">
-                          <td className="px-3 py-2 text-white">
-                            {ingredient.name}
-                            <p className="m-0 text-xs text-pos-muted">
-                              #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
-                            </p>
-                          </td>
-                          <td className="px-3 py-2 text-pos-muted">{ingredient.baseUnit}</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`font-semibold ${
-                                Number(ingredient.minimumQuantity || 0) > 0 &&
-                                Number(ingredient.currentQuantity || 0) <=
-                                  Number(ingredient.minimumQuantity || 0)
-                                  ? "text-red-300"
-                                  : "text-pos-text"
-                              }`}
-                            >
-                              {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right text-pos-muted">
-                            {formatQuantity(ingredient.minimumQuantity, ingredient.baseUnit)}
-                          </td>
-                        </tr>
-                      ))}
-                      {ingredients.length === 0 ? (
-                        <tr>
-                          <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
-                            Add ingredients from Stock In before tracking inventory.
-                          </td>
-                        </tr>
-                      ) : null}
+                      {products.map((product) => {
+                        const recipeManaged = isRecipeManagedProduct(product);
+                        const availability = getProductAvailability(product, recipes, ingredients);
+                        const stockText =
+                          recipeManaged && availability
+                            ? `${availability.available} can sell`
+                            : recipeManaged
+                              ? "Recipe needed"
+                              : formatStock(product);
+
+                        return (
+                          <tr key={product.id} className="border-t border-white/10">
+                            <td className="px-3 py-2 text-white">
+                              {product.name}
+                              <p className="m-0 text-xs text-pos-muted">#{product.id}</p>
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {product.category?.name || "Uncategorized"}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span
+                                className={`font-semibold ${
+                                  stockText === "Recipe needed" ||
+                                  (recipeManaged
+                                    ? Number(availability?.available || 0) <= Number(lowStock.threshold || 5)
+                                    : Number(product.stock || 0) <= Number(lowStock.threshold || 5))
+                                    ? "text-red-300"
+                                    : "text-pos-text"
+                                }`}
+                              >
+                                {stockText}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right text-pos-muted">
+                              {recipeManaged ? "Recipe" : "Product stock"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="mt-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Product Availability</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">Ingredient Stock</h3>
                   <p className="m-0 mt-1 text-xs text-pos-muted">
-                    Shows how many sale items can be made from current ingredient stock.
+                    Raw ingredients used by coffee and ice cream recipes.
                   </p>
                   <div className="scroll-y mt-3 max-h-[32vh] overflow-y-auto rounded-xl border border-white/10">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                         <tr>
-                          <th className="px-3 py-2">Product</th>
-                          <th className="px-3 py-2">Recipe</th>
-                          <th className="px-3 py-2 text-right">Can Sell</th>
+                          <th className="px-3 py-2">Ingredient</th>
+                          <th className="px-3 py-2">Base Unit</th>
+                          <th className="px-3 py-2 text-right">Stock</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {products
-                          .map((product) => ({
-                            product,
-                            availability: getProductAvailability(product, recipes, ingredients),
-                          }))
-                          .filter((entry) => entry.availability)
-                          .map(({ product, availability }) => (
-                            <tr key={product.id} className="border-t border-white/10 align-top">
+                        {ingredients.map((ingredient) => (
+                            <tr key={ingredient.id} className="border-t border-white/10 align-top">
                               <td className="px-3 py-2 text-white">
-                                {product.name}
-                                <p className="m-0 text-xs text-pos-muted">#{product.id}</p>
+                                {ingredient.name}
+                                <p className="m-0 text-xs text-pos-muted">
+                                  #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
+                                </p>
                               </td>
-                              <td className="px-3 py-2 text-pos-muted">
-                                {availability.items
-                                  .map((item) =>
-                                    `${formatQuantity(
-                                      item.quantityPerSale,
-                                      item.ingredient?.baseUnit || item.unit || ""
-                                    )} ${item.ingredient?.name || "ingredient"}`
-                                  )
-                                  .join(" + ")}
-                              </td>
+                              <td className="px-3 py-2 text-pos-muted">{ingredient.baseUnit}</td>
                               <td className="px-3 py-2 text-right font-semibold text-pos-text">
-                                {availability.available}
+                                {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
                               </td>
                             </tr>
                           ))}
-                        {products.every(
-                          (product) => !getProductAvailability(product, recipes, ingredients)
-                        ) ? (
+                        {ingredients.length === 0 ? (
                           <tr>
                             <td colSpan="3" className="px-3 py-6 text-center text-pos-muted">
-                              Add recipes to see product availability.
+                              No ingredients yet.
                             </td>
                           </tr>
                         ) : null}
