@@ -2451,7 +2451,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                     >
-                      <option value="">None - use recipe or product stock</option>
+                      <option value="">None - recipe required for sales</option>
                       {ingredients
                         .filter((ingredient) => ingredient.baseUnit === "pcs")
                         .map((ingredient) => (

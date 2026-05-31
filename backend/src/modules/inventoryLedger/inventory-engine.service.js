@@ -114,40 +114,20 @@ const consumeIngredientsForOrderItems = async ({ tx, orderItems, actorId, source
     },
   });
   const recipesByProductId = new Map(recipes.map((recipe) => [recipe.productId, recipe]));
-  const directStockProducts = await tx.product.findMany({
-    where: {
-      id: { in: productIds },
-      directStockIngredientId: { not: null },
-    },
-    include: {
-      directStockIngredient: true,
-    },
+  const products = await tx.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, name: true },
   });
-  const directStockProductsById = new Map(
-    directStockProducts.map((product) => [product.id, product])
-  );
+  const productsById = new Map(products.map((product) => [product.id, product]));
 
   for (const orderItem of orderItems) {
     const recipe = recipesByProductId.get(orderItem.productId);
 
-    if (!recipe) {
-      const directStockProduct = directStockProductsById.get(orderItem.productId);
-
-      if (directStockProduct?.directStockIngredient) {
-        await applyIngredientMovement({
-          tx,
-          ingredientId: directStockProduct.directStockIngredientId,
-          type: "OUT",
-          quantity: orderItem.quantity,
-          unit: "pcs",
-          sourceType: "SALE",
-          sourceId,
-          reason: `${directStockProduct.name} x${orderItem.quantity}`,
-          actorId,
-        });
-      }
-
-      continue;
+    if (!recipe || !recipe.items.length) {
+      const product = productsById.get(orderItem.productId);
+      throw new AppError(
+        `Product "${product?.name || orderItem.productId}" needs a recipe before it can be sold`
+      );
     }
 
     for (const recipeItem of recipe.items) {
@@ -184,39 +164,11 @@ const restoreIngredientsForOrderItems = async ({ tx, orderItems, actorId, source
     },
   });
   const recipesByProductId = new Map(recipes.map((recipe) => [recipe.productId, recipe]));
-  const directStockProducts = await tx.product.findMany({
-    where: {
-      id: { in: productIds },
-      directStockIngredientId: { not: null },
-    },
-    include: {
-      directStockIngredient: true,
-    },
-  });
-  const directStockProductsById = new Map(
-    directStockProducts.map((product) => [product.id, product])
-  );
 
   for (const orderItem of orderItems) {
     const recipe = recipesByProductId.get(orderItem.productId);
 
-    if (!recipe) {
-      const directStockProduct = directStockProductsById.get(orderItem.productId);
-
-      if (directStockProduct?.directStockIngredient) {
-        await applyIngredientMovement({
-          tx,
-          ingredientId: directStockProduct.directStockIngredientId,
-          type: "IN",
-          quantity: orderItem.quantity,
-          unit: "pcs",
-          sourceType: "SALE_CANCEL_RESTORE",
-          sourceId,
-          reason: `Restored ${directStockProduct.name} x${orderItem.quantity}`,
-          actorId,
-        });
-      }
-
+    if (!recipe || !recipe.items.length) {
       continue;
     }
 

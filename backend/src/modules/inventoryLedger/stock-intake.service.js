@@ -10,6 +10,57 @@ const { assertBaseUnit } = require("./unit-conversion");
 
 const DEFAULT_PACKAGE_SIZE = 12;
 
+const ensureSinglePieceRecipe = async ({ tx, product, ingredient }) => {
+  if (ingredient.baseUnit !== "pcs") {
+    return;
+  }
+
+  const existingRecipe = await tx.recipe.findUnique({
+    where: { productId: product.id },
+    include: { items: true },
+  });
+
+  if (existingRecipe?.items?.length) {
+    if (!existingRecipe.isActive) {
+      await tx.recipe.update({
+        where: { id: existingRecipe.id },
+        data: { isActive: true },
+      });
+    }
+
+    return;
+  }
+
+  await tx.recipe.upsert({
+    where: { productId: product.id },
+    create: {
+      productId: product.id,
+      notes: "Auto-created for packaged direct-sale product. Product still consumes ingredient stock through recipe.",
+      items: {
+        create: [
+          {
+            ingredientId: ingredient.id,
+            quantity: 1,
+            unit: "pcs",
+          },
+        ],
+      },
+    },
+    update: {
+      isActive: true,
+      items: {
+        create: [
+          {
+            ingredientId: ingredient.id,
+            quantity: 1,
+            unit: "pcs",
+          },
+        ],
+      },
+    },
+  });
+};
+
 const resolveProductStockIngredient = async ({ tx, repository, productId }) => {
   const product = await repository.findProductById(productId);
 
@@ -18,6 +69,12 @@ const resolveProductStockIngredient = async ({ tx, repository, productId }) => {
   }
 
   if (product.directStockIngredient) {
+    await ensureSinglePieceRecipe({
+      tx,
+      product,
+      ingredient: product.directStockIngredient,
+    });
+
     return {
       ingredient: product.directStockIngredient,
       product,
@@ -38,6 +95,12 @@ const resolveProductStockIngredient = async ({ tx, repository, productId }) => {
   await tx.product.update({
     where: { id: product.id },
     data: { directStockIngredientId: ingredient.id },
+  });
+
+  await ensureSinglePieceRecipe({
+    tx,
+    product,
+    ingredient,
   });
 
   return {
