@@ -260,7 +260,38 @@ const formatProductOption = (product) => {
   return `${product.name} #${product.id} | ${categoryName} | Stock ${product.stock} ${stockUnit}${packageText}`;
 };
 
-const formatStock = (product) => `${product.stock} ${product.stockUnit || "cope"}`;
+const getProductStockIngredient = (product, ingredientsList) =>
+  product?.directStockIngredient ||
+  ingredientsList.find((ingredient) => String(ingredient.id) === String(product?.directStockIngredientId)) ||
+  ingredientsList.find(
+    (ingredient) =>
+      String(ingredient.name || "").trim().toLowerCase() ===
+      String(product?.name || "").trim().toLowerCase()
+  ) ||
+  null;
+
+const getProductDisplayStock = (product, ingredientsList) => {
+  const stockIngredient = getProductStockIngredient(product, ingredientsList);
+
+  if (stockIngredient) {
+    return {
+      quantity: Number(stockIngredient.currentQuantity || 0),
+      unit: stockIngredient.baseUnit || "pcs",
+      source: "ledger",
+    };
+  }
+
+  return {
+    quantity: Number(product?.stock || 0),
+    unit: product?.stockUnit || "cope",
+    source: "legacy",
+  };
+};
+
+const formatStock = (product, ingredientsList = []) => {
+  const stock = getProductDisplayStock(product, ingredientsList);
+  return `${stock.quantity} ${stock.unit}`;
+};
 
 const getProductStockUnit = (product) => product?.stockUnit || "cope";
 
@@ -1514,6 +1545,49 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(async () => {
       const stockIntake = await createStockIntake(session.token, payload);
       setStockIntakes((current) => [stockIntake, ...current]);
+      const updatedIngredients = ensureArray(stockIntake.items)
+        .map((item) => item.ingredient)
+        .filter(Boolean);
+
+      if (updatedIngredients.length) {
+        setIngredients((current) => {
+          const nextById = new Map(current.map((ingredient) => [ingredient.id, ingredient]));
+
+          updatedIngredients.forEach((ingredient) => {
+            nextById.set(ingredient.id, ingredient);
+          });
+
+          return Array.from(nextById.values()).sort((left, right) =>
+            String(left.name || "").localeCompare(String(right.name || ""))
+          );
+        });
+      }
+
+      const nextMovements = ensureArray(stockIntake.movements);
+
+      if (nextMovements.length) {
+        setStockMovements((current) => [...nextMovements, ...current]);
+      }
+
+      setProducts((current) =>
+        current.map((product) => {
+          const linkedIngredient = updatedIngredients.find(
+            (ingredient) =>
+              String(ingredient.name || "").trim().toLowerCase() ===
+              String(product.name || "").trim().toLowerCase()
+          );
+
+          if (!linkedIngredient) {
+            return product;
+          }
+
+          return {
+            ...product,
+            directStockIngredientId: product.directStockIngredientId || linkedIngredient.id,
+            directStockIngredient: linkedIngredient,
+          };
+        })
+      );
       resetStockIntakeForm();
     }, payload.confirm ? "Stock intake confirmed and ingredient stock updated." : "Stock intake saved as draft.");
   };
@@ -2359,7 +2433,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                           </td>
                           <td className="px-3 py-2 text-pos-muted">{formatMoney(product.price)} EUR</td>
                           <td className="px-3 py-2 text-pos-muted">
-                            {formatStock(product)}
+                            {formatStock(product, ingredients)}
                             {product.unitsPerPackage ? (
                               <span className="ml-2 text-[11px] text-pos-muted">
                                 1 paketa = {product.unitsPerPackage}{" "}
@@ -2509,7 +2583,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 {product.name}
                               </p>
                               <p className="m-0 mt-1 text-xs text-pos-muted">
-                                {formatMoney(product.price)} EUR | Stock {formatStock(product)}
+                                {formatMoney(product.price)} EUR | Stock {formatStock(product, ingredients)}
                               </p>
                             </div>
                             <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
@@ -2612,41 +2686,45 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {products.map((product) => (
-                        <tr key={product.id} className="border-t border-white/10">
-                          <td className="px-3 py-2 text-white">{product.name}</td>
-                          <td className="px-3 py-2 text-pos-muted">
-                            {product.category?.name || "Uncategorized"}
-                          </td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`font-semibold ${
-                                product.stock <= Number(lowStock.threshold || 5)
-                                  ? "text-red-300"
-                                  : "text-pos-text"
-                              }`}
-                            >
-                              {formatStock(product)}
-                              <span className="ml-2 text-[11px] font-normal text-pos-muted">
-                                #{product.id}
-                              </span>
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {STOCK_INTAKE_ENABLED ? (
-                              <button
-                                type="button"
-                                className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
-                                onClick={() => setActiveSection("incoming")}
+                      {products.map((product) => {
+                        const displayStock = getProductDisplayStock(product, ingredients);
+
+                        return (
+                          <tr key={product.id} className="border-t border-white/10">
+                            <td className="px-3 py-2 text-white">{product.name}</td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {product.category?.name || "Uncategorized"}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span
+                                className={`font-semibold ${
+                                  displayStock.quantity <= Number(lowStock.threshold || 5)
+                                    ? "text-red-300"
+                                    : "text-pos-text"
+                                }`}
                               >
-                                Stock In
-                              </button>
-                            ) : (
-                              <span className="text-xs text-pos-muted">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                                {formatStock(product, ingredients)}
+                                <span className="ml-2 text-[11px] font-normal text-pos-muted">
+                                  #{product.id}
+                                </span>
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {STOCK_INTAKE_ENABLED ? (
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
+                                  onClick={() => setActiveSection("incoming")}
+                                >
+                                  Stock In
+                                </button>
+                              ) : (
+                                <span className="text-xs text-pos-muted">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2680,7 +2758,7 @@ export default function ManagerDashboard({ session, onLogout }) {
                       >
                         <p className="m-0 text-sm font-semibold text-red-200">{product.name}</p>
                         <p className="m-0 mt-1 text-xs text-red-200/90">
-                          Stock: {formatStock(product)} | Category: {product.category?.name || "N/A"}
+                          Stock: {formatStock(product, ingredients)} | Category: {product.category?.name || "N/A"}
                         </p>
                       </div>
                     ))
