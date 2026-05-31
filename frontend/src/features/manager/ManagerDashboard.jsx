@@ -301,6 +301,35 @@ const formatStock = (product, ingredientsList = []) => {
   return `${stock.quantity} ${stock.unit}`;
 };
 
+const getProductAvailability = (product, recipesList, ingredientsList) => {
+  const recipe = recipesList.find((entry) => String(entry.productId) === String(product.id));
+  const recipeItems = ensureArray(recipe?.items);
+
+  if (!recipe || !recipe.isActive || recipeItems.length === 0) {
+    return null;
+  }
+
+  const itemAvailability = recipeItems.map((item) => {
+    const ingredient =
+      item.ingredient ||
+      ingredientsList.find((entry) => String(entry.id) === String(item.ingredientId));
+    const quantityPerSale = Number(item.quantity || 0);
+    const currentQuantity = Number(ingredient?.currentQuantity || 0);
+
+    return {
+      ingredient,
+      quantityPerSale,
+      possibleSales: quantityPerSale > 0 ? Math.floor(currentQuantity / quantityPerSale) : 0,
+    };
+  });
+
+  return {
+    available: Math.min(...itemAvailability.map((item) => item.possibleSales)),
+    items: itemAvailability,
+    recipe,
+  };
+};
+
 const getProductStockUnit = (product) => product?.stockUnit || "cope";
 
 const getDefaultPurchaseUnitForProduct = (product) =>
@@ -2795,6 +2824,62 @@ export default function ManagerDashboard({ session, onLogout }) {
                       ) : null}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="mt-4">
+                  <h3 className="m-0 text-base font-semibold text-white">Product Availability</h3>
+                  <p className="m-0 mt-1 text-xs text-pos-muted">
+                    Shows how many sale items can be made from current ingredient stock.
+                  </p>
+                  <div className="scroll-y mt-3 max-h-[32vh] overflow-y-auto rounded-xl border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                        <tr>
+                          <th className="px-3 py-2">Product</th>
+                          <th className="px-3 py-2">Recipe</th>
+                          <th className="px-3 py-2 text-right">Can Sell</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {products
+                          .map((product) => ({
+                            product,
+                            availability: getProductAvailability(product, recipes, ingredients),
+                          }))
+                          .filter((entry) => entry.availability)
+                          .map(({ product, availability }) => (
+                            <tr key={product.id} className="border-t border-white/10 align-top">
+                              <td className="px-3 py-2 text-white">
+                                {product.name}
+                                <p className="m-0 text-xs text-pos-muted">#{product.id}</p>
+                              </td>
+                              <td className="px-3 py-2 text-pos-muted">
+                                {availability.items
+                                  .map((item) =>
+                                    `${formatQuantity(
+                                      item.quantityPerSale,
+                                      item.ingredient?.baseUnit || item.unit || ""
+                                    )} ${item.ingredient?.name || "ingredient"}`
+                                  )
+                                  .join(" + ")}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-pos-text">
+                                {availability.available}
+                              </td>
+                            </tr>
+                          ))}
+                        {products.every(
+                          (product) => !getProductAvailability(product, recipes, ingredients)
+                        ) ? (
+                          <tr>
+                            <td colSpan="3" className="px-3 py-6 text-center text-pos-muted">
+                              Add recipes to see product availability.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </article>
 
