@@ -38,10 +38,7 @@ const autoApiBaseUrls = resolveAutoApiBaseUrls();
 
 const rawApiBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api";
 
-const API_BASE_URL =
-  isAutoApiBaseUrl
-    ? autoApiBaseUrls[0]
-    : rawApiBaseUrl.replace(/\/$/, "");
+const API_BASE_URL = isAutoApiBaseUrl ? autoApiBaseUrls[0] : rawApiBaseUrl.replace(/\/$/, "");
 
 const buildUrl = (path, baseUrl = API_BASE_URL) => {
   if (path.startsWith("http://") || path.startsWith("https://")) {
@@ -60,9 +57,7 @@ const parseResponse = async (response) => {
 
   if (!response.ok) {
     const message =
-      (typeof payload === "object" &&
-        payload !== null &&
-        (payload.error || payload.message)) ||
+      (typeof payload === "object" && payload !== null && (payload.error || payload.message)) ||
       (typeof payload === "string" && payload) ||
       `Request failed with status ${response.status}`;
 
@@ -132,9 +127,7 @@ export const apiRequest = async (path, options = {}) => {
         return parseResponse(response);
       } catch (error) {
         if (didTimeout) {
-          const timeoutError = new Error(
-            "Backend is waking up. Wait a few seconds and try again."
-          );
+          const timeoutError = new Error("Backend is waking up. Wait a few seconds and try again.");
           timeoutError.name = "TimeoutError";
           timeoutError.status = 408;
           throw timeoutError;

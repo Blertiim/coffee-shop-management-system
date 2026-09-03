@@ -2,12 +2,7 @@ import { useEffect, useState } from "react";
 
 import QRCode from "qrcode";
 
-export default function PosQrCode({
-  value,
-  alt = "QR code",
-  size = 180,
-  imageClassName = "",
-}) {
+export default function PosQrCode({ value, alt = "QR code", size = 180, imageClassName = "" }) {
   const [qrSrc, setQrSrc] = useState("");
   const [error, setError] = useState("");
 

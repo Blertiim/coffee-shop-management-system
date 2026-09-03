@@ -34,8 +34,7 @@ const pushPathname = (pathname) => {
   window.history.pushState({}, "", pathname);
 };
 
-const normalizeRole = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const filterAssignedTables = (tables, user) => {
   const role = normalizeRole(user?.role);
@@ -54,8 +53,7 @@ const filterAssignedTables = (tables, user) => {
   return assignedTables;
 };
 
-const normalizeStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const formatPrice = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -82,7 +80,7 @@ const buildTableSummary = (tables) =>
       available: 0,
       openOrder: 0,
       pendingPayment: 0,
-    }
+    },
   );
 
 const MONITOR_SECTIONS = [
@@ -153,9 +151,9 @@ const getTableCardTheme = (status, isOpening) => {
   if (isOpening) {
     return {
       label: "Hapet...",
-      className:
-        "border-[#caa15f] bg-[linear-gradient(180deg,rgba(196,145,71,0.98)_0%,rgba(126,88,32,0.99)_100%)] text-white shadow-[inset_0_1px_0_rgba(255,248,230,0.14),0_8px_18px_rgba(82,54,18,0.28)]",
-      stripeClass: "bg-[#ffe0a6]",
+      className: "border-[#f0d9b0] bg-[#fdf3e0] shadow-[0_4px_10px_rgba(196,143,62,0.14)]",
+      stripeClass: "bg-[#d6923a]",
+      metaTextClass: "text-[#a15c1f]",
     };
   }
 
@@ -164,35 +162,35 @@ const getTableCardTheme = (status, isOpening) => {
   if (normalized === "pending_payment") {
     return {
       label: "Pagese",
-      className:
-        "border-[#78bc7a] bg-[linear-gradient(180deg,rgba(70,149,80,0.98)_0%,rgba(36,92,51,0.99)_100%)] text-white shadow-[inset_0_1px_0_rgba(241,255,237,0.08),0_8px_18px_rgba(19,59,31,0.24)]",
-      stripeClass: "bg-[#f5f2ac]",
+      className: "border-[#bfe6cf] bg-[#e7f7ed] shadow-[0_4px_10px_rgba(21,115,71,0.1)]",
+      stripeClass: "bg-[#2f8f45]",
+      metaTextClass: "text-[#157347]",
     };
   }
 
   if (normalized === "reserved") {
     return {
       label: "Rezervuar",
-      className:
-        "border-[#8c7ab3] bg-[linear-gradient(180deg,rgba(98,84,132,0.98)_0%,rgba(60,48,86,0.99)_100%)] text-white shadow-[inset_0_1px_0_rgba(244,239,255,0.08),0_8px_18px_rgba(43,32,64,0.24)]",
-      stripeClass: "bg-[#ddd0ff]",
+      className: "border-[#dcd0f5] bg-[#f3eefd] shadow-[0_4px_10px_rgba(106,76,194,0.1)]",
+      stripeClass: "bg-[#8a6fd0]",
+      metaTextClass: "text-[#6a4cc2]",
     };
   }
 
   if (["occupied", "pending", "preparing", "served"].includes(normalized)) {
     return {
       label: "Aktive",
-      className:
-        "border-[#b15b73] bg-[linear-gradient(180deg,rgba(150,61,81,0.98)_0%,rgba(95,33,51,0.99)_100%)] text-white shadow-[inset_0_1px_0_rgba(255,237,241,0.1),0_8px_18px_rgba(69,21,36,0.28)]",
-      stripeClass: "bg-[#f7d3df]",
+      className: "border-[#f3c3c9] bg-[#fdedef] shadow-[0_4px_10px_rgba(179,54,74,0.1)]",
+      stripeClass: "bg-[#d9576f]",
+      metaTextClass: "text-[#b3364a]",
     };
   }
 
   return {
     label: "Lire",
-    className:
-      "border-[#66c3b1] bg-[linear-gradient(180deg,rgba(44,133,125,0.98)_0%,rgba(22,86,83,0.99)_100%)] text-white shadow-[inset_0_1px_0_rgba(236,255,251,0.08),0_8px_18px_rgba(13,53,52,0.24)]",
-    stripeClass: "bg-[#d2fff0]",
+    className: "border-[#d3e3fa] bg-white shadow-[0_4px_10px_rgba(20,55,110,0.06)]",
+    stripeClass: "bg-[#1fa2ff]",
+    metaTextClass: "text-[#5c7093]",
   };
 };
 
@@ -264,7 +262,7 @@ export default function TableSelectionScreen() {
         },
       };
     },
-    [session.token]
+    [session.token],
   );
 
   const {
@@ -294,37 +292,32 @@ export default function TableSelectionScreen() {
 
   const visibleTables = useMemo(
     () =>
-      filterAssignedTables(tables, session.user).sort(
-        (left, right) => left.number - right.number
-      ),
-    [session.user, tables]
+      filterAssignedTables(tables, session.user).sort((left, right) => left.number - right.number),
+    [session.user, tables],
   );
   const tableBindings = useMemo(() => buildTableBindings(visibleTables), [visibleTables]);
 
   const locations = useMemo(
     () => Array.from(new Set(visibleTables.map((table) => table.location).filter(Boolean))),
-    [visibleTables]
+    [visibleTables],
   );
-  const displayedBindings = useMemo(
-    () => {
-      const filteredBindings =
-        selectedLocation === "all"
-          ? tableBindings
-          : tableBindings.filter(({ table }) => table.location === selectedLocation);
+  const displayedBindings = useMemo(() => {
+    const filteredBindings =
+      selectedLocation === "all"
+        ? tableBindings
+        : tableBindings.filter(({ table }) => table.location === selectedLocation);
 
-      return compactBindingsToMonitorSlots(filteredBindings);
-    },
-    [selectedLocation, tableBindings]
-  );
+    return compactBindingsToMonitorSlots(filteredBindings);
+  }, [selectedLocation, tableBindings]);
   const latestGuestOrderTable = useMemo(() => {
     const guestOrderBindings = tableBindings
       .filter(({ table }) => table.activeGuestOrder)
       .sort((left, right) => {
         const leftTime = new Date(
-          left.table.activeGuestOrder?.updatedAt || left.table.activeGuestOrder?.createdAt || 0
+          left.table.activeGuestOrder?.updatedAt || left.table.activeGuestOrder?.createdAt || 0,
         ).getTime();
         const rightTime = new Date(
-          right.table.activeGuestOrder?.updatedAt || right.table.activeGuestOrder?.createdAt || 0
+          right.table.activeGuestOrder?.updatedAt || right.table.activeGuestOrder?.createdAt || 0,
         ).getTime();
 
         return rightTime - leftTime;
@@ -359,14 +352,13 @@ export default function TableSelectionScreen() {
       (window.matchMedia?.("(pointer: coarse)")?.matches || navigator.maxTouchPoints > 0);
 
     return (
-      viewport.width <= 1024 ||
-      (hasTouchViewport && shortestSide <= 1024 && longestSide <= 1400)
+      viewport.width <= 1024 || (hasTouchViewport && shortestSide <= 1024 && longestSide <= 1400)
     );
   }, [viewport]);
 
   const openOrderStatuses = useMemo(
     () => new Set(["occupied", "pending", "preparing", "served", "pending_payment"]),
-    []
+    [],
   );
 
   useEffect(() => {
@@ -422,14 +414,13 @@ export default function TableSelectionScreen() {
         showNotice({
           type: "error",
           message:
-            requestError.message ||
-            `Unable to open table ${visualTableId}. Please try again.`,
+            requestError.message || `Unable to open table ${visualTableId}. Please try again.`,
         });
       } finally {
         setOpeningTableId(null);
       }
     },
-    [logout, openOrderStatuses, selectTable, session.token, showNotice]
+    [logout, openOrderStatuses, selectTable, session.token, showNotice],
   );
 
   useEffect(() => {
@@ -491,7 +482,8 @@ export default function TableSelectionScreen() {
       total: activeGuestOrder.total || 0,
       appendedToExistingOrder: true,
       assignedWaiterId: table.assignedWaiterId || null,
-      timestamp: activeGuestOrder.updatedAt || activeGuestOrder.createdAt || new Date().toISOString(),
+      timestamp:
+        activeGuestOrder.updatedAt || activeGuestOrder.createdAt || new Date().toISOString(),
     });
   }, [
     dismissedGuestOrderEventId,
@@ -503,152 +495,156 @@ export default function TableSelectionScreen() {
   ]);
 
   return (
-    <main className="min-h-[100dvh] bg-[linear-gradient(180deg,#090705_0%,#110d0a_42%,#16110d_100%)] p-0">
-      <section className="flex min-h-[100dvh] rounded-none border-0 bg-[radial-gradient(circle_at_18%_18%,rgba(177,126,60,0.08)_0%,transparent_24%),radial-gradient(circle_at_82%_78%,rgba(48,112,99,0.08)_0%,transparent_28%),linear-gradient(180deg,#070605_0%,#100d0a_42%,#16110d_100%)] p-0">
+    <main className="min-h-[100dvh] bg-[linear-gradient(180deg,#f5f9ff_0%,#eef5ff_48%,#e8f1fd_100%)] p-0">
+      <section className="flex min-h-[100dvh] rounded-none border-0 bg-[radial-gradient(circle_at_18%_18%,rgba(31,162,255,0.08)_0%,transparent_24%),radial-gradient(circle_at_82%_78%,rgba(56,120,217,0.08)_0%,transparent_28%),linear-gradient(180deg,#f5f9ff_0%,#eef5ff_48%,#e8f1fd_100%)] p-0">
         <div
-          className={`grid min-h-full w-full rounded-none border-0 bg-[#11100d] p-0 ${
+          className={`grid min-h-full w-full rounded-none border-0 bg-[#d3e3fa] p-0 ${
             isTabletLayout
               ? "grid-rows-[minmax(0,1fr)_auto] gap-px"
               : "grid-cols-[minmax(0,1fr)_84px] gap-px sm:grid-cols-[minmax(0,1fr)_104px] sm:gap-px"
           }`}
         >
-          <div className="relative min-h-0 overflow-hidden rounded-none border-0 bg-[linear-gradient(180deg,#203d3a_0%,#19322f_28%,#162b2a_62%,#122221_100%)]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_21%_18%,rgba(250,219,165,0.05)_0%,transparent_22%),radial-gradient(circle_at_70%_48%,rgba(95,180,163,0.12)_0%,transparent_30%),linear-gradient(180deg,rgba(255,242,214,0.03)_0%,transparent_24%,transparent_100%)]" />
+          <div className="relative min-h-0 overflow-hidden rounded-none border-0 bg-[linear-gradient(180deg,#ffffff_0%,#f7faff_48%,#f3f8ff_100%)]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_21%_18%,rgba(31,162,255,0.05)_0%,transparent_22%),radial-gradient(circle_at_70%_48%,rgba(31,162,255,0.07)_0%,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.5)_0%,transparent_24%,transparent_100%)]" />
 
-                <div className="relative z-10 flex h-full min-h-0 flex-col">
-                  <div className="flex items-center justify-between border-b border-white/10 px-[5px] py-[4px] text-[8px] font-medium tracking-[0.08em] text-[#ecd6af] sm:px-[6px] sm:text-[9px]">
-                    <span>{getLocationLabel(selectedLocation)}</span>
-                    <span>POS</span>
-                  </div>
-
-                  {error ? (
-                    <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#b56a6d] bg-[rgba(92,31,37,0.82)] px-2 py-1 text-[9px] text-white sm:text-[10px]">
-                      {error}
-                    </div>
-                  ) : null}
-
-                  <div className="relative min-h-0 flex-1 overflow-hidden">
-                    {isLoading ? (
-                      <div className="flex h-full items-center justify-center px-3 py-4">
-                        <PosScreenLoader label="Loading assigned tables..." />
-                      </div>
-                    ) : visibleTables.length === 0 ? (
-                      <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#e9dbc2] sm:text-[11px]">
-                        Nuk u gjet asnje tavoline per kete kamarier.
-                      </div>
-                    ) : displayedBindings.length === 0 ? (
-                      <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#e9dbc2] sm:text-[11px]">
-                        Nuk ka tavolina ne kete seksion.
-                      </div>
-                    ) : (
-                      <div className="relative h-full">
-                        {isTabletLayout ? (
-                          <div className="scroll-y h-full overflow-y-auto px-[6px] pb-[28px] pt-[6px]">
-                            <div className="grid content-start grid-cols-2 gap-[6px] sm:grid-cols-3">
-                              {displayedBindings.map(({ table, visualId }) => {
-                                const isOpening = openingTableId === table.id;
-                                const isGuestHighlighted = highlightedGuestTableId === table.id;
-                                const theme = getTableCardTheme(table.status, isOpening);
-                                const showMeta = normalizeStatus(table.status) !== "available";
-
-                                return (
-                                  <button
-                                    key={table.id}
-                                    type="button"
-                                    onClick={() => handleTableSelect(table, visualId)}
-                                    disabled={isOpening}
-                                    className={`relative flex min-h-[74px] flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 sm:min-h-[84px] ${theme.className} ${
-                                      isGuestHighlighted
-                                        ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
-                                        : ""
-                                    }`}
-                                    aria-label={`Open Table ${visualId}`}
-                                    title={`Table ${visualId}`}
-                                  >
-                                    {isGuestHighlighted ? (
-                                      <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
-                                        QR
-                                      </span>
-                                    ) : null}
-                                    <span
-                                      className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
-                                    />
-                                    <span className="pl-[5px] text-[9px] font-medium tracking-[0.01em] text-white">
-                                      Tavolina - {visualId}
-                                    </span>
-                                    <span className="mt-[3px] pl-[5px] text-[8px] font-medium leading-tight text-white/90">
-                                      {showMeta ? theme.label : "\u00A0"}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="absolute inset-[6px_6px_18px_6px]">
-                            {displayedBindings.map(({ table, visualId, slot }) => {
-                              const isOpening = openingTableId === table.id;
-                              const isGuestHighlighted = highlightedGuestTableId === table.id;
-                              const theme = getTableCardTheme(table.status, isOpening);
-                              const showMeta = normalizeStatus(table.status) !== "available";
-
-                              return (
-                                <button
-                                  key={table.id}
-                                  type="button"
-                                  onClick={() => handleTableSelect(table, visualId)}
-                                  disabled={isOpening}
-                                  className={`absolute flex flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 ${theme.className} ${
-                                    isGuestHighlighted
-                                      ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
-                                      : ""
-                                  }`}
-                                  style={{
-                                    left: `${slot.left}%`,
-                                    top: `${slot.top}%`,
-                                    width: `${slot.width}%`,
-                                    height: `${slot.height}%`,
-                                  }}
-                                  aria-label={`Open Table ${visualId}`}
-                                  title={`Table ${visualId}`}
-                                >
-                                  {isGuestHighlighted ? (
-                                    <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
-                                      QR
-                                    </span>
-                                  ) : null}
-                                  <span
-                                    className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
-                                  />
-                                  <span className="pl-[5px] text-[9px] font-medium tracking-[0.01em] text-white">
-                                    Tavolina - {visualId}
-                                  </span>
-                                  <span className="mt-[3px] pl-[5px] text-[8px] font-medium leading-tight text-white/90">
-                                    {showMeta ? theme.label : "\u00A0"}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        <div className="absolute inset-x-[6px] bottom-[4px]">
-                          <div className="h-px w-full bg-white/10" />
-                          <div className="mt-1 flex items-center justify-between text-[8px] tracking-[0.08em] text-[#cdb38c]">
-                            <span>ready</span>
-                            <span>
-                              {summary.available} free | {openTablesCount} open
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+            <div className="relative z-10 flex h-full min-h-0 flex-col">
+              <div className="flex items-center justify-between border-b border-[#e1ecfb] px-[5px] py-[4px] text-[8px] font-medium tracking-[0.08em] text-[#5c7093] sm:px-[6px] sm:text-[9px]">
+                <span>{getLocationLabel(selectedLocation)}</span>
+                <span>POS</span>
               </div>
 
+              {error ? (
+                <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#f3c3c9] bg-[#fdedef] px-2 py-1 text-[9px] text-[#b3364a] sm:text-[10px]">
+                  {error}
+                </div>
+              ) : null}
+
+              <div className="relative min-h-0 flex-1 overflow-hidden">
+                {isLoading ? (
+                  <div className="flex h-full items-center justify-center px-3 py-4">
+                    <PosScreenLoader label="Loading assigned tables..." />
+                  </div>
+                ) : visibleTables.length === 0 ? (
+                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#5c7093] sm:text-[11px]">
+                    Nuk u gjet asnje tavoline per kete kamarier.
+                  </div>
+                ) : displayedBindings.length === 0 ? (
+                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#5c7093] sm:text-[11px]">
+                    Nuk ka tavolina ne kete seksion.
+                  </div>
+                ) : (
+                  <div className="relative h-full">
+                    {isTabletLayout ? (
+                      <div className="scroll-y h-full overflow-y-auto px-[6px] pb-[28px] pt-[6px]">
+                        <div className="grid content-start grid-cols-2 gap-[6px] sm:grid-cols-3">
+                          {displayedBindings.map(({ table, visualId }) => {
+                            const isOpening = openingTableId === table.id;
+                            const isGuestHighlighted = highlightedGuestTableId === table.id;
+                            const theme = getTableCardTheme(table.status, isOpening);
+                            const showMeta = normalizeStatus(table.status) !== "available";
+
+                            return (
+                              <button
+                                key={table.id}
+                                type="button"
+                                onClick={() => handleTableSelect(table, visualId)}
+                                disabled={isOpening}
+                                className={`relative flex min-h-[74px] flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 sm:min-h-[84px] ${theme.className} ${
+                                  isGuestHighlighted
+                                    ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
+                                    : ""
+                                }`}
+                                aria-label={`Open Table ${visualId}`}
+                                title={`Table ${visualId}`}
+                              >
+                                {isGuestHighlighted ? (
+                                  <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
+                                    QR
+                                  </span>
+                                ) : null}
+                                <span
+                                  className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
+                                />
+                                <span className="pl-[5px] text-[9px] font-medium tracking-[0.01em] text-[#12213d]">
+                                  Tavolina - {visualId}
+                                </span>
+                                <span
+                                  className={`mt-[3px] pl-[5px] text-[8px] font-medium leading-tight ${theme.metaTextClass}`}
+                                >
+                                  {showMeta ? theme.label : "\u00A0"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-[6px_6px_18px_6px]">
+                        {displayedBindings.map(({ table, visualId, slot }) => {
+                          const isOpening = openingTableId === table.id;
+                          const isGuestHighlighted = highlightedGuestTableId === table.id;
+                          const theme = getTableCardTheme(table.status, isOpening);
+                          const showMeta = normalizeStatus(table.status) !== "available";
+
+                          return (
+                            <button
+                              key={table.id}
+                              type="button"
+                              onClick={() => handleTableSelect(table, visualId)}
+                              disabled={isOpening}
+                              className={`absolute flex flex-col justify-start overflow-hidden rounded-[2px] border px-[6px] py-[5px] text-left outline-none transition duration-150 hover:brightness-105 focus-visible:brightness-105 active:scale-[0.99] disabled:cursor-progress disabled:opacity-90 ${theme.className} ${
+                                isGuestHighlighted
+                                  ? "ring-2 ring-[#ffd977] ring-offset-0 shadow-[0_0_0_1px_rgba(255,219,119,0.55),0_0_16px_rgba(255,211,97,0.36)]"
+                                  : ""
+                              }`}
+                              style={{
+                                left: `${slot.left}%`,
+                                top: `${slot.top}%`,
+                                width: `${slot.width}%`,
+                                height: `${slot.height}%`,
+                              }}
+                              aria-label={`Open Table ${visualId}`}
+                              title={`Table ${visualId}`}
+                            >
+                              {isGuestHighlighted ? (
+                                <span className="absolute right-[5px] top-[5px] rounded-full border border-[#fff1bf] bg-[#f1bd58] px-[5px] py-[1px] text-[7px] font-bold uppercase tracking-[0.12em] text-[#392306]">
+                                  QR
+                                </span>
+                              ) : null}
+                              <span
+                                className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
+                              />
+                              <span className="pl-[5px] text-[9px] font-medium tracking-[0.01em] text-[#12213d]">
+                                Tavolina - {visualId}
+                              </span>
+                              <span
+                                className={`mt-[3px] pl-[5px] text-[8px] font-medium leading-tight ${theme.metaTextClass}`}
+                              >
+                                {showMeta ? theme.label : "\u00A0"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="absolute inset-x-[6px] bottom-[4px]">
+                      <div className="h-px w-full bg-[#e1ecfb]" />
+                      <div className="mt-1 flex items-center justify-between text-[8px] tracking-[0.08em] text-[#5c7093]">
+                        <span>ready</span>
+                        <span>
+                          {summary.available} free | {openTablesCount} open
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {isTabletLayout ? (
-            <aside className="grid grid-cols-3 gap-px bg-[#11100d]">
+            <aside className="grid grid-cols-3 gap-px bg-[#d3e3fa]">
               {MONITOR_SECTIONS.map((section) => {
                 const isActive = selectedLocation === section.key;
 
@@ -658,13 +654,13 @@ export default function TableSelectionScreen() {
                     type="button"
                     onClick={() =>
                       setSelectedLocation((current) =>
-                        current === section.key ? "all" : section.key
+                        current === section.key ? "all" : section.key,
                       )
                     }
                     className={`min-h-[56px] border px-1 text-center text-[8px] font-medium tracking-[0.04em] transition ${
                       isActive
-                        ? "border-[#cfa66d] bg-[linear-gradient(180deg,rgba(170,126,58,0.98)_0%,rgba(106,76,30,0.99)_100%)] text-[#fff8ed]"
-                        : "border-[#5d847c]/45 bg-[linear-gradient(180deg,rgba(42,110,100,0.92)_0%,rgba(25,72,67,0.96)_100%)] text-[#e8f4ef] hover:brightness-105"
+                        ? "border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] text-white"
+                        : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#8fb8ee]"
                     }`}
                   >
                     {section.label}
@@ -672,7 +668,7 @@ export default function TableSelectionScreen() {
                 );
               })}
 
-              <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#6db08b] bg-[linear-gradient(180deg,rgba(53,140,82,0.98)_0%,rgba(28,90,55,0.99)_100%)] px-1 text-center text-[#f2fff4]">
+              <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#5fb46a] bg-[linear-gradient(180deg,#5fc26c_0%,#2f8f45_100%)] px-1 text-center text-white">
                 <span className="text-[7px] uppercase tracking-[0.16em]">Totali</span>
                 <span className="mt-1 text-[9px] font-semibold">
                   {formatPrice(dailyPaidTotals.totalPaid)}
@@ -681,13 +677,13 @@ export default function TableSelectionScreen() {
 
               <button
                 type="button"
-                className="min-h-[54px] border border-[#b35d70] bg-[linear-gradient(180deg,rgba(151,61,83,0.98)_0%,rgba(93,31,46,0.99)_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99]"
+                className="min-h-[54px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99]"
                 onClick={logout}
               >
                 Logout
               </button>
 
-              <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#d2bf74] bg-[linear-gradient(180deg,rgba(184,159,79,0.98)_0%,rgba(128,107,42,0.99)_100%)] px-1 text-center text-[#fff7df]">
+              <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] px-1 text-center text-white">
                 <span className="text-[7px] uppercase tracking-[0.16em]">Open</span>
                 <span className="mt-1 text-[9px] font-bold">{openTablesCount}</span>
               </div>
@@ -703,13 +699,13 @@ export default function TableSelectionScreen() {
                     type="button"
                     onClick={() =>
                       setSelectedLocation((current) =>
-                        current === section.key ? "all" : section.key
+                        current === section.key ? "all" : section.key,
                       )
                     }
                     className={`flex-1 rounded-[2px] border px-1 text-center text-[8px] font-medium tracking-[0.04em] transition min-h-[82px] sm:min-h-[98px] sm:text-[9px] ${
                       isActive
-                        ? "border-[#cfa66d] bg-[linear-gradient(180deg,rgba(170,126,58,0.98)_0%,rgba(106,76,30,0.99)_100%)] text-[#fff8ed]"
-                        : "border-[#5d847c]/45 bg-[linear-gradient(180deg,rgba(42,110,100,0.92)_0%,rgba(25,72,67,0.96)_100%)] text-[#e8f4ef] hover:brightness-105"
+                        ? "border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] text-white"
+                        : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#8fb8ee]"
                     }`}
                   >
                     {section.label}
@@ -717,22 +713,22 @@ export default function TableSelectionScreen() {
                 );
               })}
 
-              <div className="relative flex-[1.15] overflow-hidden rounded-[2px] border border-white/8 bg-[linear-gradient(180deg,rgba(20,31,31,0.92)_0%,rgba(14,21,21,0.98)_100%)] min-h-[146px]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(207,166,109,0.08)_0%,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.02)_0%,transparent_35%,rgba(0,0,0,0.06)_100%)]" />
+              <div className="relative flex-[1.15] overflow-hidden rounded-[2px] border border-[#e1ecfb] bg-[linear-gradient(180deg,#ffffff_0%,#f3f8ff_100%)] min-h-[146px]">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(31,162,255,0.06)_0%,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.5)_0%,transparent_35%,rgba(18,33,61,0.02)_100%)]" />
                 <div className="relative flex h-full min-h-[146px] flex-col items-center justify-center px-2 py-3 text-center">
-                  <p className="m-0 text-[7px] uppercase tracking-[0.24em] text-[#cfb58d]">
+                  <p className="m-0 text-[7px] uppercase tracking-[0.24em] text-[#5c7093]">
                     Terminal
                   </p>
-                  <p className="m-0 mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#f2e5ca] sm:text-[11px]">
+                  <p className="m-0 mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0f6bb8] sm:text-[11px]">
                     Rosit Bar
                   </p>
-                  <p className="m-0 mt-2 text-[7px] uppercase tracking-[0.18em] text-[#7ca398]">
+                  <p className="m-0 mt-2 text-[7px] uppercase tracking-[0.18em] text-[#5c7093]">
                     Table Control
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-[2px] border border-[#6db08b] bg-[linear-gradient(180deg,rgba(53,140,82,0.98)_0%,rgba(28,90,55,0.99)_100%)] px-1 py-3 text-center text-[#f2fff4] sm:py-4">
+              <div className="rounded-[2px] border border-[#5fb46a] bg-[linear-gradient(180deg,#5fc26c_0%,#2f8f45_100%)] px-1 py-3 text-center text-white sm:py-4">
                 <p className="m-0 text-[7px] uppercase tracking-[0.16em]">Totali</p>
                 <p className="m-0 mt-1 text-[9px] font-semibold sm:text-[10px]">
                   {formatPrice(dailyPaidTotals.totalPaid)}
@@ -742,13 +738,13 @@ export default function TableSelectionScreen() {
               <div className="grid grid-cols-2 gap-[4px]">
                 <button
                   type="button"
-                  className="min-h-[58px] rounded-[2px] border border-[#b35d70] bg-[linear-gradient(180deg,rgba(151,61,83,0.98)_0%,rgba(93,31,46,0.99)_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99] sm:min-h-[64px] sm:text-[8px]"
+                  className="min-h-[58px] rounded-[2px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99] sm:min-h-[64px] sm:text-[8px]"
                   onClick={logout}
                 >
                   Logout
                 </button>
 
-                <div className="flex min-h-[58px] flex-col items-center justify-center rounded-[2px] border border-[#d2bf74] bg-[linear-gradient(180deg,rgba(184,159,79,0.98)_0%,rgba(128,107,42,0.99)_100%)] px-1 text-center text-[#fff7df] sm:min-h-[64px]">
+                <div className="flex min-h-[58px] flex-col items-center justify-center rounded-[2px] border border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] px-1 text-center text-white sm:min-h-[64px]">
                   <span className="text-[7px] uppercase tracking-[0.16em]">Open</span>
                   <span className="mt-1 text-[9px] font-bold sm:text-[10px]">
                     {openTablesCount}

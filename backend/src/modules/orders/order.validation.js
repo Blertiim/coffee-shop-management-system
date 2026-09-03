@@ -27,10 +27,7 @@ const normalizeOrderItems = (items) => {
 
     return {
       productId: ensureId(item.productId, `Order item ${index + 1} product id`),
-      quantity: ensurePositiveInteger(
-        item.quantity,
-        `Order item ${index + 1} quantity`
-      ),
+      quantity: ensurePositiveInteger(item.quantity, `Order item ${index + 1} quantity`),
     };
   });
 

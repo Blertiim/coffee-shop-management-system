@@ -1,11 +1,7 @@
 const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateSupplierPayload,
   validateSupplierId,
@@ -71,10 +67,7 @@ exports.createSupplier = async (req, res) => {
 
     return sendSuccess(res, 201, "Supplier created successfully", supplier);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return sendError(res, 409, "Supplier email already exists");
     }
 
@@ -102,10 +95,7 @@ exports.updateSupplier = async (req, res) => {
 
     return sendSuccess(res, 200, "Supplier updated successfully", supplier);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return sendError(res, 409, "Supplier email already exists");
     }
 
@@ -131,15 +121,8 @@ exports.deleteSupplier = async (req, res) => {
 
     return sendSuccess(res, 200, "Supplier deleted successfully", null);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return sendError(
-        res,
-        400,
-        "Cannot delete supplier linked to inventory or supplier orders"
-      );
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return sendError(res, 400, "Cannot delete supplier linked to inventory or supplier orders");
     }
 
     return handleControllerError(res, error, "Delete supplier error");

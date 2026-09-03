@@ -137,8 +137,7 @@ const escapeCsv = (value) => {
   return text;
 };
 
-const appendCsvSection = (rows) =>
-  rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+const appendCsvSection = (rows) => rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
 
 const buildDayBuckets = (range) => {
   const buckets = {};
@@ -240,7 +239,7 @@ const buildAdvancedReportPayload = async (range) => {
 
     if (monthBuckets[monthKey]) {
       monthBuckets[monthKey].revenue = Number(
-        (monthBuckets[monthKey].revenue + order.total).toFixed(2)
+        (monthBuckets[monthKey].revenue + order.total).toFixed(2),
       );
       monthBuckets[monthKey].orders += 1;
     }
@@ -256,14 +255,12 @@ const buildAdvancedReportPayload = async (range) => {
     };
 
     current.quantitySold += lineItem.quantity;
-    current.revenue = Number(
-      (current.revenue + lineItem.quantity * lineItem.price).toFixed(2)
-    );
+    current.revenue = Number((current.revenue + lineItem.quantity * lineItem.price).toFixed(2));
     salesByProductMap.set(lineItem.productId, current);
   });
 
   const salesByProductEntries = [...salesByProductMap.values()].sort(
-    (left, right) => right.quantitySold - left.quantitySold || right.revenue - left.revenue
+    (left, right) => right.quantitySold - left.quantitySold || right.revenue - left.revenue,
   );
   const productIds = salesByProductEntries.map((entry) => entry.productId);
   const userIds = employeeGroups
@@ -343,8 +340,7 @@ const buildAdvancedReportPayload = async (range) => {
         role: user?.role || "unknown",
         totalSales,
         ordersHandled,
-        averageOrderValue:
-          ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
+        averageOrderValue: ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
       };
     }),
   };
@@ -505,7 +501,7 @@ exports.getRecentOrders = async (req, res) => {
         include: DASHBOARD_ORDER_INCLUDE,
         orderBy: { createdAt: "desc" },
         take: 5,
-      })
+      }),
     );
 
     return sendSuccess(res, 200, "Recent orders retrieved successfully", recentOrders);
@@ -548,8 +544,7 @@ exports.getOrdersByDate = async (req, res) => {
 
       const paidRevenue = Number((paidAggregation._sum.total || 0).toFixed(2));
       const paidCount = paidAggregation._count.id || 0;
-      const averagePaidOrder =
-        paidCount > 0 ? Number((paidRevenue / paidCount).toFixed(2)) : 0;
+      const averagePaidOrder = paidCount > 0 ? Number((paidRevenue / paidCount).toFixed(2)) : 0;
 
       return {
         filters: {
@@ -577,7 +572,9 @@ exports.getOrdersByDate = async (req, res) => {
 exports.getRevenueTrend = async (req, res) => {
   try {
     const payload = await rememberDashboardResult("revenue-trend", req, 20 * 1000, async () => {
-      const hasExplicitRange = Boolean(req.query.from || req.query.to || req.query.startDate || req.query.endDate);
+      const hasExplicitRange = Boolean(
+        req.query.from || req.query.to || req.query.startDate || req.query.endDate,
+      );
       const range = hasExplicitRange
         ? buildDateRange(req.query, { defaultDays: 31 })
         : (() => {
@@ -637,72 +634,77 @@ exports.getRevenueTrend = async (req, res) => {
 
 exports.getWaiterPerformance = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("waiter-performance", req, 20 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 1 });
+    const payload = await rememberDashboardResult(
+      "waiter-performance",
+      req,
+      20 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 1 });
 
-      const grouped = await prisma.order.groupBy({
-        where: {
-          status: "paid",
-          ...buildRangeFilter("updatedAt", range),
-        },
-        by: ["userId"],
-        _sum: {
-          total: true,
-        },
-        _count: {
-          id: true,
-        },
-        orderBy: {
-          _sum: {
-            total: "desc",
+        const grouped = await prisma.order.groupBy({
+          where: {
+            status: "paid",
+            ...buildRangeFilter("updatedAt", range),
           },
-        },
-      });
+          by: ["userId"],
+          _sum: {
+            total: true,
+          },
+          _count: {
+            id: true,
+          },
+          orderBy: {
+            _sum: {
+              total: "desc",
+            },
+          },
+        });
 
-      const userIds = grouped
-        .map((entry) => entry.userId)
-        .filter((value) => Number.isInteger(value));
+        const userIds = grouped
+          .map((entry) => entry.userId)
+          .filter((value) => Number.isInteger(value));
 
-      const users = userIds.length
-        ? await prisma.user.findMany({
-            where: {
-              id: {
-                in: userIds,
+        const users = userIds.length
+          ? await prisma.user.findMany({
+              where: {
+                id: {
+                  in: userIds,
+                },
               },
-            },
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-            },
-          })
-        : [];
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+              },
+            })
+          : [];
 
-      const usersById = new Map(users.map((user) => [user.id, user]));
+        const usersById = new Map(users.map((user) => [user.id, user]));
 
-      const performance = grouped.map((entry, index) => {
-        const user = usersById.get(entry.userId);
-        const totalSales = Number((entry._sum.total || 0).toFixed(2));
-        const ordersHandled = entry._count.id || 0;
+        const performance = grouped.map((entry, index) => {
+          const user = usersById.get(entry.userId);
+          const totalSales = Number((entry._sum.total || 0).toFixed(2));
+          const ordersHandled = entry._count.id || 0;
+
+          return {
+            rank: index + 1,
+            userId: entry.userId || null,
+            waiterName: user ? user.fullName : "Unknown user",
+            email: user ? user.email : null,
+            totalSales,
+            ordersHandled,
+            averageOrderValue:
+              ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
+          };
+        });
 
         return {
-          rank: index + 1,
-          userId: entry.userId || null,
-          waiterName: user ? user.fullName : "Unknown user",
-          email: user ? user.email : null,
-          totalSales,
-          ordersHandled,
-          averageOrderValue:
-            ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
+          from: range.from.toISOString(),
+          to: range.to.toISOString(),
+          ranking: performance,
         };
-      });
-
-      return {
-        from: range.from.toISOString(),
-        to: range.to.toISOString(),
-        ranking: performance,
-      };
-    });
+      },
+    );
 
     return sendSuccess(res, 200, "Waiter performance retrieved successfully", payload);
   } catch (error) {
@@ -791,8 +793,7 @@ exports.getDailySummary = async (req, res) => {
         netRevenue: Number((totalRevenue - totalExpenses).toFixed(2)),
         totalOrders,
         paidOrders,
-        averagePaidOrder:
-          paidOrders > 0 ? Number((totalRevenue / paidOrders).toFixed(2)) : 0,
+        averagePaidOrder: paidOrders > 0 ? Number((totalRevenue / paidOrders).toFixed(2)) : 0,
       };
     });
 
@@ -909,8 +910,8 @@ exports.exportAdvancedReportCsv = async (req, res) => {
       "Content-Disposition",
       `attachment; filename="advanced-sales-report-${report.range.from.slice(
         0,
-        10
-      )}-to-${report.range.to.slice(0, 10)}.csv"`
+        10,
+      )}-to-${report.range.to.slice(0, 10)}.csv"`,
     );
 
     return res.status(200).send(lines.join("\n"));
@@ -931,10 +932,7 @@ exports.exportAdvancedReportPdf = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="advanced-sales-report-${report.range.from.slice(
-        0,
-        10
-      )}.pdf"`
+      `attachment; filename="advanced-sales-report-${report.range.from.slice(0, 10)}.pdf"`,
     );
 
     doc.pipe(res);
@@ -957,27 +955,31 @@ exports.exportAdvancedReportPdf = async (req, res) => {
     doc.fontSize(12).text("Monthly Sales", { underline: true });
     doc.moveDown(0.4);
     report.monthlySales.slice(0, 12).forEach((entry) => {
-      doc.fontSize(10).text(
-        `${entry.month}: ${entry.revenue} EUR from ${entry.orders} paid orders`
-      );
+      doc
+        .fontSize(10)
+        .text(`${entry.month}: ${entry.revenue} EUR from ${entry.orders} paid orders`);
     });
     doc.moveDown(0.8);
 
     doc.fontSize(12).text("Top Products", { underline: true });
     doc.moveDown(0.4);
     report.salesByProduct.slice(0, 10).forEach((entry, index) => {
-      doc.fontSize(10).text(
-        `${index + 1}. ${entry.productName} (${entry.categoryName}) - ${entry.quantitySold} sold / ${entry.revenue} EUR`
-      );
+      doc
+        .fontSize(10)
+        .text(
+          `${index + 1}. ${entry.productName} (${entry.categoryName}) - ${entry.quantitySold} sold / ${entry.revenue} EUR`,
+        );
     });
     doc.moveDown(0.8);
 
     doc.fontSize(12).text("Top Employees", { underline: true });
     doc.moveDown(0.4);
     report.salesByEmployee.slice(0, 10).forEach((entry, index) => {
-      doc.fontSize(10).text(
-        `${index + 1}. ${entry.employeeName} - ${entry.totalSales} EUR across ${entry.ordersHandled} orders`
-      );
+      doc
+        .fontSize(10)
+        .text(
+          `${index + 1}. ${entry.employeeName} - ${entry.totalSales} EUR across ${entry.ordersHandled} orders`,
+        );
     });
 
     doc.end();

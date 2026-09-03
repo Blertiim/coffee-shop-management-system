@@ -10,13 +10,13 @@ router.get(
   "/tables/:tableId/access",
   authMiddleware,
   adminOrManager,
-  guestController.getTableGuestAccess
+  guestController.getTableGuestAccess,
 );
 router.post(
   "/tables/:tableId/access/rotate",
   authMiddleware,
   adminOrManager,
-  guestController.rotateTableGuestAccess
+  guestController.rotateTableGuestAccess,
 );
 router.get("/access/:token/menu", guestController.getGuestMenu);
 router.post("/access/:token/order", guestController.submitGuestOrder);

@@ -1,7 +1,6 @@
 const { sendError } = require("../utils/response");
 
-const normalizeRole = (role) =>
-  typeof role === "string" ? role.trim().toLowerCase() : "";
+const normalizeRole = (role) => (typeof role === "string" ? role.trim().toLowerCase() : "");
 
 const authorizeRoles = (...allowedRoles) => {
   const normalizedAllowedRoles = allowedRoles.map(normalizeRole);

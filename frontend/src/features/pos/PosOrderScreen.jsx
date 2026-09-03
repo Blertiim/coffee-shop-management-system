@@ -23,12 +23,7 @@ import {
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
 const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
-const TRANSFERABLE_ORDER_STATUSES = new Set([
-  "pending",
-  "preparing",
-  "served",
-  "pending_payment",
-]);
+const TRANSFERABLE_ORDER_STATUSES = new Set(["pending", "preparing", "served", "pending_payment"]);
 const TABLES_PATH = "/tables";
 const REALTIME_MENU_CHANNELS = ["categories", "products", "inventory"];
 const MAX_SPLIT_PARTS = 12;
@@ -45,8 +40,7 @@ const buildRealtimeStreamUrl = (token, channels = []) => {
 };
 
 const isHiddenPosCategory = (name) => {
-  const normalizedName =
-    typeof name === "string" ? name.trim().toLowerCase() : "";
+  const normalizedName = typeof name === "string" ? name.trim().toLowerCase() : "";
 
   return (
     normalizedName.includes("orders category 2026") ||
@@ -61,8 +55,7 @@ const formatPrice = (value) =>
     maximumFractionDigits: 2,
   }).format(value || 0);
 
-const normalizeStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const buildTablePath = (visualTableId, fallbackTableNumber) => {
   const parsedVisualId = Number(visualTableId);
@@ -86,10 +79,7 @@ const getDisplayTableId = (table) => table?.visualId || table?.number || "-";
 
 const normalizeOrderSubtotal = (order) =>
   Number(
-    (
-      order?.subtotal ??
-      (Number(order?.total || 0) + Number(order?.discountAmount || 0))
-    ).toFixed(2)
+    (order?.subtotal ?? Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2),
   );
 
 const buildDiscountConfig = (source = null) => ({
@@ -183,7 +173,7 @@ const buildTicketSummaryItems = (items) => {
   });
 
   return Array.from(groupedItems.values()).sort((left, right) =>
-    left.name.localeCompare(right.name)
+    left.name.localeCompare(right.name),
   );
 };
 
@@ -230,7 +220,7 @@ export default function PosOrderScreen() {
   const [selectedCartProductId, setSelectedCartProductId] = useState(null);
   const [isToGo, setIsToGo] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState(() =>
-    buildDiscountConfig(table?.activeOrder)
+    buildDiscountConfig(table?.activeOrder),
   );
   const [isDiscountDialogOpen, setIsDiscountDialogOpen] = useState(false);
   const [discountForm, setDiscountForm] = useState({
@@ -248,15 +238,8 @@ export default function PosOrderScreen() {
   const [selectedTransferTableId, setSelectedTransferTableId] = useState(null);
   const [isTransferringOrder, setIsTransferringOrder] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const {
-    cart,
-    total,
-    itemCount,
-    addProduct,
-    changeQuantity,
-    removeProduct,
-    clearCart,
-  } = useOrderCart();
+  const { cart, total, itemCount, addProduct, changeQuantity, removeProduct, clearCart } =
+    useOrderCart();
 
   useEffect(() => {
     setCurrentOrder(table?.activeOrder || null);
@@ -277,7 +260,7 @@ export default function PosOrderScreen() {
     }
 
     setSelectedCartProductId((current) =>
-      cart.some((item) => item.productId === current) ? current : cart[0].productId
+      cart.some((item) => item.productId === current) ? current : cart[0].productId,
     );
   }, [cart]);
 
@@ -347,7 +330,7 @@ export default function PosOrderScreen() {
       replacePathname(TABLES_PATH);
       returnToTables(options);
     },
-    [returnToTables]
+    [returnToTables],
   );
 
   useEffect(() => {
@@ -380,7 +363,7 @@ export default function PosOrderScreen() {
         products: productsResponse || [],
       };
     },
-    [session.token]
+    [session.token],
   );
 
   const {
@@ -402,9 +385,7 @@ export default function PosOrderScreen() {
       return undefined;
     }
 
-    const source = new EventSource(
-      buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS)
-    );
+    const source = new EventSource(buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS));
 
     const handleUpdate = (event) => {
       try {
@@ -436,7 +417,7 @@ export default function PosOrderScreen() {
 
   const loadTransferTables = useCallback(
     async (signal) => getTables(session.token, signal),
-    [session.token]
+    [session.token],
   );
 
   const {
@@ -454,15 +435,14 @@ export default function PosOrderScreen() {
   const backendCategories = menuData?.categories || [];
   const products = menuData?.products || [];
   const transferTables = Array.isArray(transferTablesData) ? transferTablesData : [];
-  const employeeId =
-    session.staffProfile?.employeeId || session.user?.employee?.id || null;
+  const employeeId = session.staffProfile?.employeeId || session.user?.employee?.id || null;
   const waiterName = session.staffProfile?.name || session.user?.fullName || "Waiter";
   const availableProducts = useMemo(
     () =>
       products
         .filter((product) => product.isAvailable)
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [products]
+    [products],
   );
 
   const categoryCounts = useMemo(() => {
@@ -481,7 +461,7 @@ export default function PosOrderScreen() {
       backendCategories
         .filter((category) => !isHiddenPosCategory(category.name))
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [backendCategories]
+    [backendCategories],
   );
 
   useEffect(() => {
@@ -501,25 +481,22 @@ export default function PosOrderScreen() {
 
   const sortedTransferTables = useMemo(
     () => [...transferTables].sort((left, right) => left.number - right.number),
-    [transferTables]
+    [transferTables],
   );
 
   const tableVisualIdsById = useMemo(
     () =>
-      new Map(
-        sortedTransferTables.map((transferTable, index) => [transferTable.id, index + 1])
-      ),
-    [sortedTransferTables]
+      new Map(sortedTransferTables.map((transferTable, index) => [transferTable.id, index + 1])),
+    [sortedTransferTables],
   );
 
   const transferCandidates = useMemo(
     () =>
       sortedTransferTables.filter(
         (transferTable) =>
-          transferTable.id !== table?.id &&
-          normalizeStatus(transferTable.status) === "available"
+          transferTable.id !== table?.id && normalizeStatus(transferTable.status) === "available",
       ),
-    [sortedTransferTables, table]
+    [sortedTransferTables, table],
   );
 
   const hasActiveOrder = Boolean(currentOrder);
@@ -545,21 +522,19 @@ export default function PosOrderScreen() {
         label: category.name,
         count: categoryCounts.get(String(category.id)) || 0,
       })),
-    [categoryCounts, menuCategories]
+    [categoryCounts, menuCategories],
   );
 
   const selectedCategoryName = useMemo(() => {
     const selectedCategory = categoryRailItems.find(
-      (category) => category.key === selectedCategoryId
+      (category) => category.key === selectedCategoryId,
     );
 
     return selectedCategory?.label || "Available Menu";
   }, [categoryRailItems, selectedCategoryId]);
 
   const visibleProducts = useMemo(() => {
-    const allowedCategoryIds = new Set(
-      menuCategories.map((category) => String(category.id))
-    );
+    const allowedCategoryIds = new Set(menuCategories.map((category) => String(category.id)));
 
     return availableProducts.filter((product) => {
       const productCategoryId = String(product.categoryId);
@@ -578,12 +553,12 @@ export default function PosOrderScreen() {
 
   const ticketItems = useMemo(
     () => buildTicketSummaryItems(Array.isArray(currentOrder?.items) ? currentOrder.items : []),
-    [currentOrder]
+    [currentOrder],
   );
 
   const activeOrderItemCount = useMemo(
     () => ticketItems.reduce((sum, item) => sum + item.quantity, 0),
-    [ticketItems]
+    [ticketItems],
   );
 
   const displayLocation = table?.location || "Floor";
@@ -591,20 +566,19 @@ export default function PosOrderScreen() {
     categoryRailItems.length > 0
       ? "Tap a category once, then hit products as fast as the guest calls them."
       : "No ready-to-order products are available right now.";
-  const activeDiscountConfig = hasActiveOrder
-    ? buildDiscountConfig(currentOrder)
-    : pendingDiscount;
+  const activeDiscountConfig = hasActiveOrder ? buildDiscountConfig(currentOrder) : pendingDiscount;
   const currentSubtotal = hasActiveOrder ? normalizeOrderSubtotal(currentOrder) : 0;
   const projectedSubtotal = Number((currentSubtotal + total).toFixed(2));
   const projectedDiscountAmount = calculateDiscountAmount(
     projectedSubtotal,
     activeDiscountConfig.discountType,
-    activeDiscountConfig.discountValue
+    activeDiscountConfig.discountValue,
   );
-  const projectedTotal = Number(Math.max(projectedSubtotal - projectedDiscountAmount, 0).toFixed(2));
+  const projectedTotal = Number(
+    Math.max(projectedSubtotal - projectedDiscountAmount, 0).toFixed(2),
+  );
   const serviceLabel = isToGo ? "To Go" : "Table Service";
-  const selectedCartItem =
-    cart.find((item) => item.productId === selectedCartProductId) || null;
+  const selectedCartItem = cart.find((item) => item.productId === selectedCartProductId) || null;
   const hasAppliedDiscount = projectedDiscountAmount > 0;
   const discountSummaryLabel = hasAppliedDiscount
     ? activeDiscountConfig.discountType === "percent"
@@ -613,7 +587,7 @@ export default function PosOrderScreen() {
     : "No discount";
   const splitShares = useMemo(
     () => buildSplitShares(Number(currentOrder?.total || 0), splitCount),
-    [currentOrder?.total, splitCount]
+    [currentOrder?.total, splitCount],
   );
   const flowHint = getFlowHint({
     canCompletePayment,
@@ -782,10 +756,8 @@ export default function PosOrderScreen() {
         notice: {
           type: "success",
           message: `Payment completed (${formatPrice(
-            paidOrder.total
-          )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(
-            table
-          )} is available.`,
+            paidOrder.total,
+          )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(table)} is available.`,
         },
       });
     } catch (requestError) {
@@ -803,7 +775,7 @@ export default function PosOrderScreen() {
   const handleAddProduct = (product) => {
     if (!canEditOrderItems) {
       setSubmitError(
-        "This ticket is waiting for payment. Complete payment before adding new items."
+        "This ticket is waiting for payment. Complete payment before adding new items.",
       );
       return;
     }
@@ -837,7 +809,9 @@ export default function PosOrderScreen() {
   };
 
   const handleApplyDiscount = async () => {
-    const discountType = String(discountForm.discountType || "").trim().toLowerCase();
+    const discountType = String(discountForm.discountType || "")
+      .trim()
+      .toLowerCase();
     const discountValue = Number(discountForm.discountValue);
 
     if (!["percent", "fixed"].includes(discountType)) {
@@ -963,7 +937,7 @@ export default function PosOrderScreen() {
       const transferredOrder = await transferOrderToTable(
         session.token,
         currentOrder.id,
-        selectedTransferTableId
+        selectedTransferTableId,
       );
       const transferredTableId = transferredOrder.tableId || transferredOrder.table?.id;
       const transferredTable =
@@ -1028,29 +1002,29 @@ export default function PosOrderScreen() {
   };
 
   const headerStats = [
-    { label: "Categories", value: categoryRailItems.length, accent: "text-[#eff8f6]" },
-    { label: "Products Ready", value: visibleProducts.length, accent: "text-[#eff8f6]" },
-    { label: "Pending Cart", value: itemCount, accent: "text-[#eff8f6]" },
+    { label: "Categories", value: categoryRailItems.length, accent: "text-[#12213d]" },
+    { label: "Products Ready", value: visibleProducts.length, accent: "text-[#12213d]" },
+    { label: "Pending Cart", value: itemCount, accent: "text-[#12213d]" },
     {
       label: "Ticket Status",
       value: hasActiveOrder ? getUiStatusLabel(orderStatus) : "Ready",
-      accent: "text-[#eff8f6]",
+      accent: "text-[#12213d]",
     },
   ];
 
   const orderStats = [
-    { label: "Pending", value: itemCount, accent: "text-[#eff8f6]" },
+    { label: "Pending", value: itemCount, accent: "text-[#12213d]" },
     {
       label: "Pending Total",
       value: `${formatPrice(total)} EUR`,
-      accent: "text-[#d8ffe3]",
+      accent: "text-[#1554a3]",
       align: "text-right",
     },
-    { label: "Ticket Items", value: activeOrderItemCount, accent: "text-[#eff8f6]" },
+    { label: "Ticket Items", value: activeOrderItemCount, accent: "text-[#12213d]" },
     {
       label: "Projected Total",
       value: `${formatPrice(projectedTotal)} EUR`,
-      accent: "text-[#eff8f6]",
+      accent: "text-[#12213d]",
       align: "text-right",
     },
   ];
@@ -1064,33 +1038,32 @@ export default function PosOrderScreen() {
   }
 
   return (
-    <main className="pos-shell bg-[radial-gradient(circle_at_top_left,rgba(39,102,95,0.16)_0%,transparent_26%),radial-gradient(circle_at_bottom_right,rgba(22,116,176,0.16)_0%,transparent_30%),linear-gradient(180deg,#051217_0%,#061920_52%,#08151a_100%)]">
+    <main className="pos-shell">
       <section className="flex min-h-[calc(100vh-24px)] flex-col gap-4">
-        <header className="rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(8,29,35,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.28)]">
+        <header className="rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)]">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap gap-2">
-                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d7f4e7]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#c7dcf7] bg-[#eaf2fb] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0f6bb8]">
                   Table {getDisplayTableId(table)}
                 </span>
-                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d7eef3]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#c7dcf7] bg-[#eaf2fb] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0f6bb8]">
                   {displayLocation}
                 </span>
-                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#dce7ea]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#c7dcf7] bg-[#eaf2fb] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0f6bb8]">
                   {waiterName}
                 </span>
-                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#31595a] bg-[#0c1f24] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#a6e8c3]">
+                <span className="inline-flex min-h-[36px] items-center rounded-full border border-[#bfe6cf] bg-[#e7f7ed] px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#157347]">
                   {serviceLabel}
                 </span>
               </div>
 
               <div className="mt-4">
-                <h1 className="m-0 text-[clamp(1.6rem,3.4vw,2.35rem)] font-semibold tracking-[-0.03em] text-[#eff8f6]">
+                <h1 className="m-0 text-[clamp(1.6rem,3.4vw,2.35rem)] font-semibold tracking-[-0.03em] text-[#12213d]">
                   Order Terminal
                 </h1>
-                <p className="m-0 mt-2 max-w-3xl text-sm text-[#95b0b4] sm:text-[15px]">
-                  Categories on the left, products in the middle, checkout on the
-                  right.
+                <p className="m-0 mt-2 max-w-3xl text-sm text-[#5c7093] sm:text-[15px]">
+                  Categories on the left, products in the middle, checkout on the right.
                 </p>
               </div>
             </div>
@@ -1098,14 +1071,14 @@ export default function PosOrderScreen() {
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
               <button
                 type="button"
-                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] hover:text-white active:scale-[0.99]"
+                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f3f8ff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] hover:text-[#0a2547] active:scale-[0.99]"
                 onClick={() => handleReturnToTables()}
               >
                 Back To Tables
               </button>
               <button
                 type="button"
-                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#7b4255] bg-[linear-gradient(180deg,rgba(118,47,69,0.96)_0%,rgba(80,29,45,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
+                className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#e0899a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
                 onClick={logout}
               >
                 Logout
@@ -1117,26 +1090,24 @@ export default function PosOrderScreen() {
             {headerStats.map((item) => (
               <div
                 key={item.label}
-                className="rounded-[8px] border border-[#284952] bg-[#0a1a20] px-3 py-3"
+                className="rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-3 py-3"
               >
-                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                   {item.label}
                 </p>
-                <p className={`m-0 mt-2 text-xl font-semibold ${item.accent}`}>
-                  {item.value}
-                </p>
+                <p className={`m-0 mt-2 text-xl font-semibold ${item.accent}`}>{item.value}</p>
               </div>
             ))}
           </div>
         </header>
 
         {error ? (
-          <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+          <div className="rounded-[8px] border border-[#f3c3c9] bg-[#fdedef] px-4 py-3 text-sm font-medium text-[#b3364a]">
             {error}
           </div>
         ) : null}
         {submitError ? (
-          <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+          <div className="rounded-[8px] border border-[#f3c3c9] bg-[#fdedef] px-4 py-3 text-sm font-medium text-[#b3364a]">
             {submitError}
           </div>
         ) : null}
@@ -1148,23 +1119,23 @@ export default function PosOrderScreen() {
             onSelectCategory={setSelectedCategoryId}
           />
 
-          <section className="flex min-h-0 flex-col rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(7,28,33,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.26)] xl:h-full">
+          <section className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] xl:h-full">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Products
                 </p>
-                <h2 className="m-0 mt-2 text-[1.55rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                <h2 className="m-0 mt-2 text-[1.55rem] font-semibold tracking-[-0.02em] text-[#12213d]">
                   {selectedCategoryName}
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#8eaab0]">{selectedMenuHint}</p>
+                <p className="m-0 mt-2 text-sm text-[#5c7093]">{selectedMenuHint}</p>
               </div>
 
-              <div className="rounded-[8px] border border-[#2b5055] bg-[#0b1c22] px-3 py-3 text-right">
-                <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+              <div className="rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-3 py-3 text-right">
+                <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Selected Group
                 </p>
-                <p className="m-0 mt-2 text-lg font-semibold text-[#d8ffe3]">
+                <p className="m-0 mt-2 text-lg font-semibold text-[#1554a3]">
                   {visibleProducts.length} items
                 </p>
               </div>
@@ -1173,23 +1144,23 @@ export default function PosOrderScreen() {
             {isLoading ? (
               <PosScreenLoader label="Loading menu..." />
             ) : categoryRailItems.length === 0 ? (
-              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6 text-center">
+              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#c7dcf7] bg-[#f3f8ff] p-6 text-center">
                 <div>
-                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                  <p className="m-0 text-base font-semibold text-[#12213d]">
                     No orderable categories
                   </p>
-                  <p className="mt-2 text-sm text-[#90a3b2]">
+                  <p className="mt-2 text-sm text-[#5c7093]">
                     Add products with stock and availability from the manager panel first.
                   </p>
                 </div>
               </div>
             ) : visibleProducts.length === 0 ? (
-              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6 text-center">
+              <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-[8px] border border-dashed border-[#c7dcf7] bg-[#f3f8ff] p-6 text-center">
                 <div>
-                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                  <p className="m-0 text-base font-semibold text-[#12213d]">
                     No products in this category
                   </p>
-                  <p className="mt-2 text-sm text-[#90a3b2]">
+                  <p className="mt-2 text-sm text-[#5c7093]">
                     Choose another category or restock products from the manager side.
                   </p>
                 </div>
@@ -1208,16 +1179,18 @@ export default function PosOrderScreen() {
             )}
           </section>
 
-          <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#21434a] bg-[linear-gradient(180deg,rgba(7,23,29,0.98)_0%,rgba(7,28,33,0.98)_100%)] p-4 shadow-[0_22px_48px_rgba(0,0,0,0.28)] xl:h-full">
+          <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] xl:h-full">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Order Summary
                 </p>
-                <h3 className="m-0 mt-2 text-[1.5rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
-                  {hasActiveOrder ? `Order #${currentOrder.id}` : `Table ${getDisplayTableId(table)}`}
+                <h3 className="m-0 mt-2 text-[1.5rem] font-semibold tracking-[-0.02em] text-[#12213d]">
+                  {hasActiveOrder
+                    ? `Order #${currentOrder.id}`
+                    : `Table ${getDisplayTableId(table)}`}
                 </h3>
-                <p className="m-0 mt-1 text-sm text-[#8eaab0]">
+                <p className="m-0 mt-1 text-sm text-[#5c7093]">
                   {displayLocation} | {waiterName}
                 </p>
               </div>
@@ -1226,7 +1199,7 @@ export default function PosOrderScreen() {
                 {hasActiveOrder ? (
                   <StatusChip status={currentOrder.status} />
                 ) : (
-                  <span className="inline-flex items-center rounded-full border border-[#3cc574]/35 bg-[#123126] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#c8f9da]">
+                  <span className="inline-flex items-center rounded-full border border-[#bfe6cf] bg-[#e7f7ed] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#157347]">
                     New Ticket
                   </span>
                 )}
@@ -1237,22 +1210,20 @@ export default function PosOrderScreen() {
               {orderStats.map((item) => (
                 <div
                   key={item.label}
-                  className={`rounded-[8px] border border-[#274852] bg-[#0a1a20] px-3 py-3 ${
+                  className={`rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-3 py-3 ${
                     item.align || ""
                   }`}
                 >
-                  <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                  <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                     {item.label}
                   </p>
-                  <p className={`m-0 mt-2 text-lg font-semibold ${item.accent}`}>
-                    {item.value}
-                  </p>
+                  <p className={`m-0 mt-2 text-lg font-semibold ${item.accent}`}>{item.value}</p>
                 </div>
               ))}
             </div>
 
             <div className="mt-4">
-              <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+              <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                 Top Actions
               </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -1261,8 +1232,8 @@ export default function PosOrderScreen() {
                   aria-pressed={isToGo}
                   className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-3 text-sm font-semibold transition active:scale-[0.99] ${
                     isToGo
-                      ? "border-[#3cc574] bg-[linear-gradient(180deg,rgba(33,122,83,0.98)_0%,rgba(22,89,61,0.99)_100%)] text-white"
-                      : "border-[#2b5055] bg-[#0b1c22] text-[#dceef1] hover:border-[#3cc574]"
+                      ? "border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] text-white"
+                      : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#1fa2ff]"
                   }`}
                   onClick={() => setIsToGo((current) => !current)}
                 >
@@ -1272,8 +1243,8 @@ export default function PosOrderScreen() {
                   type="button"
                   className={`inline-flex min-h-[62px] items-center justify-center rounded-[8px] border px-3 text-sm font-semibold transition active:scale-[0.99] ${
                     hasAppliedDiscount
-                      ? "border-[#e6b657] bg-[linear-gradient(180deg,rgba(158,118,44,0.98)_0%,rgba(120,86,28,0.99)_100%)] text-white"
-                      : "border-[#5b4a26] bg-[rgba(53,39,14,0.78)] text-[#f3ddb0] hover:brightness-110"
+                      ? "border-[#e6b657] bg-[linear-gradient(180deg,#f4b860_0%,#d6923a_100%)] text-white"
+                      : "border-[#f0d9b0] bg-[#fdf3e0] text-[#a15c1f] hover:brightness-105"
                   }`}
                   onClick={handleOpenDiscountDialog}
                 >
@@ -1281,16 +1252,20 @@ export default function PosOrderScreen() {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-3 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1554a3_100%)] px-3 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={isBusy || !canEditOrderItems || cart.length === 0}
                   onClick={handleSaveOrder}
                 >
-                  {isSavingOrder ? "Confirming..." : hasActiveOrder ? "Confirm Order" : "Open Order"}
+                  {isSavingOrder
+                    ? "Confirming..."
+                    : hasActiveOrder
+                      ? "Confirm Order"
+                      : "Open Order"}
                 </button>
               </div>
             </div>
-            <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-[8px] border border-[#284952] bg-[#08171d]">
-              <div className="grid grid-cols-[minmax(0,1fr)_110px_96px] gap-3 border-b border-[#183139] px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+            <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-[8px] border border-[#e1ecfb] bg-[#f7faff]">
+              <div className="grid grid-cols-[minmax(0,1fr)_110px_96px] gap-3 border-b border-[#e1ecfb] px-3 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                 <span>Name</span>
                 <span className="text-center">Quantity</span>
                 <span className="text-right">Price</span>
@@ -1298,12 +1273,10 @@ export default function PosOrderScreen() {
 
               <div className="scroll-y min-h-0 flex-1 overflow-y-auto p-3">
                 {ticketItems.length === 0 && cart.length === 0 ? (
-                  <div className="flex h-full min-h-[260px] items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] px-4 text-center">
+                  <div className="flex h-full min-h-[260px] items-center justify-center rounded-[8px] border border-dashed border-[#c7dcf7] bg-white px-4 text-center">
                     <div>
-                      <p className="m-0 text-base font-semibold text-[#eff8f6]">
-                        No items yet
-                      </p>
-                      <p className="mt-2 text-sm text-[#92a6b6]">
+                      <p className="m-0 text-base font-semibold text-[#12213d]">No items yet</p>
+                      <p className="mt-2 text-sm text-[#5c7093]">
                         Tap product tiles to fill the order summary.
                       </p>
                     </div>
@@ -1313,20 +1286,16 @@ export default function PosOrderScreen() {
                     {ticketItems.length > 0 ? (
                       <section>
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+                          <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                             On Ticket
                           </p>
-                          <span className="text-[11px] font-semibold text-[#dbe8eb]">
+                          <span className="text-[11px] font-semibold text-[#12213d]">
                             {activeOrderItemCount} pcs
                           </span>
                         </div>
                         <div className="space-y-2">
                           {ticketItems.map((item) => (
-                            <CartItemRow
-                              key={item.key}
-                              item={item}
-                              variant="ticket"
-                            />
+                            <CartItemRow key={item.key} item={item} variant="ticket" />
                           ))}
                         </div>
                       </section>
@@ -1334,20 +1303,20 @@ export default function PosOrderScreen() {
 
                     {cart.length > 0 ? (
                       <section
-                        className={ticketItems.length > 0 ? "border-t border-[#183139] pt-4" : ""}
+                        className={ticketItems.length > 0 ? "border-t border-[#e1ecfb] pt-4" : ""}
                       >
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div>
-                            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f9ea4]">
+                            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                               Ready To Confirm
                             </p>
-                            <p className="m-0 mt-1 text-xs text-[#8eaab0]">
+                            <p className="m-0 mt-1 text-xs text-[#5c7093]">
                               {selectedCartItem
                                 ? `${selectedCartItem.name} selected`
                                 : "Tap a pending line to edit or delete"}
                             </p>
                           </div>
-                          <span className="text-[11px] font-semibold text-[#dbe8eb]">
+                          <span className="text-[11px] font-semibold text-[#12213d]">
                             {itemCount} pcs
                           </span>
                         </div>
@@ -1370,8 +1339,8 @@ export default function PosOrderScreen() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4">
-              <div className="space-y-2 text-sm text-[#dcebef]">
+            <div className="mt-4 rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] p-4">
+              <div className="space-y-2 text-sm text-[#12213d]">
                 <div className="flex items-center justify-between gap-3">
                   <span>Pending Cart</span>
                   <strong>{formatPrice(total)} EUR</strong>
@@ -1382,7 +1351,7 @@ export default function PosOrderScreen() {
                       <span>Subtotal Before Discount</span>
                       <strong>{formatPrice(projectedSubtotal)} EUR</strong>
                     </div>
-                    <div className="flex items-center justify-between gap-3 text-[#f3ddb0]">
+                    <div className="flex items-center justify-between gap-3 text-[#a15c1f]">
                       <span>{discountSummaryLabel}</span>
                       <strong>-{formatPrice(projectedDiscountAmount)} EUR</strong>
                     </div>
@@ -1392,15 +1361,15 @@ export default function PosOrderScreen() {
                   <span>Current Ticket</span>
                   <strong>{formatPrice(currentOrder?.total || 0)} EUR</strong>
                 </div>
-                <div className="flex items-center justify-between gap-3 border-t border-[#183139] pt-2 text-base">
+                <div className="flex items-center justify-between gap-3 border-t border-[#e1ecfb] pt-2 text-base">
                   <span>Total Due</span>
-                  <strong className="text-[#d8ffe3]">{formatPrice(projectedTotal)} EUR</strong>
+                  <strong className="text-[#1554a3]">{formatPrice(projectedTotal)} EUR</strong>
                 </div>
               </div>
 
-              <p className="m-0 mt-3 text-sm text-[#8eaab0]">{flowHint}</p>
+              <p className="m-0 mt-3 text-sm text-[#5c7093]">{flowHint}</p>
               {hasAppliedDiscount ? (
-                <p className="m-0 mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#f3ddb0]">
+                <p className="m-0 mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#a15c1f]">
                   {discountSummaryLabel} active
                 </p>
               ) : null}
@@ -1408,7 +1377,7 @@ export default function PosOrderScreen() {
               <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <button
                   type="button"
-                  className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#d09b3c] bg-[linear-gradient(180deg,rgba(173,127,42,0.98)_0%,rgba(123,87,24,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={isBusy || !canGenerateInvoice || cart.length > 0}
                   onClick={handleGenerateInvoice}
                 >
@@ -1418,7 +1387,7 @@ export default function PosOrderScreen() {
                 {canDownloadInvoice || isDownloadingInvoice ? (
                   <button
                     type="button"
-                    className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#3d8ccf] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                    className="inline-flex min-h-[56px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f3f8ff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={isBusy}
                     onClick={handleDownloadInvoice}
                   >
@@ -1430,18 +1399,20 @@ export default function PosOrderScreen() {
 
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#7f9ea4]">
+                <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                   Bottom Actions
                 </p>
-                <span className="text-xs text-[#8eaab0]">
-                  {selectedCartItem ? `Selected: ${selectedCartItem.name}` : "Select a pending item"}
+                <span className="text-xs text-[#5c7093]">
+                  {selectedCartItem
+                    ? `Selected: ${selectedCartItem.name}`
+                    : "Select a pending item"}
                 </span>
               </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#9a4c62] bg-[linear-gradient(180deg,rgba(126,47,67,0.96)_0%,rgba(91,33,48,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#e0899a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={isBusy || !selectedCartItem}
                   onClick={handleDeleteSelectedItem}
                 >
@@ -1449,15 +1420,17 @@ export default function PosOrderScreen() {
                 </button>
                 <button
                   type="button"
-                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#466b8f] bg-[linear-gradient(180deg,rgba(41,77,117,0.96)_0%,rgba(28,55,86,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={!hasActiveOrder || cart.length > 0 || Number(currentOrder?.total || 0) <= 0}
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#5c8dff] bg-[linear-gradient(180deg,#6ea3ff_0%,#3a6fd6_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={
+                    !hasActiveOrder || cart.length > 0 || Number(currentOrder?.total || 0) <= 0
+                  }
                   onClick={handleOpenSplitDialog}
                 >
                   Split Bill
                 </button>
                 <button
                   type="button"
-                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#3e7484] bg-[linear-gradient(180deg,rgba(29,104,116,0.96)_0%,rgba(20,72,82,0.99)_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={!canTransferOrder || cart.length > 0}
                   onClick={handleOpenTransferDialog}
                 >
@@ -1468,7 +1441,7 @@ export default function PosOrderScreen() {
               <div className="mt-2 grid grid-cols-1 gap-2">
                 <button
                   type="button"
-                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#34b26a] bg-[linear-gradient(180deg,#3ecf7e_0%,#1f9d5c_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={isBusy || !canCompletePayment}
                   onClick={handleCompletePayment}
                 >
@@ -1481,31 +1454,31 @@ export default function PosOrderScreen() {
       </section>
 
       {isTransferDialogOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
-          <div className="w-full max-w-[720px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(18,33,61,0.45)] p-3 sm:items-center">
+          <div className="w-full max-w-[720px] rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_28px_60px_rgba(20,55,110,0.24)]">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Transfer Order
                 </p>
-                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#12213d]">
                   Move Order #{currentOrder?.id}
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                <p className="m-0 mt-2 text-sm text-[#5c7093]">
                   Pick an available table for this active ticket.
                 </p>
               </div>
 
               <button
                 type="button"
-                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f7faff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99]"
                 onClick={() => setIsTransferDialogOpen(false)}
               >
                 Close
               </button>
             </div>
 
-            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] px-4 py-3 text-sm text-[#d9e7ea]">
+            <div className="mt-4 rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-4 py-3 text-sm text-[#12213d]">
               <div className="flex items-center justify-between gap-3">
                 <span>Current table</span>
                 <strong>Table {getDisplayTableId(table)}</strong>
@@ -1514,19 +1487,19 @@ export default function PosOrderScreen() {
 
             <div className="mt-4">
               {transferTablesError ? (
-                <div className="rounded-[8px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+                <div className="rounded-[8px] border border-[#f3c3c9] bg-[#fdedef] px-4 py-3 text-sm font-medium text-[#b3364a]">
                   {transferTablesError}
                 </div>
               ) : isLoadingTransferTables ? (
-                <div className="flex min-h-[180px] items-center justify-center rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] p-6">
+                <div className="flex min-h-[180px] items-center justify-center rounded-[8px] border border-dashed border-[#c7dcf7] bg-[#f7faff] p-6">
                   <PosScreenLoader label="Loading tables..." />
                 </div>
               ) : transferCandidates.length === 0 ? (
-                <div className="rounded-[8px] border border-dashed border-[#2c5552] bg-[#0c1b20] px-4 py-8 text-center">
-                  <p className="m-0 text-base font-semibold text-[#eff8f6]">
+                <div className="rounded-[8px] border border-dashed border-[#c7dcf7] bg-[#f7faff] px-4 py-8 text-center">
+                  <p className="m-0 text-base font-semibold text-[#12213d]">
                     No free tables right now
                   </p>
-                  <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                  <p className="m-0 mt-2 text-sm text-[#5c7093]">
                     Free up another table, then try the transfer again.
                   </p>
                 </div>
@@ -1543,16 +1516,14 @@ export default function PosOrderScreen() {
                         type="button"
                         className={`rounded-[8px] border px-4 py-4 text-left transition active:scale-[0.99] ${
                           isSelected
-                            ? "border-[#3cc574] bg-[linear-gradient(180deg,rgba(21,79,57,0.98)_0%,rgba(15,58,41,0.99)_100%)] text-white"
-                            : "border-[#284952] bg-[#0a1a20] text-[#e2eff2] hover:border-[#3cc574]"
+                            ? "border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] text-white"
+                            : "border-[#d3e3fa] bg-white text-[#12213d] hover:border-[#1fa2ff]"
                         }`}
                         onClick={() => setSelectedTransferTableId(candidate.id)}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="m-0 text-lg font-semibold">
-                              Table {candidateVisualId}
-                            </p>
+                            <p className="m-0 text-lg font-semibold">Table {candidateVisualId}</p>
                             <p className="m-0 mt-1 text-sm opacity-80">
                               {candidate.location || "Floor"}
                             </p>
@@ -1571,7 +1542,7 @@ export default function PosOrderScreen() {
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <button
                 type="button"
-                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#34b26a] bg-[linear-gradient(180deg,#3ecf7e_0%,#1f9d5c_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                 disabled={
                   isTransferringOrder ||
                   isLoadingTransferTables ||
@@ -1584,7 +1555,7 @@ export default function PosOrderScreen() {
               </button>
               <button
                 type="button"
-                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f7faff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99]"
                 onClick={() => setIsTransferDialogOpen(false)}
               >
                 Keep Table
@@ -1595,24 +1566,24 @@ export default function PosOrderScreen() {
       ) : null}
 
       {isDiscountDialogOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
-          <div className="w-full max-w-[680px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(18,33,61,0.45)] p-3 sm:items-center">
+          <div className="w-full max-w-[680px] rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_28px_60px_rgba(20,55,110,0.24)]">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Discount / Coupon
                 </p>
-                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#12213d]">
                   Adjust ticket total
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                <p className="m-0 mt-2 text-sm text-[#5c7093]">
                   Apply a percent or fixed discount to this ticket.
                 </p>
               </div>
 
               <button
                 type="button"
-                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f7faff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99]"
                 onClick={() => setIsDiscountDialogOpen(false)}
               >
                 Close
@@ -1621,11 +1592,11 @@ export default function PosOrderScreen() {
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="block">
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                   Discount Type
                 </span>
                 <select
-                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#d3e3fa] bg-white px-4 text-base text-[#12213d] outline-none transition focus:border-[#1fa2ff]"
                   value={discountForm.discountType}
                   onChange={(event) =>
                     setDiscountForm((current) => ({
@@ -1640,7 +1611,7 @@ export default function PosOrderScreen() {
               </label>
 
               <label className="block">
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                   Value
                 </span>
                 <input
@@ -1648,7 +1619,7 @@ export default function PosOrderScreen() {
                   min="0"
                   step={discountForm.discountType === "percent" ? "1" : "0.01"}
                   inputMode="decimal"
-                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#d3e3fa] bg-white px-4 text-base text-[#12213d] outline-none transition focus:border-[#1fa2ff]"
                   value={discountForm.discountValue}
                   onChange={(event) =>
                     setDiscountForm((current) => ({
@@ -1661,25 +1632,25 @@ export default function PosOrderScreen() {
               </label>
             </div>
 
-            <div className="mt-4 rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4 text-sm text-[#dcebef]">
+            <div className="mt-4 rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] p-4 text-sm text-[#12213d]">
               <div className="flex items-center justify-between gap-3">
                 <span>Subtotal</span>
                 <strong>{formatPrice(projectedSubtotal)} EUR</strong>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3 text-[#f3ddb0]">
+              <div className="mt-2 flex items-center justify-between gap-3 text-[#a15c1f]">
                 <span>{discountSummaryLabel}</span>
                 <strong>-{formatPrice(projectedDiscountAmount)} EUR</strong>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#183139] pt-2 text-base">
+              <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#e1ecfb] pt-2 text-base">
                 <span>Projected total</span>
-                <strong className="text-[#d8ffe3]">{formatPrice(projectedTotal)} EUR</strong>
+                <strong className="text-[#1554a3]">{formatPrice(projectedTotal)} EUR</strong>
               </div>
             </div>
 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <button
                 type="button"
-                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#3cc574] bg-[linear-gradient(180deg,rgba(38,130,82,0.98)_0%,rgba(25,96,59,0.99)_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-[58px] flex-1 items-center justify-center rounded-[8px] border border-[#34b26a] bg-[linear-gradient(180deg,#3ecf7e_0%,#1f9d5c_100%)] px-4 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                 disabled={isApplyingDiscount}
                 onClick={handleApplyDiscount}
               >
@@ -1687,7 +1658,7 @@ export default function PosOrderScreen() {
               </button>
               <button
                 type="button"
-                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#9a4c62] bg-[linear-gradient(180deg,rgba(126,47,67,0.96)_0%,rgba(91,33,48,0.99)_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                 disabled={isApplyingDiscount || !hasAppliedDiscount}
                 onClick={handleClearDiscount}
               >
@@ -1699,24 +1670,24 @@ export default function PosOrderScreen() {
       ) : null}
 
       {isSplitDialogOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(2,10,14,0.72)] p-3 sm:items-center">
-          <div className="w-full max-w-[680px] rounded-[8px] border border-[#29525a] bg-[linear-gradient(180deg,rgba(7,23,29,0.99)_0%,rgba(8,28,34,0.99)_100%)] p-4 shadow-[0_28px_60px_rgba(0,0,0,0.42)]">
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-[rgba(18,33,61,0.45)] p-3 sm:items-center">
+          <div className="w-full max-w-[680px] rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_28px_60px_rgba(20,55,110,0.24)]">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#7ea0a7]">
+                <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
                   Split Bill
                 </p>
-                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#eff8f6]">
+                <h2 className="m-0 mt-2 text-[1.45rem] font-semibold tracking-[-0.02em] text-[#12213d]">
                   Divide ticket total
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#8eaab0]">
+                <p className="m-0 mt-2 text-sm text-[#5c7093]">
                   Choose how many guests are splitting the payment.
                 </p>
               </div>
 
               <button
                 type="button"
-                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-4 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                className="inline-flex min-h-[48px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f7faff] px-4 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99]"
                 onClick={() => setIsSplitDialogOpen(false)}
               >
                 Close
@@ -1725,7 +1696,7 @@ export default function PosOrderScreen() {
 
             <div className="mt-4 grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
               <label className="block">
-                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ea0a7]">
+                <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
                   Guests
                 </span>
                 <input
@@ -1733,18 +1704,21 @@ export default function PosOrderScreen() {
                   min="2"
                   max={MAX_SPLIT_PARTS}
                   step="1"
-                  className="min-h-[54px] w-full rounded-[8px] border border-[#2a525b] bg-[#0a1a20] px-4 text-base text-[#eff8f6] outline-none transition focus:border-[#43c67c]"
+                  className="min-h-[54px] w-full rounded-[8px] border border-[#d3e3fa] bg-white px-4 text-base text-[#12213d] outline-none transition focus:border-[#1fa2ff]"
                   value={splitCount}
                   onChange={(event) => {
                     const nextValue = Number(event.target.value);
                     setSplitCount(
-                      Math.max(2, Math.min(MAX_SPLIT_PARTS, Number.isFinite(nextValue) ? nextValue : 2))
+                      Math.max(
+                        2,
+                        Math.min(MAX_SPLIT_PARTS, Number.isFinite(nextValue) ? nextValue : 2),
+                      ),
                     );
                   }}
                 />
               </label>
 
-              <div className="rounded-[8px] border border-[#284952] bg-[#0a1a20] p-4 text-sm text-[#dcebef]">
+              <div className="rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] p-4 text-sm text-[#12213d]">
                 <div className="flex items-center justify-between gap-3">
                   <span>Total ticket</span>
                   <strong>{formatPrice(currentOrder?.total || 0)} EUR</strong>
@@ -1753,7 +1727,7 @@ export default function PosOrderScreen() {
                   <span>Guests</span>
                   <strong>{splitShares.length}</strong>
                 </div>
-                <p className="m-0 mt-3 text-xs text-[#8eaab0]">
+                <p className="m-0 mt-3 text-xs text-[#5c7093]">
                   Remainder cents are distributed automatically so the full total stays exact.
                 </p>
               </div>
@@ -1763,11 +1737,11 @@ export default function PosOrderScreen() {
               {splitShares.map((share) => (
                 <div
                   key={share.key}
-                  className="rounded-[8px] border border-[#284952] bg-[#0a1a20] px-4 py-3 text-[#e2eff2]"
+                  className="rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-4 py-3 text-[#12213d]"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold">{share.label}</span>
-                    <strong className="text-base text-[#d8ffe3]">
+                    <strong className="text-base text-[#1554a3]">
                       {formatPrice(share.amount)} EUR
                     </strong>
                   </div>
@@ -1778,7 +1752,7 @@ export default function PosOrderScreen() {
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
-                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#2d5960] bg-[#0c1f25] px-5 text-sm font-semibold text-[#dcf0f2] transition hover:border-[#43c67c] active:scale-[0.99]"
+                className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#d3e3fa] bg-[#f7faff] px-5 text-sm font-semibold text-[#12213d] transition hover:border-[#1fa2ff] active:scale-[0.99]"
                 onClick={() => setIsSplitDialogOpen(false)}
               >
                 Done

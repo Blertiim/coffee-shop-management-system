@@ -1,24 +1,12 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useReducer,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
 
-import {
-  clearStoredSession,
-  getStoredSession,
-  saveStoredSession,
-} from "../lib/authStorage";
+import { clearStoredSession, getStoredSession, saveStoredSession } from "../lib/authStorage";
 import { buildApiUrl } from "../lib/api";
 
 const POS_ALLOWED_ROLES = new Set(["admin", "waiter", "staff", "manager"]);
 const PosAppContext = createContext(null);
 
-const normalizeRole = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const isManagerRole = (role) => {
   const normalized = normalizeRole(role);
@@ -128,9 +116,7 @@ const reducer = (state, action) => {
         screen: "order",
         notice: null,
         guestOrderAlert:
-          state.guestOrderAlert?.tableId === action.payload?.id
-            ? null
-            : state.guestOrderAlert,
+          state.guestOrderAlert?.tableId === action.payload?.id ? null : state.guestOrderAlert,
         highlightedGuestTableId:
           state.highlightedGuestTableId === action.payload?.id
             ? null
@@ -224,7 +210,7 @@ export function PosAppProvider({ children }) {
     }
 
     const source = new EventSource(
-      buildRealtimeStreamUrl(state.session.token, ["orders", "tables"])
+      buildRealtimeStreamUrl(state.session.token, ["orders", "tables"]),
     );
 
     const handleUpdate = (event) => {
@@ -341,7 +327,7 @@ export function PosAppProvider({ children }) {
       selectTable,
       showNotice,
       state,
-    ]
+    ],
   );
 
   return <PosAppContext.Provider value={value}>{children}</PosAppContext.Provider>;

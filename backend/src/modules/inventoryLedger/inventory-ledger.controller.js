@@ -10,7 +10,7 @@ const {
 exports.createIngredient = async (req, res) => {
   try {
     const ingredient = await inventoryLedgerService.createIngredient(
-      validateCreateIngredientPayload(req.body)
+      validateCreateIngredientPayload(req.body),
     );
 
     return sendSuccess(res, 201, "Ingredient created successfully", ingredient);

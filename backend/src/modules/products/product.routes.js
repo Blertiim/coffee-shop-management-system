@@ -11,15 +11,7 @@ router.get("/", productController.getAllProducts);
 router.get("/:id", productController.getProductById);
 router.post("/", adminOrManager, productController.createProduct);
 router.put("/:id", adminOrManager, productController.updateProduct);
-router.patch(
-  "/:id/stock",
-  adminOrManager,
-  productController.updateProductStock
-);
-router.delete(
-  "/:id",
-  adminOrManager,
-  productController.deleteProduct
-);
+router.patch("/:id/stock", adminOrManager, productController.updateProductStock);
+router.delete("/:id", adminOrManager, productController.deleteProduct);
 
 module.exports = router;

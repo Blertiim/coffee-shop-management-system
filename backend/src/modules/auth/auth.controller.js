@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { getJwtSecret } = require("../../config/security");
 const { logManualAuditEvent } = require("../../services/audit.service");
 const { isDatabaseUnavailableError } = require("../../services/alert.service");
+const { sendError, sendSuccess, handleControllerError } = require("../../utils/response");
 const {
   clearPosLoginAttemptState,
   getPosLoginBlock,
@@ -14,17 +15,14 @@ const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
 const INVALID_POS_LOGIN_MESSAGE = "Invalid user or PIN";
 const POS_LOGIN_LOCKED_MESSAGE =
   "Too many failed attempts. POS login is temporarily locked. Please wait and try again.";
-const POS_LOGIN_DELAY_MESSAGE =
-  "Please wait a few seconds before trying again.";
+const POS_LOGIN_DELAY_MESSAGE = "Please wait a few seconds before trying again.";
 
-const normalizeRole = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const isActiveStatus = (value) =>
   typeof value === "string" && value.trim().toLowerCase() === "active";
 
-const isValidPin = (value) =>
-  typeof value === "string" && /^\d{4}$/.test(value.trim());
+const isValidPin = (value) => typeof value === "string" && /^\d{4}$/.test(value.trim());
 
 const mapPosProfile = (user) => ({
   id: user.id,
@@ -77,7 +75,7 @@ exports.register = async (req, res) => {
     const { fullName, email, password } = req.body;
 
     if (!fullName || !email || !password) {
-      return res.status(400).json({ error: "All fields are required" });
+      return sendError(res, 400, "All fields are required");
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -85,7 +83,7 @@ exports.register = async (req, res) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({ error: "Email already exists" });
+      return sendError(res, 400, "Email already exists");
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -111,18 +109,14 @@ exports.register = async (req, res) => {
       ...getAuditContext(req),
     });
 
-    res.status(201).json({
-      message: "User registered successfully",
+    return sendSuccess(res, 201, "User registered successfully", {
       user: await buildUserPayload(user),
     });
   } catch (error) {
-    console.error("Register error:", error);
     if (isDatabaseUnavailableError(error)) {
-      return res.status(503).json({
-        error: "Database unavailable. Start MySQL and try again.",
-      });
+      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
     }
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Register error");
   }
 };
 
@@ -131,7 +125,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
+      return sendError(res, 400, "Email and password are required");
     }
 
     const user = await prisma.user.findUnique({
@@ -147,7 +141,7 @@ exports.login = async (req, res) => {
         payload: { email },
         ...getAuditContext(req),
       });
-      return res.status(401).json({ error: "Invalid email or password" });
+      return sendError(res, 401, "Invalid email or password");
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -165,7 +159,7 @@ exports.login = async (req, res) => {
         payload: { email },
         ...getAuditContext(req),
       });
-      return res.status(401).json({ error: "Invalid email or password" });
+      return sendError(res, 401, "Invalid email or password");
     }
 
     if (!isActiveStatus(user.status)) {
@@ -181,14 +175,12 @@ exports.login = async (req, res) => {
         payload: { email },
         ...getAuditContext(req),
       });
-      return res.status(403).json({ error: "User account is not active" });
+      return sendError(res, 403, "User account is not active");
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
-      { expiresIn: "7d" }
-    );
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, getJwtSecret(), {
+      expiresIn: "7d",
+    });
 
     await logManualAuditEvent({
       actorId: user.id,
@@ -203,19 +195,15 @@ exports.login = async (req, res) => {
       ...getAuditContext(req),
     });
 
-    res.status(200).json({
-      message: "Login successful",
+    return sendSuccess(res, 200, "Login successful", {
       token,
       user: await buildUserPayload(user),
     });
   } catch (error) {
-    console.error("Login error:", error);
     if (isDatabaseUnavailableError(error)) {
-      return res.status(503).json({
-        error: "Database unavailable. Start MySQL and try again.",
-      });
+      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
     }
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Login error");
   }
 };
 
@@ -237,38 +225,34 @@ exports.getPosStaffProfiles = async (req, res) => {
       orderBy: [{ role: "asc" }, { fullName: "asc" }],
     });
 
-    return res.status(200).json({
-      message: "POS staff profiles retrieved successfully",
-      data: users.map(mapPosProfile),
-    });
+    return sendSuccess(
+      res,
+      200,
+      "POS staff profiles retrieved successfully",
+      users.map(mapPosProfile),
+    );
   } catch (error) {
-    console.error("Get POS staff profiles error:", error);
     if (isDatabaseUnavailableError(error)) {
-      return res.status(503).json({
-        error: "Database unavailable. Start MySQL and reload the POS.",
-      });
+      return sendError(res, 503, "Database unavailable. Start MySQL and reload the POS.");
     }
-    return res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get POS staff profiles error");
   }
 };
 
 exports.posLogin = async (req, res) => {
   try {
     const userId = Number(req.body && req.body.userId);
-    const pin =
-      typeof req.body?.pin === "string" ? req.body.pin.trim() : "";
+    const pin = typeof req.body?.pin === "string" ? req.body.pin.trim() : "";
     const identifier = Number.isInteger(userId) && userId > 0 ? `user:${userId}` : "";
     const auditContext = getAuditContext(req);
     const ipAddress = auditContext.ipAddress;
 
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: "Valid userId is required" });
+      return sendError(res, 400, "Valid userId is required");
     }
 
     if (!isValidPin(pin)) {
-      return res.status(400).json({
-        error: "PIN is required and must be exactly 4 digits",
-      });
+      return sendError(res, 400, "PIN is required and must be exactly 4 digits");
     }
 
     const activeBlock = getPosLoginBlock({
@@ -277,16 +261,10 @@ exports.posLogin = async (req, res) => {
     });
 
     if (activeBlock) {
-      res.setHeader(
-        "Retry-After",
-        String(Math.max(1, Math.ceil(activeBlock.retryAfterMs / 1000)))
-      );
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(activeBlock.retryAfterMs / 1000))));
 
       await logManualAuditEvent({
-        action:
-          activeBlock.type === "lockout"
-            ? "auth.pos.locked"
-            : "auth.pos.delayed",
+        action: activeBlock.type === "lockout" ? "auth.pos.locked" : "auth.pos.delayed",
         entityType: "auth",
         entityId: String(userId),
         statusCode: 429,
@@ -298,12 +276,11 @@ exports.posLogin = async (req, res) => {
         ...auditContext,
       });
 
-      return res.status(429).json({
-        error:
-          activeBlock.type === "lockout"
-            ? POS_LOGIN_LOCKED_MESSAGE
-            : POS_LOGIN_DELAY_MESSAGE,
-      });
+      return sendError(
+        res,
+        429,
+        activeBlock.type === "lockout" ? POS_LOGIN_LOCKED_MESSAGE : POS_LOGIN_DELAY_MESSAGE,
+      );
     }
 
     const user = await prisma.user.findUnique({
@@ -322,11 +299,10 @@ exports.posLogin = async (req, res) => {
           Math.max(
             1,
             Math.ceil(
-              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) /
-                1000
-            )
-          )
-        )
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) / 1000,
+            ),
+          ),
+        ),
       );
 
       await logManualAuditEvent({
@@ -338,11 +314,11 @@ exports.posLogin = async (req, res) => {
         ...auditContext,
       });
 
-      return res.status(attemptState.lockedUntil ? 429 : 401).json({
-        error: attemptState.lockedUntil
-          ? POS_LOGIN_LOCKED_MESSAGE
-          : INVALID_POS_LOGIN_MESSAGE,
-      });
+      return sendError(
+        res,
+        attemptState.lockedUntil ? 429 : 401,
+        attemptState.lockedUntil ? POS_LOGIN_LOCKED_MESSAGE : INVALID_POS_LOGIN_MESSAGE,
+      );
     }
 
     if (!isActiveStatus(user.status)) {
@@ -358,7 +334,7 @@ exports.posLogin = async (req, res) => {
         payload: { userId },
         ...auditContext,
       });
-      return res.status(403).json({ error: "User account is not active" });
+      return sendError(res, 403, "User account is not active");
     }
 
     const isMatch = await bcrypt.compare(pin, user.password);
@@ -375,11 +351,10 @@ exports.posLogin = async (req, res) => {
           Math.max(
             1,
             Math.ceil(
-              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) /
-                1000
-            )
-          )
-        )
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) / 1000,
+            ),
+          ),
+        ),
       );
 
       await logManualAuditEvent({
@@ -395,11 +370,11 @@ exports.posLogin = async (req, res) => {
         ...auditContext,
       });
 
-      return res.status(attemptState.lockedUntil ? 429 : 401).json({
-        error: attemptState.lockedUntil
-          ? POS_LOGIN_LOCKED_MESSAGE
-          : INVALID_POS_LOGIN_MESSAGE,
-      });
+      return sendError(
+        res,
+        attemptState.lockedUntil ? 429 : 401,
+        attemptState.lockedUntil ? POS_LOGIN_LOCKED_MESSAGE : INVALID_POS_LOGIN_MESSAGE,
+      );
     }
 
     clearPosLoginAttemptState({
@@ -407,11 +382,9 @@ exports.posLogin = async (req, res) => {
       ipAddress,
     });
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      getJwtSecret(),
-      { expiresIn: "7d" }
-    );
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, getJwtSecret(), {
+      expiresIn: "7d",
+    });
 
     await logManualAuditEvent({
       actorId: user.id,
@@ -426,18 +399,14 @@ exports.posLogin = async (req, res) => {
       ...auditContext,
     });
 
-    return res.status(200).json({
-      message: "POS login successful",
+    return sendSuccess(res, 200, "POS login successful", {
       token,
       user: await buildUserPayload(user),
     });
   } catch (error) {
-    console.error("POS login error:", error);
     if (isDatabaseUnavailableError(error)) {
-      return res.status(503).json({
-        error: "Database unavailable. Start MySQL and try again.",
-      });
+      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
     }
-    return res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "POS login error");
   }
 };

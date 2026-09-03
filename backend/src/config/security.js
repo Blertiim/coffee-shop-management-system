@@ -35,7 +35,7 @@ const getJwtSecret = () => {
 
   if (!secret || PLACEHOLDER_JWT_SECRETS.has(secret.toLowerCase())) {
     throw new Error(
-      "JWT_SECRET must be set to a strong non-placeholder value before the server can run."
+      "JWT_SECRET must be set to a strong non-placeholder value before the server can run.",
     );
   }
 
@@ -63,9 +63,7 @@ const buildCorsOriginChecker = () => {
   const selfOrigins = buildSelfOrigins();
 
   const isKnownAllowedOrigin = (origin) =>
-    !origin ||
-    selfOrigins.has(origin) ||
-    (allowedOrigins ? allowedOrigins.has(origin) : false);
+    !origin || selfOrigins.has(origin) || (allowedOrigins ? allowedOrigins.has(origin) : false);
 
   if (rawOrigins === "*") {
     if (isProductionEnv()) {

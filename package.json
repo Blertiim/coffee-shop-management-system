@@ -10,6 +10,9 @@
     "preview:frontend": "npm --prefix frontend run preview",
     "build": "npm --prefix frontend run build",
     "publish:check": "npm run build && npm --prefix backend test",
-    "start": "npm --prefix backend start"
+    "start": "npm --prefix backend start",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "format": "npm --prefix backend run format && npm --prefix frontend run format",
+    "format:check": "npm --prefix backend run format:check && npm --prefix frontend run format:check"
   }
 }

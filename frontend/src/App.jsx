@@ -8,17 +8,12 @@ import { PosAppProvider, usePosApp } from "./context/PosAppContext";
 const PosLoginScreen = lazy(() => import("./features/auth/PosLoginScreen"));
 const GuestOrderScreen = lazy(() => import("./features/guest/GuestOrderScreen"));
 const PosOrderScreen = lazy(() => import("./features/pos/PosOrderScreen"));
-const TableSelectionScreen = lazy(() =>
-  import("./features/pos/TableSelectionScreen")
-);
-const ManagerDashboard = lazy(() =>
-  import("./features/manager/ManagerDashboard")
-);
+const TableSelectionScreen = lazy(() => import("./features/pos/TableSelectionScreen"));
+const ManagerDashboard = lazy(() => import("./features/manager/ManagerDashboard"));
 const POS_IDLE_LOGOUT_MS = 30 * 1000;
 const POS_IDLE_LOGOUT_SCREENS = new Set(["tables", "order"]);
 
-const normalizeRole = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const isGuestOrderingRoute = () =>
   typeof window !== "undefined" && /^\/guest\/table\/[^/]+\/?$/.test(window.location.pathname);
@@ -50,15 +45,13 @@ class PosRuntimeErrorBoundary extends Component {
       return (
         <main className="pos-shell">
           <section className="flex min-h-[calc(100vh-24px)] flex-col items-center justify-center rounded-[24px] border border-[#6d3b3f] bg-[linear-gradient(180deg,rgba(40,18,22,0.98)_0%,rgba(19,11,14,0.99)_100%)] px-6 py-10 text-center shadow-[0_24px_48px_rgba(0,0,0,0.38)]">
-            <p className="m-0 text-[11px] uppercase tracking-[0.24em] text-[#ffb7af]">
-              POS Error
-            </p>
+            <p className="m-0 text-[11px] uppercase tracking-[0.24em] text-[#ffb7af]">POS Error</p>
             <h1 className="m-0 mt-3 text-[1.8rem] font-semibold text-white">
               The waiter screen crashed
             </h1>
             <p className="m-0 mt-3 max-w-[520px] text-sm text-[#f3d5d0]">
-              We stopped the black screen and caught the error. Return to login, then try the
-              waiter again.
+              We stopped the black screen and caught the error. Return to login, then try the waiter
+              again.
             </p>
             <button
               type="button"
@@ -91,10 +84,7 @@ function PosAppShell() {
   const isManagerView = ["admin", "manager"].includes(normalizeRole(session?.user?.role));
   const isGuestRoute = isGuestOrderingRoute();
   const isPosIdleProtectedScreen =
-    Boolean(session) &&
-    !isGuestRoute &&
-    !isManagerView &&
-    POS_IDLE_LOGOUT_SCREENS.has(screen);
+    Boolean(session) && !isGuestRoute && !isManagerView && POS_IDLE_LOGOUT_SCREENS.has(screen);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isPosIdleProtectedScreen) {
@@ -102,13 +92,7 @@ function PosAppShell() {
     }
 
     let timeoutId = 0;
-    const activityEvents = [
-      "pointerdown",
-      "pointermove",
-      "keydown",
-      "wheel",
-      "touchstart",
-    ];
+    const activityEvents = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
 
     const resetIdleTimer = () => {
       if (timeoutId) {

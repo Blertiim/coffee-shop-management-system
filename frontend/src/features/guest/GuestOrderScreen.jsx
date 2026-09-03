@@ -76,7 +76,7 @@ export default function GuestOrderScreen() {
       (menu.products || [])
         .filter((product) => product.isAvailable && product.stock > 0)
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [menu.products]
+    [menu.products],
   );
 
   const categoryCounts = useMemo(() => {
@@ -91,9 +91,8 @@ export default function GuestOrderScreen() {
   }, [orderableProducts]);
 
   const categories = useMemo(
-    () =>
-      (menu.categories || []).filter((category) => categoryCounts.has(String(category.id))),
-    [categoryCounts, menu.categories]
+    () => (menu.categories || []).filter((category) => categoryCounts.has(String(category.id))),
+    [categoryCounts, menu.categories],
   );
 
   useEffect(() => {
@@ -116,19 +115,14 @@ export default function GuestOrderScreen() {
       return orderableProducts;
     }
 
-    return orderableProducts.filter(
-      (product) => String(product.categoryId) === selectedCategoryId
-    );
+    return orderableProducts.filter((product) => String(product.categoryId) === selectedCategoryId);
   }, [orderableProducts, selectedCategoryId]);
 
-  const cartItemCount = useMemo(
-    () => cart.reduce((sum, item) => sum + item.quantity, 0),
-    [cart]
-  );
+  const cartItemCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
 
   const cartTotal = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantity * item.price, 0),
-    [cart]
+    [cart],
   );
 
   const addProduct = (product) => {
@@ -138,9 +132,7 @@ export default function GuestOrderScreen() {
 
       if (existing) {
         return current.map((entry) =>
-          entry.productId === product.id
-            ? { ...entry, quantity: entry.quantity + 1 }
-            : entry
+          entry.productId === product.id ? { ...entry, quantity: entry.quantity + 1 } : entry,
         );
       }
 
@@ -160,11 +152,9 @@ export default function GuestOrderScreen() {
     setCart((current) =>
       current
         .map((entry) =>
-          entry.productId === productId
-            ? { ...entry, quantity: entry.quantity + delta }
-            : entry
+          entry.productId === productId ? { ...entry, quantity: entry.quantity + delta } : entry,
         )
-        .filter((entry) => entry.quantity > 0)
+        .filter((entry) => entry.quantity > 0),
     );
   };
 
@@ -188,7 +178,7 @@ export default function GuestOrderScreen() {
 
       setCart([]);
       setSuccessMessage(
-        "Your order was sent to the bar successfully. Staff will see it immediately."
+        "Your order was sent to the bar successfully. Staff will see it immediately.",
       );
     } catch (requestError) {
       setError(requestError.message || "Unable to send the order.");
@@ -206,77 +196,79 @@ export default function GuestOrderScreen() {
   }
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#071016_0%,#0b1820_45%,#081117_100%)] px-4 py-5 text-white sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[linear-gradient(180deg,#f5f9ff_0%,#eef5ff_48%,#e8f1fd_100%)] px-4 py-5 text-[#12213d] sm:px-6 lg:px-8">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
-        <header className="rounded-[28px] border border-[#274453] bg-[linear-gradient(135deg,rgba(10,23,31,0.98)_0%,rgba(16,36,48,0.98)_52%,rgba(11,56,63,0.98)_100%)] p-5 shadow-[0_26px_60px_rgba(0,0,0,0.22)]">
-          <p className="m-0 text-[11px] uppercase tracking-[0.22em] text-[#9bc8d0]">
+        <header className="rounded-[28px] border border-[#d3e3fa] bg-[linear-gradient(135deg,#ffffff_0%,#f7faff_52%,#eaf5ff_100%)] p-5 shadow-[0_18px_40px_rgba(20,55,110,0.1)]">
+          <p className="m-0 text-[11px] uppercase tracking-[0.22em] text-[#5c7093]">
             QR Guest Ordering
           </p>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="m-0 text-[clamp(2rem,5vw,3.2rem)] font-semibold tracking-[-0.05em] text-[#f7f3ea]">
+              <h1 className="m-0 text-[clamp(2rem,5vw,3.2rem)] font-semibold tracking-[-0.05em] text-[#12213d]">
                 {menu.table ? `Table ${menu.table.number}` : "Guest Menu"}
               </h1>
-              <p className="m-0 mt-2 text-sm text-[#b6c8d2]">
-                {menu.table?.location || "Scan the QR code on your table"} • Add items and send
-                them straight to the live ticket.
+              <p className="m-0 mt-2 text-sm text-[#5c7093]">
+                {menu.table?.location || "Scan the QR code on your table"} • Add items and send them
+                straight to the live ticket.
               </p>
             </div>
 
-            <div className="rounded-[20px] border border-[#355667] bg-[rgba(9,18,27,0.58)] px-4 py-3">
-              <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8eb0bb]">
-                Cart
-              </p>
-              <p className="m-0 mt-2 text-2xl font-semibold text-[#f5dca8]">
+            <div className="rounded-[20px] border border-[#c7dcf7] bg-[#eaf2fb] px-4 py-3">
+              <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#5c7093]">Cart</p>
+              <p className="m-0 mt-2 text-2xl font-semibold text-[#1554a3]">
                 {formatMoney(cartTotal)} EUR
               </p>
-              <p className="m-0 mt-1 text-xs text-[#9bb4bf]">{cartItemCount} items selected</p>
+              <p className="m-0 mt-1 text-xs text-[#5c7093]">{cartItemCount} items selected</p>
             </div>
           </div>
         </header>
 
         {error ? (
-          <div className="rounded-[18px] border border-[#8f4958] bg-[rgba(71,24,35,0.72)] px-4 py-3 text-sm font-medium text-[#ffd9dd]">
+          <div className="rounded-[18px] border border-[#f3c3c9] bg-[#fdedef] px-4 py-3 text-sm font-medium text-[#b3364a]">
             {error}
           </div>
         ) : null}
         {successMessage ? (
-          <div className="rounded-[18px] border border-emerald-400/30 bg-emerald-500/15 px-4 py-3 text-sm font-medium text-emerald-100">
+          <div className="rounded-[18px] border border-[#bfe6cf] bg-[#e7f7ed] px-4 py-3 text-sm font-medium text-[#157347]">
             {successMessage}
           </div>
         ) : null}
 
         <section className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_320px]">
-          <aside className="rounded-[28px] border border-[#284553] bg-[rgba(10,24,34,0.82)] p-4">
-            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#93b4be]">Categories</p>
+          <aside className="rounded-[28px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.06)]">
+            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#5c7093]">Categories</p>
             <div className="mt-4 grid gap-2">
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  type="button"
-                  onClick={() => setSelectedCategoryId(String(category.id))}
-                  className={`rounded-[18px] border px-4 py-3 text-left transition ${
-                    selectedCategoryId === String(category.id)
-                      ? "border-[#68c8bf] bg-[rgba(69,163,152,0.22)] text-white"
-                      : "border-white/10 bg-white/5 text-[#d0d9df] hover:bg-white/10"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-semibold">{category.name}</span>
-                    <span className="text-xs text-[#9db1bc]">
-                      {categoryCounts.get(String(category.id)) || 0}
-                    </span>
-                  </div>
-                </button>
-              ))}
+              {categories.map((category) => {
+                const isActive = selectedCategoryId === String(category.id);
+
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setSelectedCategoryId(String(category.id))}
+                    className={`rounded-[18px] border px-4 py-3 text-left transition ${
+                      isActive
+                        ? "border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] text-white"
+                        : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:bg-[#eef5ff]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold">{category.name}</span>
+                      <span className={`text-xs ${isActive ? "text-[#eaf5ff]" : "text-[#5c7093]"}`}>
+                        {categoryCounts.get(String(category.id)) || 0}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </aside>
 
-          <section className="rounded-[28px] border border-[#284553] bg-[rgba(10,24,34,0.82)] p-4">
-            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#93b4be]">Menu</p>
+          <section className="rounded-[28px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.06)]">
+            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#5c7093]">Menu</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {visibleProducts.length === 0 ? (
-                <div className="rounded-[20px] border border-dashed border-white/10 bg-white/5 p-6 text-sm text-[#a9bac4]">
+                <div className="rounded-[20px] border border-dashed border-[#c7dcf7] bg-[#f7faff] p-6 text-sm text-[#5c7093]">
                   No products are ready in this group right now.
                 </div>
               ) : (
@@ -285,20 +277,20 @@ export default function GuestOrderScreen() {
                     key={product.id}
                     type="button"
                     onClick={() => addProduct(product)}
-                    className="rounded-[22px] border border-[#335060] bg-[linear-gradient(180deg,rgba(24,53,65,0.96)_0%,rgba(17,35,44,0.98)_100%)] p-4 text-left transition hover:border-[#5fc6bb] hover:translate-y-[-1px]"
+                    className="rounded-[22px] border border-[#d3e3fa] bg-white p-4 text-left shadow-[0_10px_24px_rgba(20,55,110,0.08)] transition hover:border-[#1fa2ff] hover:translate-y-[-1px]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="m-0 text-base font-semibold text-[#f7f3ea]">{product.name}</p>
-                        <p className="m-0 mt-2 text-xs text-[#8faab6]">
+                        <p className="m-0 text-base font-semibold text-[#12213d]">{product.name}</p>
+                        <p className="m-0 mt-2 text-xs text-[#5c7093]">
                           {product.category?.name || "Menu"}
                         </p>
                       </div>
-                      <span className="rounded-full border border-[#3d6e71] bg-[#173438] px-2 py-1 text-[11px] text-[#b6efe6]">
+                      <span className="rounded-full border border-[#c7dcf7] bg-[#eaf2fb] px-2 py-1 text-[11px] text-[#0f6bb8]">
                         Stock {product.stock} {product.stockUnit || "cope"}
                       </span>
                     </div>
-                    <p className="m-0 mt-4 text-xl font-semibold text-[#f5dca8]">
+                    <p className="m-0 mt-4 text-xl font-semibold text-[#1554a3]">
                       {formatMoney(product.price)} EUR
                     </p>
                   </button>
@@ -307,27 +299,27 @@ export default function GuestOrderScreen() {
             </div>
           </section>
 
-          <aside className="rounded-[28px] border border-[#284553] bg-[rgba(10,24,34,0.82)] p-4">
-            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#93b4be]">Your Order</p>
+          <aside className="rounded-[28px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.06)]">
+            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#5c7093]">Your Order</p>
             <div className="mt-4 space-y-3">
               {cart.length === 0 ? (
-                <div className="rounded-[20px] border border-dashed border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-[#9eb1bc]">
+                <div className="rounded-[20px] border border-dashed border-[#c7dcf7] bg-[#f7faff] px-4 py-8 text-center text-sm text-[#5c7093]">
                   Tap menu cards to add items.
                 </div>
               ) : (
                 cart.map((item) => (
                   <div
                     key={item.productId}
-                    className="rounded-[20px] border border-white/10 bg-white/5 p-3"
+                    className="rounded-[20px] border border-[#e1ecfb] bg-[#f7faff] p-3"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="m-0 text-sm font-semibold text-white">{item.name}</p>
-                        <p className="m-0 mt-1 text-xs text-[#9bb0bc]">
+                        <p className="m-0 text-sm font-semibold text-[#12213d]">{item.name}</p>
+                        <p className="m-0 mt-1 text-xs text-[#5c7093]">
                           {formatMoney(item.price)} EUR each
                         </p>
                       </div>
-                      <p className="m-0 text-sm font-semibold text-[#f5dca8]">
+                      <p className="m-0 text-sm font-semibold text-[#1554a3]">
                         {formatMoney(item.price * item.quantity)} EUR
                       </p>
                     </div>
@@ -336,7 +328,7 @@ export default function GuestOrderScreen() {
                       <button
                         type="button"
                         onClick={() => changeQuantity(item.productId, -1)}
-                        className="h-9 w-9 rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10"
+                        className="h-9 w-9 rounded-full border border-[#d3e3fa] bg-white text-lg text-[#12213d] hover:bg-[#eef5ff]"
                       >
                         -
                       </button>
@@ -346,7 +338,7 @@ export default function GuestOrderScreen() {
                       <button
                         type="button"
                         onClick={() => changeQuantity(item.productId, 1)}
-                        className="h-9 w-9 rounded-full border border-white/15 bg-white/5 text-lg text-white hover:bg-white/10"
+                        className="h-9 w-9 rounded-full border border-[#d3e3fa] bg-white text-lg text-[#12213d] hover:bg-[#eef5ff]"
                       >
                         +
                       </button>
@@ -356,15 +348,17 @@ export default function GuestOrderScreen() {
               )}
             </div>
 
-            <div className="mt-4 rounded-[22px] border border-[#355667] bg-[rgba(9,18,27,0.58)] px-4 py-4">
+            <div className="mt-4 rounded-[22px] border border-[#c7dcf7] bg-[#eaf2fb] px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#8eb0bb]">
+                  <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#5c7093]">
                     Total
                   </p>
-                  <p className="m-0 mt-1 text-sm text-[#a8bac4]">Sent directly to the live table ticket</p>
+                  <p className="m-0 mt-1 text-sm text-[#5c7093]">
+                    Sent directly to the live table ticket
+                  </p>
                 </div>
-                <p className="m-0 text-2xl font-semibold text-[#f5dca8]">
+                <p className="m-0 text-2xl font-semibold text-[#1554a3]">
                   {formatMoney(cartTotal)} EUR
                 </p>
               </div>
@@ -374,7 +368,7 @@ export default function GuestOrderScreen() {
               type="button"
               onClick={handleSubmitOrder}
               disabled={isSubmitting || cart.length === 0}
-              className="mt-4 inline-flex min-h-[56px] w-full items-center justify-center rounded-[18px] border border-[#5fc6bb] bg-[linear-gradient(180deg,rgba(79,183,170,0.96)_0%,rgba(31,112,103,0.99)_100%)] px-4 text-base font-bold text-[#071311] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-4 inline-flex min-h-[56px] w-full items-center justify-center rounded-[18px] border border-[#34b26a] bg-[linear-gradient(180deg,#3ecf7e_0%,#1f9d5c_100%)] px-4 text-base font-bold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? "Sending Order..." : "Send To Table"}
             </button>

@@ -11,7 +11,9 @@ const UNIT_DEFINITIONS = {
 const BASE_UNITS = new Set(["g", "ml", "pcs"]);
 
 const normalizeUnit = (unit) => {
-  const normalized = String(unit || "").trim().toLowerCase();
+  const normalized = String(unit || "")
+    .trim()
+    .toLowerCase();
 
   if (normalized === "liter" || normalized === "liters" || normalized === "litra") {
     return "l";

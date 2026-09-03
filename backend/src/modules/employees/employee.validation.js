@@ -14,11 +14,7 @@ const VALID_EMPLOYEE_POSITIONS = ["waiter", "manager", "cashier"];
 const validateCreateEmployeePayload = (body) => ({
   firstName: ensureRequiredString(body.firstName, "First name"),
   lastName: ensureRequiredString(body.lastName, "Last name"),
-  position: ensureEnumValue(
-    body.position,
-    "Employee position",
-    VALID_EMPLOYEE_POSITIONS
-  ),
+  position: ensureEnumValue(body.position, "Employee position", VALID_EMPLOYEE_POSITIONS),
   phone: ensurePhone(body.phone, "Phone"),
   email: ensureEmail(body.email, "Email"),
   hireDate: ensureDateTime(body.hireDate, "Hire date"),
@@ -38,11 +34,7 @@ const validateUpdateEmployeePayload = (body) => {
   }
 
   if (body.position !== undefined) {
-    data.position = ensureEnumValue(
-      body.position,
-      "Employee position",
-      VALID_EMPLOYEE_POSITIONS
-    );
+    data.position = ensureEnumValue(body.position, "Employee position", VALID_EMPLOYEE_POSITIONS);
   }
 
   if (body.phone !== undefined) {

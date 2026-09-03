@@ -73,9 +73,7 @@ const applyIngredientMovement = async ({
     where: { id: ingredient.id },
     data: {
       currentQuantity: newStock,
-      ...(unitCost !== null && unitCost !== undefined
-        ? { averageCost: Number(unitCost) }
-        : {}),
+      ...(unitCost !== null && unitCost !== undefined ? { averageCost: Number(unitCost) } : {}),
       baseUnit,
     },
   });

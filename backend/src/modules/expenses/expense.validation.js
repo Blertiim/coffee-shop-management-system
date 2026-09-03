@@ -18,7 +18,7 @@ const validateCreateExpensePayload = (body) => ({
   paymentMethod: ensureEnumValue(
     body.paymentMethod,
     "Expense payment method",
-    VALID_EXPENSE_PAYMENT_METHODS
+    VALID_EXPENSE_PAYMENT_METHODS,
   ),
 });
 
@@ -45,7 +45,7 @@ const validateUpdateExpensePayload = (body) => {
     data.paymentMethod = ensureEnumValue(
       body.paymentMethod,
       "Expense payment method",
-      VALID_EXPENSE_PAYMENT_METHODS
+      VALID_EXPENSE_PAYMENT_METHODS,
     );
   }
 

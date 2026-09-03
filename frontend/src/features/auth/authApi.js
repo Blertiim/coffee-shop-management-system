@@ -5,7 +5,7 @@ export const login = async (credentials) =>
     await apiRequest("/auth/login", {
       method: "POST",
       body: credentials,
-    })
+    }),
   );
 
 export const getPosStaffProfiles = async (signal) =>
@@ -14,7 +14,7 @@ export const getPosStaffProfiles = async (signal) =>
       method: "GET",
       signal,
       timeoutMs: 45000,
-    })
+    }),
   );
 
 export const posLogin = async (payload) =>
@@ -22,5 +22,5 @@ export const posLogin = async (payload) =>
     await apiRequest("/auth/pos-login", {
       method: "POST",
       body: payload,
-    })
+    }),
   );

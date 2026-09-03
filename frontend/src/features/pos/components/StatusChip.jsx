@@ -1,39 +1,39 @@
 const STATUS_MAP = {
   available: {
     label: "Available",
-    className: "border-[#4ca59e]/40 bg-[#163736]/78 text-[#9ce7d4]",
+    className: "border-[#bfe6cf] bg-[#e7f7ed] text-[#157347]",
   },
   occupied: {
     label: "Open Order",
-    className: "border-[#b58a4b]/40 bg-[#322512]/78 text-[#f0d6a2]",
+    className: "border-[#f0d9b0] bg-[#fdf3e0] text-[#a15c1f]",
   },
   reserved: {
     label: "Reserved",
-    className: "border-[#7a67af]/40 bg-[#241c39]/78 text-[#d9d0f8]",
+    className: "border-[#dcd0f5] bg-[#f3eefd] text-[#6a4cc2]",
   },
   pending: {
     label: "Open Order",
-    className: "border-[#b58a4b]/40 bg-[#322512]/78 text-[#f0d6a2]",
+    className: "border-[#f0d9b0] bg-[#fdf3e0] text-[#a15c1f]",
   },
   preparing: {
     label: "Open Order",
-    className: "border-[#5489a5]/40 bg-[#162d3b]/78 text-[#c9e6f4]",
+    className: "border-[#c7dcf7] bg-[#eaf2fb] text-[#0f6bb8]",
   },
   served: {
     label: "Open Order",
-    className: "border-[#5f7fb6]/40 bg-[#1b2943]/78 text-[#d5e0fb]",
+    className: "border-[#c7dcf7] bg-[#eef3fd] text-[#1554a3]",
   },
   pending_payment: {
     label: "Pending Payment",
-    className: "border-[#c0794e]/40 bg-[#392116]/78 text-[#ffd9bb]",
+    className: "border-[#f3cba3] bg-[#fdedd9] text-[#a15c1f]",
   },
   paid: {
     label: "Paid",
-    className: "border-[#67b26f]/40 bg-[#16311b]/78 text-[#d5f3d8]",
+    className: "border-[#bfe6cf] bg-[#e7f7ed] text-[#157347]",
   },
   cancelled: {
     label: "Cancelled",
-    className: "border-[#a95d72]/40 bg-[#33171f]/78 text-[#ffd7de]",
+    className: "border-[#f3c3c9] bg-[#fdedef] text-[#b3364a]",
   },
 };
 
@@ -41,7 +41,7 @@ export default function StatusChip({ status }) {
   const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
   const config = STATUS_MAP[normalized] || {
     label: status || "Unknown",
-    className: "bg-white/10 text-slate-200 border-white/20",
+    className: "bg-slate-900/5 text-[#47536b] border-slate-900/10",
   };
 
   return (

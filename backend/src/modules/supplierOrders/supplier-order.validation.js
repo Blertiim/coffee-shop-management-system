@@ -9,12 +9,7 @@ const {
   ensurePositiveNumber,
 } = require("../../utils/validation");
 
-const VALID_SUPPLIER_ORDER_STATUSES = [
-  "pending",
-  "approved",
-  "delivered",
-  "cancelled",
-];
+const VALID_SUPPLIER_ORDER_STATUSES = ["pending", "approved", "delivered", "cancelled"];
 
 const normalizeOptionalId = (value, fieldName) => {
   if (value === undefined) {
@@ -69,25 +64,22 @@ const normalizeSupplierOrderItems = (items, { required = false } = {}) => {
         ? undefined
         : ensurePositiveInteger(
             item.stockUnitsPerPurchaseUnit,
-            `Supplier order item ${index + 1} stock units per purchase unit`
+            `Supplier order item ${index + 1} stock units per purchase unit`,
           );
     const stockQuantity =
       item?.stockQuantity === undefined
         ? undefined
         : ensurePositiveInteger(
             item.stockQuantity,
-            `Supplier order item ${index + 1} stock quantity`
+            `Supplier order item ${index + 1} stock quantity`,
           );
 
     return {
       productId,
-      quantity: ensurePositiveInteger(
-        item?.quantity,
-        `Supplier order item ${index + 1} quantity`
-      ),
+      quantity: ensurePositiveInteger(item?.quantity, `Supplier order item ${index + 1} quantity`),
       unitPrice: ensurePositiveNumber(
         item?.unitPrice,
-        `Supplier order item ${index + 1} unit price`
+        `Supplier order item ${index + 1} unit price`,
       ),
       unit: ensureOptionalString(item?.unit, `Supplier order item ${index + 1} unit`),
       stockUnitsPerPurchaseUnit,
@@ -97,11 +89,7 @@ const normalizeSupplierOrderItems = (items, { required = false } = {}) => {
 };
 
 const calculateItemsTotal = (items) =>
-  Number(
-    items
-      .reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
-      .toFixed(2)
-  );
+  Number(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0).toFixed(2));
 
 const validateCreateSupplierOrderPayload = (body) => {
   const items = normalizeSupplierOrderItems(body.items, { required: true });
@@ -113,27 +101,17 @@ const validateCreateSupplierOrderPayload = (body) => {
   return {
     supplierId: ensureId(body.supplierId, "Supplier id"),
     employeeId: normalizeOptionalId(body.employeeId, "Employee id"),
-    invoiceNumber: ensureOptionalString(
-      body.invoiceNumber,
-      "Supplier order invoice number"
-    ),
+    invoiceNumber: ensureOptionalString(body.invoiceNumber, "Supplier order invoice number"),
     orderDate:
       body.orderDate === undefined
         ? new Date()
         : ensureDateTime(body.orderDate, "Supplier order date"),
-    expectedDate: normalizeOptionalDateTime(
-      body.expectedDate,
-      "Supplier order expected date"
-    ),
+    expectedDate: normalizeOptionalDateTime(body.expectedDate, "Supplier order expected date"),
     total: explicitTotal === undefined ? calculateItemsTotal(items) : explicitTotal,
     status:
       body.status === undefined
         ? "pending"
-        : ensureEnumValue(
-            body.status,
-            "Supplier order status",
-            VALID_SUPPLIER_ORDER_STATUSES
-          ),
+        : ensureEnumValue(body.status, "Supplier order status", VALID_SUPPLIER_ORDER_STATUSES),
     notes: ensureOptionalString(body.notes, "Supplier order notes"),
     items,
   };
@@ -151,10 +129,7 @@ const validateUpdateSupplierOrderPayload = (body) => {
   }
 
   if (body.invoiceNumber !== undefined) {
-    data.invoiceNumber = ensureOptionalString(
-      body.invoiceNumber,
-      "Supplier order invoice number"
-    );
+    data.invoiceNumber = ensureOptionalString(body.invoiceNumber, "Supplier order invoice number");
   }
 
   if (body.orderDate !== undefined) {
@@ -164,7 +139,7 @@ const validateUpdateSupplierOrderPayload = (body) => {
   if (body.expectedDate !== undefined) {
     data.expectedDate = normalizeOptionalDateTime(
       body.expectedDate,
-      "Supplier order expected date"
+      "Supplier order expected date",
     );
   }
 
@@ -176,7 +151,7 @@ const validateUpdateSupplierOrderPayload = (body) => {
     data.status = ensureEnumValue(
       body.status,
       "Supplier order status",
-      VALID_SUPPLIER_ORDER_STATUSES
+      VALID_SUPPLIER_ORDER_STATUSES,
     );
   }
 
@@ -193,9 +168,7 @@ const validateUpdateSupplierOrderPayload = (body) => {
   }
 
   if (Object.keys(data).length === 0) {
-    throw new AppError(
-      "At least one field is required to update the supplier order"
-    );
+    throw new AppError("At least one field is required to update the supplier order");
   }
 
   return data;

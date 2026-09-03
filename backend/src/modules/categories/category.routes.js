@@ -11,10 +11,6 @@ router.get("/", categoryController.getAllCategories);
 router.get("/:id", categoryController.getCategoryById);
 router.post("/", adminOrManager, categoryController.createCategory);
 router.put("/:id", adminOrManager, categoryController.updateCategory);
-router.delete(
-  "/:id",
-  adminOrManager,
-  categoryController.deleteCategory
-);
+router.delete("/:id", adminOrManager, categoryController.deleteCategory);
 
 module.exports = router;

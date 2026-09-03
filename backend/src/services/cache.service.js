@@ -15,9 +15,7 @@ const normalizeTtl = (ttlMs) => {
 const buildCacheKey = (...parts) =>
   parts
     .flat()
-    .map((part) =>
-      typeof part === "string" ? part : JSON.stringify(part ?? null)
-    )
+    .map((part) => (typeof part === "string" ? part : JSON.stringify(part ?? null)))
     .join(":");
 
 const getCachedValue = (key) => {

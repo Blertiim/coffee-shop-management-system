@@ -6,15 +6,15 @@ export default {
       colors: {
         pos: {
           bg: "#EAF2FB",
-          panel: "#0F2444",
-          panelSoft: "#14305A",
-          card: "#1A3D70",
+          panel: "#FFFFFF",
+          panelSoft: "#EEF5FF",
+          card: "#FFFFFF",
           accent: "#1FA2FF",
-          accentSoft: "#2CC9A7",
+          accentSoft: "#5C8DFF",
           warn: "#F4A340",
           danger: "#EB5A6B",
-          text: "#EFF5FF",
-          muted: "#B5C7E4",
+          text: "#12213D",
+          muted: "#5C7093",
         },
       },
       boxShadow: {

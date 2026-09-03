@@ -1,9 +1,5 @@
 const prisma = require("../../config/prisma");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateShiftPayload,
   validateShiftId,
@@ -98,10 +94,8 @@ exports.updateShift = async (req, res) => {
       (data.startTime !== undefined || data.endTime !== undefined) &&
       !(data.startTime !== undefined && data.endTime !== undefined)
     ) {
-      const nextStartTime =
-        data.startTime === undefined ? existingShift.startTime : data.startTime;
-      const nextEndTime =
-        data.endTime === undefined ? existingShift.endTime : data.endTime;
+      const nextStartTime = data.startTime === undefined ? existingShift.startTime : data.startTime;
+      const nextEndTime = data.endTime === undefined ? existingShift.endTime : data.endTime;
 
       if (nextStartTime >= nextEndTime) {
         return sendError(res, 400, "Shift end time must be after start time");

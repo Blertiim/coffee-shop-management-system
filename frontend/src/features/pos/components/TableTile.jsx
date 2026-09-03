@@ -1,7 +1,6 @@
 import StatusChip from "./StatusChip";
 
-const normalizeStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const resolveActionConfig = (status) => {
   if (status === "available") {
@@ -53,12 +52,7 @@ const resolveActionConfig = (status) => {
   };
 };
 
-export default function TableTile({
-  table,
-  actionState,
-  onPrimaryAction,
-  onSecondaryAction,
-}) {
+export default function TableTile({ table, actionState, onPrimaryAction, onSecondaryAction }) {
   const normalizedStatus = normalizeStatus(table.status);
   const config = resolveActionConfig(normalizedStatus);
   const isPrimaryLoading = actionState === config.primaryAction;

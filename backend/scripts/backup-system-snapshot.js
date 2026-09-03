@@ -9,9 +9,7 @@ const defaultOutputDir = path.resolve(__dirname, "..", "backups");
 const backupOutputDir = process.env.BACKUP_OUTPUT_DIR
   ? path.resolve(process.env.BACKUP_OUTPUT_DIR)
   : defaultOutputDir;
-const backupSyncDir = process.env.BACKUP_SYNC_DIR
-  ? path.resolve(process.env.BACKUP_SYNC_DIR)
-  : "";
+const backupSyncDir = process.env.BACKUP_SYNC_DIR ? path.resolve(process.env.BACKUP_SYNC_DIR) : "";
 
 const stamp = new Date().toISOString().replace(/[:]/g, "-");
 
@@ -71,7 +69,7 @@ const run = async () => {
       success: true,
       outputPath,
       syncedPath,
-    })
+    }),
   );
 };
 

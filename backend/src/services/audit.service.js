@@ -9,8 +9,7 @@ const SENSITIVE_KEYS = new Set([
   "refreshToken",
 ]);
 
-const normalizeText = (value) =>
-  typeof value === "string" ? value.trim() : value ?? null;
+const normalizeText = (value) => (typeof value === "string" ? value.trim() : (value ?? null));
 
 const sanitizeValue = (value) => {
   if (Array.isArray(value)) {
@@ -46,11 +45,7 @@ const inferEntityType = (req) => {
 
 const inferEntityId = (req) =>
   normalizeText(
-    req.params?.id ||
-      req.params?.tableId ||
-      req.params?.waiterId ||
-      req.params?.token ||
-      null
+    req.params?.id || req.params?.tableId || req.params?.waiterId || req.params?.token || null,
   );
 
 const inferAction = (req) => {

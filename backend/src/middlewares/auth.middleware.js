@@ -41,7 +41,7 @@ const authenticate = async (req, res, next) => {
 
     req.user = user;
     return next();
-  } catch (error) {
+  } catch {
     return sendError(res, 401, "Invalid token");
   }
 };

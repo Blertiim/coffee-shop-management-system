@@ -1,8 +1,7 @@
 const AppError = require("../utils/app-error");
 const { sendError } = require("../utils/response");
 
-const notFoundHandler = (req, res) =>
-  sendError(res, 404, `Route not found: ${req.originalUrl}`);
+const notFoundHandler = (req, res) => sendError(res, 404, `Route not found: ${req.originalUrl}`);
 
 const globalErrorHandler = (error, req, res, next) => {
   if (res.headersSent) {

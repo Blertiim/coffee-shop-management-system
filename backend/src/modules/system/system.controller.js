@@ -25,10 +25,12 @@ const parseLimit = (value, fallback = 50, max = 200) => {
   return Math.min(parsed, max);
 };
 
-const buildBaseUrl = (req) =>
-  `${req.protocol}://${req.get("host")}`;
+const buildBaseUrl = (req) => `${req.protocol}://${req.get("host")}`;
 
-const isEnabledValue = (value) => String(value || "").trim().toLowerCase() === "true";
+const isEnabledValue = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase() === "true";
 
 const areDocsEnabled = () => !isProductionEnv() || isEnabledValue(process.env.API_DOCS_ENABLED);
 
@@ -228,7 +230,7 @@ h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1; }
 }
 `;
 
-const buildApiCatalogJs = (req) => {
+const buildApiCatalogJs = () => {
   const workspaceRoot = path.resolve(__dirname, "../../../..").replace(/\\/g, "/");
   const openApiUrl = "/api/system/docs/openapi.json";
 
@@ -415,7 +417,7 @@ const authenticateRealtimeRequest = (req) => {
 
   try {
     return jwt.verify(token, getJwtSecret());
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -447,7 +449,7 @@ exports.getApiCatalogCss = async (req, res) => {
 
 exports.getApiCatalogJs = async (req, res) => {
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-  res.status(200).send(buildApiCatalogJs(req));
+  res.status(200).send(buildApiCatalogJs());
 };
 
 exports.requireDocsAccess = (req, res, next) => {
@@ -486,7 +488,7 @@ exports.getAlerts = async (req, res) => {
     const cacheKey = buildCacheKey("system:alerts", status, limit);
 
     const alerts = await remember(cacheKey, 15 * 1000, async () =>
-      getSystemAlerts({ status, limit })
+      getSystemAlerts({ status, limit }),
     );
 
     return sendSuccess(res, 200, "System alerts retrieved successfully", {
@@ -539,45 +541,37 @@ exports.streamRealtime = async (req, res) => {
 
 exports.downloadBackupSnapshot = async (req, res) => {
   try {
-    const [
-      users,
-      categories,
-      products,
-      tables,
-      orders,
-      inventory,
-      alerts,
-      auditLogs,
-    ] = await Promise.all([
-      prisma.user.findMany({
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          role: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
-      prisma.category.findMany(),
-      prisma.product.findMany(),
-      prisma.table.findMany(),
-      prisma.order.findMany({
-        include: {
-          items: true,
-        },
-      }),
-      prisma.inventory.findMany(),
-      prisma.systemAlert.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 500,
-      }),
-      prisma.auditLog.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 1000,
-      }),
-    ]);
+    const [users, categories, products, tables, orders, inventory, alerts, auditLogs] =
+      await Promise.all([
+        prisma.user.findMany({
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        }),
+        prisma.category.findMany(),
+        prisma.product.findMany(),
+        prisma.table.findMany(),
+        prisma.order.findMany({
+          include: {
+            items: true,
+          },
+        }),
+        prisma.inventory.findMany(),
+        prisma.systemAlert.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 500,
+        }),
+        prisma.auditLog.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 1000,
+        }),
+      ]);
 
     const snapshot = {
       generatedAt: new Date().toISOString(),
@@ -594,9 +588,7 @@ exports.downloadBackupSnapshot = async (req, res) => {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="cafe-system-backup-${new Date()
-        .toISOString()
-        .slice(0, 10)}.json"`
+      `attachment; filename="cafe-system-backup-${new Date().toISOString().slice(0, 10)}.json"`,
     );
 
     return res.status(200).send(JSON.stringify(snapshot, null, 2));

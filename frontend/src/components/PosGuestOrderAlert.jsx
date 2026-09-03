@@ -43,9 +43,7 @@ export default function PosGuestOrderAlert({
           </div>
 
           <div className="rounded-[14px] border border-[#d7b06c]/35 bg-[rgba(255,237,205,0.06)] px-4 py-4 text-center">
-            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#ffe3ae]">
-              Items Added
-            </p>
+            <p className="m-0 text-[11px] uppercase tracking-[0.2em] text-[#ffe3ae]">Items Added</p>
             <p className="m-0 mt-2 text-4xl font-bold text-white">{alert.itemCount}</p>
           </div>
         </div>

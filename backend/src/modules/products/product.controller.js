@@ -1,8 +1,6 @@
 const prisma = require("../../config/prisma");
-const {
-  resolveProductStockAlert,
-  syncProductStockAlert,
-} = require("../../services/alert.service");
+const { resolveProductStockAlert, syncProductStockAlert } = require("../../services/alert.service");
+const { sendError, sendSuccess, handleControllerError } = require("../../utils/response");
 
 const parseId = (value) => {
   const id = Number(value);
@@ -90,10 +88,9 @@ exports.getAllProducts = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.status(200).json(products);
+    return sendSuccess(res, 200, "Products retrieved successfully", products);
   } catch (error) {
-    console.error("Get all products error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get all products error");
   }
 };
 
@@ -102,7 +99,7 @@ exports.getProductById = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid product id" });
+      return sendError(res, 400, "Invalid product id");
     }
 
     const product = await prisma.product.findUnique({
@@ -111,13 +108,12 @@ exports.getProductById = async (req, res) => {
     });
 
     if (!product || product.deletedAt) {
-      return res.status(404).json({ error: "Product not found" });
+      return sendError(res, 404, "Product not found");
     }
 
-    res.status(200).json(product);
+    return sendSuccess(res, 200, "Product retrieved successfully", product);
   } catch (error) {
-    console.error("Get product by id error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get product by id error");
   }
 };
 
@@ -140,7 +136,9 @@ exports.createProduct = async (req, res) => {
     const normalizedPrice = parsePrice(price);
     const normalizedCategoryId = parseId(categoryId);
     const normalizedDirectStockIngredientId =
-      directStockIngredientId === undefined || directStockIngredientId === null || directStockIngredientId === ""
+      directStockIngredientId === undefined ||
+      directStockIngredientId === null ||
+      directStockIngredientId === ""
         ? null
         : parseId(directStockIngredientId);
     const normalizedStock = stock !== undefined ? parseStock(stock) : 0;
@@ -148,21 +146,15 @@ exports.createProduct = async (req, res) => {
     const normalizedUnitsPerPackage = parseOptionalPositiveInteger(unitsPerPackage);
 
     if (!normalizedName || price === undefined || !normalizedCategoryId) {
-      return res.status(400).json({
-        error: "Name, price and categoryId are required",
-      });
+      return sendError(res, 400, "Name, price and categoryId are required");
     }
 
     if (normalizedPrice === null) {
-      return res.status(400).json({
-        error: "Price must be a valid number greater than or equal to 0",
-      });
+      return sendError(res, 400, "Price must be a valid number greater than or equal to 0");
     }
 
     if (stock !== undefined && normalizedStock === null) {
-      return res.status(400).json({
-        error: "Stock must be a whole number greater than or equal to 0",
-      });
+      return sendError(res, 400, "Stock must be a whole number greater than or equal to 0");
     }
 
     if (
@@ -171,15 +163,15 @@ exports.createProduct = async (req, res) => {
       directStockIngredientId !== "" &&
       !normalizedDirectStockIngredientId
     ) {
-      return res.status(400).json({
-        error: "directStockIngredientId must be a valid positive integer or empty",
-      });
+      return sendError(
+        res,
+        400,
+        "directStockIngredientId must be a valid positive integer or empty",
+      );
     }
 
     if (!normalizedStockUnit) {
-      return res.status(400).json({
-        error: "Stock unit must be one of: cope, shishe, litra, kg",
-      });
+      return sendError(res, 400, "Stock unit must be one of: cope, shishe, litra, kg");
     }
 
     if (
@@ -188,35 +180,19 @@ exports.createProduct = async (req, res) => {
       unitsPerPackage !== "" &&
       normalizedUnitsPerPackage === null
     ) {
-      return res.status(400).json({
-        error: "Units per package must be a positive whole number",
-      });
+      return sendError(res, 400, "Units per package must be a positive whole number");
     }
 
-    if (
-      description !== undefined &&
-      description !== null &&
-      typeof description !== "string"
-    ) {
-      return res.status(400).json({
-        error: "Description must be a string or null",
-      });
+    if (description !== undefined && description !== null && typeof description !== "string") {
+      return sendError(res, 400, "Description must be a string or null");
     }
 
-    if (
-      imageUrl !== undefined &&
-      imageUrl !== null &&
-      typeof imageUrl !== "string"
-    ) {
-      return res.status(400).json({
-        error: "Image URL must be a string or null",
-      });
+    if (imageUrl !== undefined && imageUrl !== null && typeof imageUrl !== "string") {
+      return sendError(res, 400, "Image URL must be a string or null");
     }
 
     if (isAvailable !== undefined && typeof isAvailable !== "boolean") {
-      return res.status(400).json({
-        error: "isAvailable must be a boolean value",
-      });
+      return sendError(res, 400, "isAvailable must be a boolean value");
     }
 
     const category = await prisma.category.findUnique({
@@ -224,7 +200,7 @@ exports.createProduct = async (req, res) => {
     });
 
     if (!category) {
-      return res.status(404).json({ error: "Category not found" });
+      return sendError(res, 404, "Category not found");
     }
 
     if (normalizedDirectStockIngredientId) {
@@ -233,15 +209,14 @@ exports.createProduct = async (req, res) => {
       });
 
       if (!ingredient) {
-        return res.status(404).json({ error: "Direct stock ingredient not found" });
+        return sendError(res, 404, "Direct stock ingredient not found");
       }
     }
 
     const product = await prisma.product.create({
       data: {
         name: normalizedName,
-        description:
-          description !== undefined ? normalizeOptionalString(description) : null,
+        description: description !== undefined ? normalizeOptionalString(description) : null,
         price: normalizedPrice,
         stock: normalizedStock,
         stockUnit: normalizedStockUnit,
@@ -256,13 +231,9 @@ exports.createProduct = async (req, res) => {
 
     await syncProductStockAlert(product);
 
-    res.status(201).json({
-      message: "Product created successfully",
-      product,
-    });
+    return sendSuccess(res, 201, "Product created successfully", product);
   } catch (error) {
-    console.error("Create product error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Create product error");
   }
 };
 
@@ -271,7 +242,7 @@ exports.updateProduct = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid product id" });
+      return sendError(res, 400, "Invalid product id");
     }
 
     const existingProduct = await prisma.product.findUnique({
@@ -279,7 +250,7 @@ exports.updateProduct = async (req, res) => {
     });
 
     if (!existingProduct || existingProduct.deletedAt) {
-      return res.status(404).json({ error: "Product not found" });
+      return sendError(res, 404, "Product not found");
     }
 
     const {
@@ -301,7 +272,7 @@ exports.updateProduct = async (req, res) => {
       const normalizedName = normalizeRequiredString(name);
 
       if (!normalizedName) {
-        return res.status(400).json({ error: "Name cannot be empty" });
+        return sendError(res, 400, "Name cannot be empty");
       }
 
       data.name = normalizedName;
@@ -309,9 +280,7 @@ exports.updateProduct = async (req, res) => {
 
     if (description !== undefined) {
       if (description !== null && typeof description !== "string") {
-        return res.status(400).json({
-          error: "Description must be a string or null",
-        });
+        return sendError(res, 400, "Description must be a string or null");
       }
 
       data.description = normalizeOptionalString(description);
@@ -321,9 +290,7 @@ exports.updateProduct = async (req, res) => {
       const normalizedPrice = parsePrice(price);
 
       if (normalizedPrice === null) {
-        return res.status(400).json({
-          error: "Price must be a valid number greater than or equal to 0",
-        });
+        return sendError(res, 400, "Price must be a valid number greater than or equal to 0");
       }
 
       data.price = normalizedPrice;
@@ -333,9 +300,7 @@ exports.updateProduct = async (req, res) => {
       const normalizedStock = parseStock(stock);
 
       if (normalizedStock === null) {
-        return res.status(400).json({
-          error: "Stock must be a whole number greater than or equal to 0",
-        });
+        return sendError(res, 400, "Stock must be a whole number greater than or equal to 0");
       }
 
       data.stock = normalizedStock;
@@ -345,9 +310,7 @@ exports.updateProduct = async (req, res) => {
       const normalizedStockUnit = normalizeStockUnit(stockUnit);
 
       if (!normalizedStockUnit) {
-        return res.status(400).json({
-          error: "Stock unit must be one of: cope, shishe, litra, kg",
-        });
+        return sendError(res, 400, "Stock unit must be one of: cope, shishe, litra, kg");
       }
 
       data.stockUnit = normalizedStockUnit;
@@ -361,9 +324,7 @@ exports.updateProduct = async (req, res) => {
         unitsPerPackage !== "" &&
         normalizedUnitsPerPackage === null
       ) {
-        return res.status(400).json({
-          error: "Units per package must be a positive whole number",
-        });
+        return sendError(res, 400, "Units per package must be a positive whole number");
       }
 
       data.unitsPerPackage = normalizedUnitsPerPackage;
@@ -371,9 +332,7 @@ exports.updateProduct = async (req, res) => {
 
     if (imageUrl !== undefined) {
       if (imageUrl !== null && typeof imageUrl !== "string") {
-        return res.status(400).json({
-          error: "Image URL must be a string or null",
-        });
+        return sendError(res, 400, "Image URL must be a string or null");
       }
 
       data.imageUrl = normalizeOptionalString(imageUrl);
@@ -386,9 +345,7 @@ exports.updateProduct = async (req, res) => {
         const normalizedCategoryId = parseId(categoryId);
 
         if (!normalizedCategoryId) {
-          return res.status(400).json({
-            error: "categoryId must be a valid positive integer or null",
-          });
+          return sendError(res, 400, "categoryId must be a valid positive integer or null");
         }
 
         const category = await prisma.category.findUnique({
@@ -396,7 +353,7 @@ exports.updateProduct = async (req, res) => {
         });
 
         if (!category) {
-          return res.status(404).json({ error: "Category not found" });
+          return sendError(res, 404, "Category not found");
         }
 
         data.categoryId = normalizedCategoryId;
@@ -410,9 +367,11 @@ exports.updateProduct = async (req, res) => {
         const normalizedDirectStockIngredientId = parseId(directStockIngredientId);
 
         if (!normalizedDirectStockIngredientId) {
-          return res.status(400).json({
-            error: "directStockIngredientId must be a valid positive integer or null",
-          });
+          return sendError(
+            res,
+            400,
+            "directStockIngredientId must be a valid positive integer or null",
+          );
         }
 
         const ingredient = await prisma.ingredient.findFirst({
@@ -420,7 +379,7 @@ exports.updateProduct = async (req, res) => {
         });
 
         if (!ingredient) {
-          return res.status(404).json({ error: "Direct stock ingredient not found" });
+          return sendError(res, 404, "Direct stock ingredient not found");
         }
 
         data.directStockIngredientId = normalizedDirectStockIngredientId;
@@ -429,18 +388,14 @@ exports.updateProduct = async (req, res) => {
 
     if (isAvailable !== undefined) {
       if (typeof isAvailable !== "boolean") {
-        return res.status(400).json({
-          error: "isAvailable must be a boolean value",
-        });
+        return sendError(res, 400, "isAvailable must be a boolean value");
       }
 
       data.isAvailable = isAvailable;
     }
 
     if (Object.keys(data).length === 0) {
-      return res.status(400).json({
-        error: "At least one field is required to update the product",
-      });
+      return sendError(res, 400, "At least one field is required to update the product");
     }
 
     const updatedProduct = await prisma.product.update({
@@ -451,13 +406,9 @@ exports.updateProduct = async (req, res) => {
 
     await syncProductStockAlert(updatedProduct);
 
-    res.status(200).json({
-      message: "Product updated successfully",
-      product: updatedProduct,
-    });
+    return sendSuccess(res, 200, "Product updated successfully", updatedProduct);
   } catch (error) {
-    console.error("Update product error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Update product error");
   }
 };
 
@@ -466,7 +417,7 @@ exports.deleteProduct = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid product id" });
+      return sendError(res, 400, "Invalid product id");
     }
 
     const existingProduct = await prisma.product.findUnique({
@@ -474,7 +425,7 @@ exports.deleteProduct = async (req, res) => {
     });
 
     if (!existingProduct || existingProduct.deletedAt) {
-      return res.status(404).json({ error: "Product not found" });
+      return sendError(res, 404, "Product not found");
     }
 
     await prisma.product.update({
@@ -487,12 +438,9 @@ exports.deleteProduct = async (req, res) => {
 
     await resolveProductStockAlert(id);
 
-    res.status(200).json({
-      message: "Product deleted successfully",
-    });
+    return sendSuccess(res, 200, "Product deleted successfully", null);
   } catch (error) {
-    console.error("Delete product error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Delete product error");
   }
 };
 
@@ -501,7 +449,7 @@ exports.updateProductStock = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid product id" });
+      return sendError(res, 400, "Invalid product id");
     }
 
     const { delta, stock } = req.body || {};
@@ -511,22 +459,22 @@ exports.updateProductStock = async (req, res) => {
     });
 
     if (!existingProduct || existingProduct.deletedAt) {
-      return res.status(404).json({ error: "Product not found" });
+      return sendError(res, 404, "Product not found");
     }
 
     const hasDelta = delta !== undefined;
     const hasStock = stock !== undefined;
 
     if (!hasDelta && !hasStock) {
-      return res.status(400).json({
-        error: "Provide either delta (increase/decrease) or stock (absolute value)",
-      });
+      return sendError(
+        res,
+        400,
+        "Provide either delta (increase/decrease) or stock (absolute value)",
+      );
     }
 
     if (hasDelta && hasStock) {
-      return res.status(400).json({
-        error: "Provide only one: delta or stock",
-      });
+      return sendError(res, 400, "Provide only one: delta or stock");
     }
 
     let nextStock;
@@ -535,9 +483,7 @@ exports.updateProductStock = async (req, res) => {
       const normalizedStock = parseStock(stock);
 
       if (normalizedStock === null) {
-        return res.status(400).json({
-          error: "stock must be a whole number greater than or equal to 0",
-        });
+        return sendError(res, 400, "stock must be a whole number greater than or equal to 0");
       }
 
       nextStock = normalizedStock;
@@ -545,18 +491,14 @@ exports.updateProductStock = async (req, res) => {
       const normalizedDelta = Number(delta);
 
       if (!Number.isInteger(normalizedDelta)) {
-        return res.status(400).json({
-          error: "delta must be a whole number",
-        });
+        return sendError(res, 400, "delta must be a whole number");
       }
 
       nextStock = existingProduct.stock + normalizedDelta;
     }
 
     if (nextStock < 0) {
-      return res.status(400).json({
-        error: "Resulting stock cannot be negative",
-      });
+      return sendError(res, 400, "Resulting stock cannot be negative");
     }
 
     const updatedProduct = await prisma.product.update({
@@ -569,12 +511,8 @@ exports.updateProductStock = async (req, res) => {
 
     await syncProductStockAlert(updatedProduct);
 
-    return res.status(200).json({
-      message: "Product stock updated successfully",
-      product: updatedProduct,
-    });
+    return sendSuccess(res, 200, "Product stock updated successfully", updatedProduct);
   } catch (error) {
-    console.error("Update product stock error:", error);
-    return res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Update product stock error");
   }
 };

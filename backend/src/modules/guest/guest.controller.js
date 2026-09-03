@@ -223,7 +223,7 @@ exports.getTableGuestAccess = async (req, res) => {
       res,
       200,
       "Guest QR access prepared successfully",
-      buildGuestAccessPayload(req, table, access)
+      buildGuestAccessPayload(req, table, access),
     );
   } catch (error) {
     return handleControllerError(res, error, "Get guest table access error");
@@ -262,7 +262,7 @@ exports.rotateTableGuestAccess = async (req, res) => {
       res,
       201,
       "Guest QR token rotated successfully",
-      buildGuestAccessPayload(req, table, access)
+      buildGuestAccessPayload(req, table, access),
     );
   } catch (error) {
     return handleControllerError(res, error, "Rotate guest table access error");
@@ -311,91 +311,95 @@ exports.submitGuestOrder = async (req, res) => {
     const items = validateGuestItems(req.body);
     const access = await ensureTableAccess(token);
 
-    const { savedOrder, appendedToExistingOrder, itemCount } = await prisma.$transaction(async (tx) => {
-      const [guestUser, products, activeOrder] = await Promise.all([
-        ensureGuestOrderUser(tx),
-        tx.product.findMany({
-          where: {
-            id: {
-              in: items.map((item) => item.productId),
+    const { savedOrder, appendedToExistingOrder, itemCount } = await prisma.$transaction(
+      async (tx) => {
+        const [guestUser, products, activeOrder] = await Promise.all([
+          ensureGuestOrderUser(tx),
+          tx.product.findMany({
+            where: {
+              id: {
+                in: items.map((item) => item.productId),
+              },
             },
-          },
-        }),
-        tx.order.findFirst({
-          where: {
-            tableId: access.tableId,
-            status: {
-              in: ACTIVE_ORDER_STATUSES,
+          }),
+          tx.order.findFirst({
+            where: {
+              tableId: access.tableId,
+              status: {
+                in: ACTIVE_ORDER_STATUSES,
+              },
             },
+            include: guestOrderInclude,
+            orderBy: {
+              createdAt: "desc",
+            },
+          }),
+        ]);
+
+        const { orderItems, total } = buildOrderItems(products, items);
+        const itemCount = orderItems.reduce((sum, item) => sum + item.quantity, 0);
+
+        if (activeOrder && !EDITABLE_ORDER_STATUSES.includes(activeOrder.status)) {
+          throw new AppError(
+            "The current bill is already in payment stage. Please ask staff for help.",
+          );
+        }
+
+        await deductStockForOrderItems(tx, orderItems);
+
+        if (activeOrder) {
+          await tx.orderItem.createMany({
+            data: orderItems.map((item) => ({
+              orderId: activeOrder.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+          });
+
+          return {
+            appendedToExistingOrder: true,
+            itemCount,
+            savedOrder: await tx.order.update({
+              where: {
+                id: activeOrder.id,
+              },
+              data: {
+                total: Number((activeOrder.total + total).toFixed(2)),
+              },
+              include: guestOrderInclude,
+            }),
+          };
+        }
+
+        await tx.table.update({
+          where: {
+            id: access.tableId,
           },
-          include: guestOrderInclude,
-          orderBy: {
-            createdAt: "desc",
+          data: {
+            status: "occupied",
           },
-        }),
-      ]);
-
-      const { orderItems, total } = buildOrderItems(products, items);
-      const itemCount = orderItems.reduce((sum, item) => sum + item.quantity, 0);
-
-      if (activeOrder && !EDITABLE_ORDER_STATUSES.includes(activeOrder.status)) {
-        throw new AppError("The current bill is already in payment stage. Please ask staff for help.");
-      }
-
-      await deductStockForOrderItems(tx, orderItems);
-
-      if (activeOrder) {
-        await tx.orderItem.createMany({
-          data: orderItems.map((item) => ({
-            orderId: activeOrder.id,
-            productId: item.productId,
-            quantity: item.quantity,
-            price: item.price,
-          })),
         });
 
         return {
-          appendedToExistingOrder: true,
+          appendedToExistingOrder: false,
           itemCount,
-          savedOrder: await tx.order.update({
-            where: {
-              id: activeOrder.id,
-            },
+          savedOrder: await tx.order.create({
             data: {
-              total: Number((activeOrder.total + total).toFixed(2)),
+              userId: guestUser.id,
+              tableId: access.tableId,
+              paymentMethod: "guest_qr",
+              total,
+              status: "pending",
+              items: {
+                create: orderItems,
+              },
             },
             include: guestOrderInclude,
           }),
         };
-      }
-
-      await tx.table.update({
-        where: {
-          id: access.tableId,
-        },
-        data: {
-          status: "occupied",
-        },
-      });
-
-      return {
-        appendedToExistingOrder: false,
-        itemCount,
-        savedOrder: await tx.order.create({
-          data: {
-            userId: guestUser.id,
-            tableId: access.tableId,
-            paymentMethod: "guest_qr",
-            total,
-            status: "pending",
-            items: {
-              create: orderItems,
-            },
-          },
-          include: guestOrderInclude,
-        }),
-      };
-    });
+      },
+    );
 
     publishRealtimeEvent(["orders", "tables", "dashboard"], {
       type: "guest-order.created",

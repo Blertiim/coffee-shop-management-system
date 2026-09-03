@@ -1,11 +1,7 @@
 const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const { normalizeRole } = require("../../middlewares/role.middleware");
 const {
   validateAssignTablePayload,
@@ -69,8 +65,12 @@ const isGuestOriginOrder = (order) => {
 
   return (
     normalizeRole(order.user?.role) === "guest" ||
-    String(order.user?.email || "").trim().toLowerCase() === GUEST_USER_EMAIL ||
-    String(order.paymentMethod || "").trim().toLowerCase() === "guest_qr"
+    String(order.user?.email || "")
+      .trim()
+      .toLowerCase() === GUEST_USER_EMAIL ||
+    String(order.paymentMethod || "")
+      .trim()
+      .toLowerCase() === "guest_qr"
   );
 };
 
@@ -151,12 +151,7 @@ exports.getAllTables = async (req, res) => {
       orderBy: { number: "asc" },
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Tables retrieved successfully",
-      tables.map(mapTable)
-    );
+    return sendSuccess(res, 200, "Tables retrieved successfully", tables.map(mapTable));
   } catch (error) {
     return handleControllerError(res, error, "Get all tables error");
   }
@@ -218,15 +213,8 @@ exports.createTable = async (req, res) => {
       return sendError(res, 400, "Assigned user must have waiter role");
     }
 
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Table number already exists",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Table number already exists");
     }
 
     return handleControllerError(res, error, "Create table error");
@@ -243,11 +231,7 @@ exports.updateTable = async (req, res) => {
     });
 
     if (!existingTable) {
-      return res.status(404).json({
-        success: false,
-        message: "Table not found",
-        data: null,
-      });
+      return sendError(res, 404, "Table not found");
     }
 
     const updatedTable = await prisma.$transaction(async (tx) => {
@@ -284,15 +268,8 @@ exports.updateTable = async (req, res) => {
       return sendError(res, 400, "Assigned user must have waiter role");
     }
 
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Table number already exists",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Table number already exists");
     }
 
     return handleControllerError(res, error, "Update table error");
@@ -308,11 +285,7 @@ exports.deleteTable = async (req, res) => {
     });
 
     if (!existingTable || existingTable.status === ARCHIVED_TABLE_STATUS) {
-      return res.status(404).json({
-        success: false,
-        message: "Table not found",
-        data: null,
-      });
+      return sendError(res, 404, "Table not found");
     }
 
     const relationSummary = await prisma.$transaction(async (tx) => {
@@ -364,21 +337,12 @@ exports.deleteTable = async (req, res) => {
     return sendSuccess(
       res,
       200,
-      relationSummary.archived
-        ? "Table archived successfully"
-        : "Table deleted successfully",
-      relationSummary
+      relationSummary.archived ? "Table archived successfully" : "Table deleted successfully",
+      relationSummary,
     );
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete a table that is linked to orders or reservations",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return sendError(res, 400, "Cannot delete a table that is linked to orders or reservations");
     }
 
     return handleControllerError(res, error, "Delete table error");
@@ -426,7 +390,7 @@ exports.assignTableToWaiter = async (req, res) => {
       res,
       200,
       waiterId ? "Table assigned successfully" : "Table unassigned successfully",
-      updatedTable
+      updatedTable,
     );
   } catch (error) {
     if (error.message === "TABLE_NOT_FOUND") {
@@ -521,12 +485,7 @@ exports.setWaiterTableAssignments = async (req, res) => {
       });
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Waiter table assignments updated successfully",
-      result
-    );
+    return sendSuccess(res, 200, "Waiter table assignments updated successfully", result);
   } catch (error) {
     if (error.message === "WAITER_NOT_FOUND") {
       return sendError(res, 404, "Waiter not found");

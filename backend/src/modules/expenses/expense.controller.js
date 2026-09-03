@@ -1,9 +1,5 @@
 const prisma = require("../../config/prisma");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateExpensePayload,
   validateExpenseId,

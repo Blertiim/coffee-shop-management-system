@@ -25,14 +25,13 @@ const resolveFloorPlanImageCandidates = () =>
 const FLOOR_PLAN_IMAGE_CANDIDATES = resolveFloorPlanImageCandidates();
 
 const SHOW_TABLE_OVERLAY_DEBUG =
-  String(import.meta.env.VITE_POS_SHOW_TABLE_OVERLAYS || "").trim().toLowerCase() ===
-  "true";
+  String(import.meta.env.VITE_POS_SHOW_TABLE_OVERLAYS || "")
+    .trim()
+    .toLowerCase() === "true";
 
-const normalizeStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
-const normalizeLocation = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeLocation = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 // Normalized hotspot centers detected for the current 650x459 floor-plan image.
 const DETECTED_TABLE_CENTERS = [
@@ -177,7 +176,7 @@ export const getFloorPlanBindings = (tables) => {
   });
 
   const visualIdByTableId = new Map(
-    leftToRightOrder.map((binding, index) => [binding.table.id, index + 1])
+    leftToRightOrder.map((binding, index) => [binding.table.id, index + 1]),
   );
 
   return bindings.map((binding) => ({
@@ -193,9 +192,7 @@ export default function FloorLayoutBoard({
   openingTableId,
 }) {
   const [imageIndex, setImageIndex] = useState(0);
-  const [isImageMissing, setIsImageMissing] = useState(
-    FLOOR_PLAN_IMAGE_CANDIDATES.length === 0
-  );
+  const [isImageMissing, setIsImageMissing] = useState(FLOOR_PLAN_IMAGE_CANDIDATES.length === 0);
 
   const imageSrc = FLOOR_PLAN_IMAGE_CANDIDATES[imageIndex] || null;
   const tableBindings = useMemo(() => getFloorPlanBindings(tables), [tables]);
@@ -204,7 +201,7 @@ export default function FloorLayoutBoard({
       selectedLocation === "all"
         ? tableBindings
         : tableBindings.filter(({ table }) => table.location === selectedLocation),
-    [selectedLocation, tableBindings]
+    [selectedLocation, tableBindings],
   );
 
   if (displayedBindings.length === 0) {

@@ -3,14 +3,17 @@ const os = require("os");
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
 
 const isPrivateIpv4 = (value) =>
-  /^10\./.test(value) ||
-  /^192\.168\./.test(value) ||
-  /^172\.(1[6-9]|2\d|3[0-1])\./.test(value);
+  /^10\./.test(value) || /^192\.168\./.test(value) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(value);
 
-const normalizeBaseUrl = (value) => String(value || "").trim().replace(/\/$/, "");
+const normalizeBaseUrl = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\/$/, "");
 
 const getInterfacePriority = (name = "") => {
-  const normalizedName = String(name || "").trim().toLowerCase();
+  const normalizedName = String(name || "")
+    .trim()
+    .toLowerCase();
 
   if (
     normalizedName.includes("virtual") ||
@@ -59,7 +62,8 @@ const parseHostHeader = (hostHeader = "") => {
 
   if (normalized.startsWith("[")) {
     const closingBracketIndex = normalized.indexOf("]");
-    const hostname = closingBracketIndex >= 0 ? normalized.slice(1, closingBracketIndex) : normalized;
+    const hostname =
+      closingBracketIndex >= 0 ? normalized.slice(1, closingBracketIndex) : normalized;
     const port =
       closingBracketIndex >= 0 && normalized.slice(closingBracketIndex + 1).startsWith(":")
         ? normalized.slice(closingBracketIndex + 2)
@@ -142,6 +146,22 @@ const getRequestPort = (req) => {
   return configuredPort || "5000";
 };
 
+const isProductionEnv = () =>
+  String(process.env.NODE_ENV || "")
+    .trim()
+    .toLowerCase() === "production";
+
+// In dev, the API (backend) and the app (Vite) run on two different ports.
+// A guest scanning the QR code needs the Vite port, not the API port, so
+// whenever we have to guess the base URL (no GUEST_ORDER_PUBLIC_BASE_URL
+// configured) we point at the frontend dev server instead of whatever port
+// the request came in on. This keeps the QR code working automatically even
+// when the machine's LAN IP changes. In production the frontend is deployed
+// separately, so this guess is not used there (an explicit
+// GUEST_ORDER_PUBLIC_BASE_URL is expected instead).
+const getDevFrontendPort = () =>
+  String(process.env.GUEST_ORDER_DEV_FRONTEND_PORT || "").trim() || "5173";
+
 const getReachableAppBaseUrl = (req) => {
   const configuredBaseUrl = normalizeBaseUrl(process.env.GUEST_ORDER_PUBLIC_BASE_URL);
 
@@ -151,20 +171,32 @@ const getReachableAppBaseUrl = (req) => {
 
   const protocol = getRequestProtocol(req);
   const hostInfo = parseHostHeader(req.get("host"));
-  const normalizedHost = String(hostInfo.hostname || "").trim().toLowerCase();
+  const normalizedHost = String(hostInfo.hostname || "")
+    .trim()
+    .toLowerCase();
+  const useDevFrontendPort = !isProductionEnv();
+  const devPort = getDevFrontendPort();
 
   if (hostInfo.host && normalizedHost && !LOOPBACK_HOSTS.has(normalizedHost)) {
+    if (useDevFrontendPort) {
+      return `${protocol}://${normalizedHost}${devPort ? `:${devPort}` : ""}`;
+    }
+
     return `${protocol}://${hostInfo.host}`;
   }
 
   const lanIpv4 = getPreferredLanIpv4();
-  const port = getRequestPort(req);
+  const port = useDevFrontendPort ? devPort : getRequestPort(req);
 
   if (lanIpv4) {
     return `${protocol}://${lanIpv4}${port ? `:${port}` : ""}`;
   }
 
   if (hostInfo.host) {
+    if (useDevFrontendPort && normalizedHost) {
+      return `${protocol}://${normalizedHost}${devPort ? `:${devPort}` : ""}`;
+    }
+
     return `${protocol}://${hostInfo.host}`;
   }
 

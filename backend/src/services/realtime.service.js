@@ -6,8 +6,12 @@ const KEEPALIVE_INTERVAL_MS = 20 * 1000;
 const normalizeChannels = (channels = []) =>
   new Set(
     (Array.isArray(channels) ? channels : String(channels || "").split(","))
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean)
+      .map((value) =>
+        String(value || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
   );
 
 const inferChannelsFromPath = (path = "") => {
@@ -67,7 +71,7 @@ const writeEvent = (res, eventName, payload) => {
 };
 
 const registerRealtimeClient = (req, res, channels = []) => {
-  const clientId = `client-${clientSequence += 1}`;
+  const clientId = `client-${(clientSequence += 1)}`;
   const normalizedChannels = normalizeChannels(channels);
 
   res.status(200);

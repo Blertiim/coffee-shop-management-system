@@ -1,6 +1,6 @@
 const prisma = require("../../config/prisma");
 const AppError = require("../../utils/app-error");
-const { handleControllerError, sendSuccess } = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateReservationPayload,
   validateReservationId,
@@ -36,7 +36,7 @@ const ensureTableAvailabilityForReservation = async (
   date,
   time,
   excludeId = null,
-  nextStatus = "pending"
+  nextStatus = "pending",
 ) => {
   const table = await prisma.table.findUnique({
     where: { id: tableId },
@@ -51,12 +51,7 @@ const ensureTableAvailabilityForReservation = async (
   }
 
   if (nextStatus !== "cancelled") {
-    const conflictingReservation = await findReservationConflict(
-      tableId,
-      date,
-      time,
-      excludeId
-    );
+    const conflictingReservation = await findReservationConflict(tableId, date, time, excludeId);
 
     if (conflictingReservation) {
       throw new AppError("This table is already reserved for the selected date and time");
@@ -73,12 +68,7 @@ exports.getAllReservations = async (req, res) => {
       orderBy: [{ date: "asc" }, { time: "asc" }, { createdAt: "desc" }],
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Reservations retrieved successfully",
-      reservations
-    );
+    return sendSuccess(res, 200, "Reservations retrieved successfully", reservations);
   } catch (error) {
     return handleControllerError(res, error, "Get all reservations error");
   }
@@ -94,19 +84,10 @@ exports.getReservationById = async (req, res) => {
     });
 
     if (!reservation) {
-      return res.status(404).json({
-        success: false,
-        message: "Reservation not found",
-        data: null,
-      });
+      return sendError(res, 404, "Reservation not found");
     }
 
-    return sendSuccess(
-      res,
-      200,
-      "Reservation retrieved successfully",
-      reservation
-    );
+    return sendSuccess(res, 200, "Reservation retrieved successfully", reservation);
   } catch (error) {
     return handleControllerError(res, error, "Get reservation by id error");
   }
@@ -122,7 +103,7 @@ exports.createReservation = async (req, res) => {
       data.date,
       data.time,
       null,
-      data.status
+      data.status,
     );
 
     const reservation = await prisma.reservation.create({
@@ -130,12 +111,7 @@ exports.createReservation = async (req, res) => {
       include: reservationInclude,
     });
 
-    return sendSuccess(
-      res,
-      201,
-      "Reservation created successfully",
-      reservation
-    );
+    return sendSuccess(res, 201, "Reservation created successfully", reservation);
   } catch (error) {
     return handleControllerError(res, error, "Create reservation error");
   }
@@ -151,11 +127,7 @@ exports.updateReservation = async (req, res) => {
     });
 
     if (!existingReservation) {
-      return res.status(404).json({
-        success: false,
-        message: "Reservation not found",
-        data: null,
-      });
+      return sendError(res, 404, "Reservation not found");
     }
 
     const nextReservationState = {
@@ -169,7 +141,7 @@ exports.updateReservation = async (req, res) => {
       nextReservationState.date,
       nextReservationState.time,
       id,
-      nextReservationState.status
+      nextReservationState.status,
     );
 
     const reservation = await prisma.reservation.update({
@@ -178,12 +150,7 @@ exports.updateReservation = async (req, res) => {
       include: reservationInclude,
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Reservation updated successfully",
-      reservation
-    );
+    return sendSuccess(res, 200, "Reservation updated successfully", reservation);
   } catch (error) {
     return handleControllerError(res, error, "Update reservation error");
   }
@@ -198,11 +165,7 @@ exports.deleteReservation = async (req, res) => {
     });
 
     if (!existingReservation) {
-      return res.status(404).json({
-        success: false,
-        message: "Reservation not found",
-        data: null,
-      });
+      return sendError(res, 404, "Reservation not found");
     }
 
     await prisma.reservation.delete({

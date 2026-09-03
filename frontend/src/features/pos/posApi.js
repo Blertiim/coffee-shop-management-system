@@ -6,7 +6,7 @@ export const getTables = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const getCategories = async (token, signal) =>
@@ -15,7 +15,7 @@ export const getCategories = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const getProducts = async (token, signal) =>
@@ -24,7 +24,7 @@ export const getProducts = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const createOrder = async (token, orderPayload) =>
@@ -33,7 +33,7 @@ export const createOrder = async (token, orderPayload) =>
       method: "POST",
       token,
       body: orderPayload,
-    })
+    }),
   );
 
 export const getActiveOrderByTable = async (token, tableId, signal) =>
@@ -42,7 +42,7 @@ export const getActiveOrderByTable = async (token, tableId, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const getTodayPaidTotals = async (token, signal) =>
@@ -51,7 +51,7 @@ export const getTodayPaidTotals = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const appendItemsToOrder = async (token, orderId, payload) =>
@@ -60,7 +60,7 @@ export const appendItemsToOrder = async (token, orderId, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getOrderById = async (token, orderId, signal) =>
@@ -69,7 +69,7 @@ export const getOrderById = async (token, orderId, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const updateOrderStatus = async (token, orderId, status) =>
@@ -78,7 +78,7 @@ export const updateOrderStatus = async (token, orderId, status) =>
       method: "PATCH",
       token,
       body: { status },
-    })
+    }),
   );
 
 export const generateOrderInvoice = async (token, orderId) =>
@@ -86,7 +86,7 @@ export const generateOrderInvoice = async (token, orderId) =>
     await apiRequest(`/orders/${orderId}/generate-invoice`, {
       method: "PATCH",
       token,
-    })
+    }),
   );
 
 export const transferOrderToTable = async (token, orderId, tableId) =>
@@ -95,7 +95,7 @@ export const transferOrderToTable = async (token, orderId, tableId) =>
       method: "PATCH",
       token,
       body: { tableId },
-    })
+    }),
   );
 
 export const updateOrderDiscount = async (token, orderId, payload) =>
@@ -104,7 +104,7 @@ export const updateOrderDiscount = async (token, orderId, payload) =>
       method: "PATCH",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const completeOrderPayment = async (token, orderId, paymentMethod) =>
@@ -113,7 +113,7 @@ export const completeOrderPayment = async (token, orderId, paymentMethod) =>
       method: "PATCH",
       token,
       body: paymentMethod ? { paymentMethod } : undefined,
-    })
+    }),
   );
 
 const parseDownloadError = async (response) => {

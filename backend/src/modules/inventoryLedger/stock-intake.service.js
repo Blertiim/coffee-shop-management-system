@@ -2,10 +2,7 @@ const prisma = require("../../config/prisma");
 const AppError = require("../../utils/app-error");
 const { createInventoryLedgerRepository } = require("./inventory-ledger.repository");
 const { buildPagination } = require("./ingredient.service");
-const {
-  applyIngredientMovement,
-  resolveBaseQuantity,
-} = require("./inventory-engine.service");
+const { applyIngredientMovement, resolveBaseQuantity } = require("./inventory-engine.service");
 const { assertBaseUnit } = require("./unit-conversion");
 
 const DEFAULT_PACKAGE_SIZE = 12;
@@ -35,7 +32,8 @@ const ensureSinglePieceRecipe = async ({ tx, product, ingredient }) => {
     where: { productId: product.id },
     create: {
       productId: product.id,
-      notes: "Auto-created for packaged direct-sale product. Product still consumes ingredient stock through recipe.",
+      notes:
+        "Auto-created for packaged direct-sale product. Product still consumes ingredient stock through recipe.",
       items: {
         create: [
           {
@@ -134,9 +132,7 @@ const buildIntakeItem = ({ item, ingredient, product }) => {
         unit: item.purchasedUnit,
         baseUnit,
       });
-  const lineTotal = Number(
-    (item.totalCost || item.purchasedQuantity * item.unitCost).toFixed(2)
-  );
+  const lineTotal = Number((item.totalCost || item.purchasedQuantity * item.unitCost).toFixed(2));
   const baseUnitCost = Number((lineTotal / baseQuantity).toFixed(4));
 
   return {
@@ -186,9 +182,7 @@ const createStockIntake = async ({ payload, actorId }) =>
       intakeItems.push(buildIntakeItem({ item, ingredient }));
     }
 
-    const totalCost = Number(
-      intakeItems.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2)
-    );
+    const totalCost = Number(intakeItems.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
 
     const stockIntake = await tx.stockIntake.create({
       data: {

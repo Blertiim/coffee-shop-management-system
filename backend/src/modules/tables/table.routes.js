@@ -13,11 +13,7 @@ router.get("/:id", tableController.getTableById);
 router.post("/", adminOrManager, tableController.createTable);
 router.put("/:id", adminOrManager, tableController.updateTable);
 router.patch("/:id/assignment", adminOrManager, tableController.assignTableToWaiter);
-router.put(
-  "/assignments/waiter",
-  adminOrManager,
-  tableController.setWaiterTableAssignments
-);
+router.put("/assignments/waiter", adminOrManager, tableController.setWaiterTableAssignments);
 router.delete("/:id", adminOrManager, tableController.deleteTable);
 
 module.exports = router;

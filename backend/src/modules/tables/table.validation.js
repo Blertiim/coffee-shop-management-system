@@ -6,13 +6,7 @@ const {
   ensureRequiredString,
 } = require("../../utils/validation");
 
-const VALID_TABLE_STATUSES = [
-  "available",
-  "occupied",
-  "reserved",
-  "pending_payment",
-  "paid",
-];
+const VALID_TABLE_STATUSES = ["available", "occupied", "reserved", "pending_payment", "paid"];
 
 const validateCreateTablePayload = (body) => ({
   number: ensurePositiveInteger(body.number, "Table number"),
@@ -44,18 +38,12 @@ const validateUpdateTablePayload = (body) => {
   }
 
   if (body.status !== undefined) {
-    data.status = ensureEnumValue(
-      body.status,
-      "Table status",
-      VALID_TABLE_STATUSES
-    );
+    data.status = ensureEnumValue(body.status, "Table status", VALID_TABLE_STATUSES);
   }
 
   if (body.assignedWaiterId !== undefined) {
     data.assignedWaiterId =
-      body.assignedWaiterId === null
-        ? null
-        : ensureId(body.assignedWaiterId, "Assigned waiter id");
+      body.assignedWaiterId === null ? null : ensureId(body.assignedWaiterId, "Assigned waiter id");
   }
 
   if (Object.keys(data).length === 0) {

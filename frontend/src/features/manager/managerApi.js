@@ -2,109 +2,144 @@ import { apiRequest, buildApiUrl, unwrapApiData } from "../../lib/api";
 
 export const getManagerStats = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/stats${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/stats${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getRevenueTrend = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/revenue-trend${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/revenue-trend${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getTopProducts = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/top-products${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/top-products${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getWaiterPerformance = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/waiter-performance${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/waiter-performance${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getDashboardOrders = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/orders${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/orders${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getDashboardInvoices = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/invoices${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/invoices${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getDailySummary = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/daily-summary${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/daily-summary${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getLowStockProducts = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/stock-alerts${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/stock-alerts${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getAdvancedReport = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/dashboard/advanced-report${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/dashboard/advanced-report${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getSystemAlerts = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/system/alerts${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/system/alerts${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getAuditLogs = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/system/audit-logs${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/system/audit-logs${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const getProducts = async (token, signal) =>
-  apiRequest("/products", {
-    method: "GET",
-    token,
-    signal,
-  });
+  unwrapApiData(
+    await apiRequest("/products", {
+      method: "GET",
+      token,
+      signal,
+    }),
+  );
 
 export const getSuppliers = async (token, signal) =>
   unwrapApiData(
@@ -112,7 +147,7 @@ export const getSuppliers = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const createSupplier = async (token, payload) =>
@@ -121,7 +156,7 @@ export const createSupplier = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getSupplierOrders = async (token, signal) =>
@@ -130,16 +165,19 @@ export const getSupplierOrders = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const getIngredients = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/inventory-ledger/ingredients${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/inventory-ledger/ingredients${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const createIngredient = async (token, payload) =>
@@ -148,16 +186,19 @@ export const createIngredient = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getRecipes = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/inventory-ledger/recipes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/inventory-ledger/recipes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const saveRecipe = async (token, payload) =>
@@ -166,16 +207,19 @@ export const saveRecipe = async (token, payload) =>
       method: "PUT",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getStockIntakes = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/inventory-ledger/stock-intakes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/inventory-ledger/stock-intakes${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const createStockIntake = async (token, payload) =>
@@ -184,16 +228,19 @@ export const createStockIntake = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getStockMovements = async (token, params = {}, signal) =>
   unwrapApiData(
-    await apiRequest(`/inventory-ledger/stock-movements${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`, {
-      method: "GET",
-      token,
-      signal,
-    })
+    await apiRequest(
+      `/inventory-ledger/stock-movements${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
   );
 
 export const createSupplierOrder = async (token, payload) =>
@@ -202,7 +249,7 @@ export const createSupplierOrder = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const updateSupplierOrder = async (token, supplierOrderId, payload) =>
@@ -211,42 +258,52 @@ export const updateSupplierOrder = async (token, supplierOrderId, payload) =>
       method: "PUT",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const createProduct = async (token, payload) =>
-  apiRequest("/products", {
-    method: "POST",
-    token,
-    body: payload,
-  });
+  unwrapApiData(
+    await apiRequest("/products", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+  );
 
 export const updateProduct = async (token, productId, payload) =>
-  apiRequest(`/products/${productId}`, {
-    method: "PUT",
-    token,
-    body: payload,
-  });
+  unwrapApiData(
+    await apiRequest(`/products/${productId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
 
 export const deleteProduct = async (token, productId) =>
-  apiRequest(`/products/${productId}`, {
-    method: "DELETE",
-    token,
-  });
+  unwrapApiData(
+    await apiRequest(`/products/${productId}`, {
+      method: "DELETE",
+      token,
+    }),
+  );
 
 export const updateProductStock = async (token, productId, payload) =>
-  apiRequest(`/products/${productId}/stock`, {
-    method: "PATCH",
-    token,
-    body: payload,
-  });
+  unwrapApiData(
+    await apiRequest(`/products/${productId}/stock`, {
+      method: "PATCH",
+      token,
+      body: payload,
+    }),
+  );
 
 export const getCategories = async (token, signal) =>
-  apiRequest("/categories", {
-    method: "GET",
-    token,
-    signal,
-  });
+  unwrapApiData(
+    await apiRequest("/categories", {
+      method: "GET",
+      token,
+      signal,
+    }),
+  );
 
 export const getTables = async (token, signal) =>
   unwrapApiData(
@@ -254,7 +311,7 @@ export const getTables = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const createTable = async (token, payload) =>
@@ -263,7 +320,7 @@ export const createTable = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const deleteTable = async (token, tableId) =>
@@ -271,28 +328,34 @@ export const deleteTable = async (token, tableId) =>
     await apiRequest(`/tables/${tableId}`, {
       method: "DELETE",
       token,
-    })
+    }),
   );
 
 export const createCategory = async (token, payload) =>
-  apiRequest("/categories", {
-    method: "POST",
-    token,
-    body: payload,
-  });
+  unwrapApiData(
+    await apiRequest("/categories", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+  );
 
 export const updateCategory = async (token, categoryId, payload) =>
-  apiRequest(`/categories/${categoryId}`, {
-    method: "PUT",
-    token,
-    body: payload,
-  });
+  unwrapApiData(
+    await apiRequest(`/categories/${categoryId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
 
 export const deleteCategory = async (token, categoryId) =>
-  apiRequest(`/categories/${categoryId}`, {
-    method: "DELETE",
-    token,
-  });
+  unwrapApiData(
+    await apiRequest(`/categories/${categoryId}`, {
+      method: "DELETE",
+      token,
+    }),
+  );
 
 export const assignTableToWaiter = async (token, tableId, waiterId) =>
   unwrapApiData(
@@ -300,7 +363,7 @@ export const assignTableToWaiter = async (token, tableId, waiterId) =>
       method: "PATCH",
       token,
       body: { waiterId },
-    })
+    }),
   );
 
 export const setWaiterTableAssignments = async (token, payload) =>
@@ -309,7 +372,7 @@ export const setWaiterTableAssignments = async (token, payload) =>
       method: "PUT",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const getWaiters = async (token, signal) =>
@@ -318,7 +381,7 @@ export const getWaiters = async (token, signal) =>
       method: "GET",
       token,
       signal,
-    })
+    }),
   );
 
 export const createWaiter = async (token, payload) =>
@@ -327,7 +390,7 @@ export const createWaiter = async (token, payload) =>
       method: "POST",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const updateWaiter = async (token, waiterId, payload) =>
@@ -336,7 +399,7 @@ export const updateWaiter = async (token, waiterId, payload) =>
       method: "PATCH",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const updateWaiterStatus = async (token, waiterId, payload) =>
@@ -345,7 +408,7 @@ export const updateWaiterStatus = async (token, waiterId, payload) =>
       method: "PATCH",
       token,
       body: payload,
-    })
+    }),
   );
 
 export const deleteWaiter = async (token, waiterId) =>
@@ -353,7 +416,7 @@ export const deleteWaiter = async (token, waiterId) =>
     await apiRequest(`/staff/waiters/${waiterId}`, {
       method: "DELETE",
       token,
-    })
+    }),
   );
 
 export const getGuestQrAccess = async (token, tableId) =>
@@ -361,7 +424,7 @@ export const getGuestQrAccess = async (token, tableId) =>
     await apiRequest(`/guest/tables/${tableId}/access`, {
       method: "GET",
       token,
-    })
+    }),
   );
 
 export const rotateGuestQrAccess = async (token, tableId) =>
@@ -369,7 +432,7 @@ export const rotateGuestQrAccess = async (token, tableId) =>
     await apiRequest(`/guest/tables/${tableId}/access/rotate`, {
       method: "POST",
       token,
-    })
+    }),
   );
 
 export const buildRealtimeStreamUrl = (token, channels = []) => {
@@ -475,7 +538,7 @@ export const downloadAdvancedReportCsv = async (token, params = {}) => {
   await downloadReportFile(
     token,
     `/dashboard/export/report.csv${query ? `?${query}` : ""}`,
-    "advanced-sales-report.csv"
+    "advanced-sales-report.csv",
   );
 };
 
@@ -484,6 +547,6 @@ export const downloadAdvancedReportPdf = async (token, params = {}) => {
   await downloadReportFile(
     token,
     `/dashboard/export/report.pdf${query ? `?${query}` : ""}`,
-    "advanced-sales-report.pdf"
+    "advanced-sales-report.pdf",
   );
 };

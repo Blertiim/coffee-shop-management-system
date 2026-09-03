@@ -55,10 +55,7 @@ const createRateLimiter = ({
     res.setHeader("X-RateLimit-Reset", String(Math.ceil(bucket.resetAt / 1000)));
 
     if (bucket.count > max) {
-      res.setHeader(
-        "Retry-After",
-        String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)))
-      );
+      res.setHeader("Retry-After", String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
 
       return sendError(res, 429, message);
     }

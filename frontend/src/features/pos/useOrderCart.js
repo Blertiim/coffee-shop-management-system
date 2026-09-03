@@ -19,9 +19,7 @@ export default function useOrderCart() {
       }
 
       return current.map((item) =>
-        item.productId === product.id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
+        item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item,
       );
     });
   };
@@ -30,11 +28,9 @@ export default function useOrderCart() {
     setCart((current) =>
       current
         .map((item) =>
-          item.productId === productId
-            ? { ...item, quantity: item.quantity + delta }
-            : item
+          item.productId === productId ? { ...item, quantity: item.quantity + delta } : item,
         )
-        .filter((item) => item.quantity > 0)
+        .filter((item) => item.quantity > 0),
     );
   };
 
@@ -47,17 +43,11 @@ export default function useOrderCart() {
   };
 
   const total = useMemo(
-    () =>
-      Number(
-        cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)
-      ),
-    [cart]
+    () => Number(cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)),
+    [cart],
   );
 
-  const itemCount = useMemo(
-    () => cart.reduce((sum, item) => sum + item.quantity, 0),
-    [cart]
-  );
+  const itemCount = useMemo(() => cart.reduce((sum, item) => sum + item.quantity, 0), [cart]);
 
   return {
     cart,

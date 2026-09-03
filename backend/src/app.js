@@ -22,10 +22,7 @@ const tableRoutes = require("./modules/tables/table.routes");
 const guestRoutes = require("./modules/guest/guest.routes");
 const authMiddleware = require("./middlewares/auth.middleware");
 const requestActivityMiddleware = require("./middlewares/request-activity.middleware");
-const {
-  globalErrorHandler,
-  notFoundHandler,
-} = require("./middlewares/error.middleware");
+const { globalErrorHandler, notFoundHandler } = require("./middlewares/error.middleware");
 const { sendSuccess } = require("./utils/response");
 const { buildCorsOriginChecker } = require("./config/security");
 
@@ -43,7 +40,7 @@ app.use(
       callback(new Error("Not allowed by CORS"));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  })
+  }),
 );
 app.use(
   helmet({
@@ -53,7 +50,7 @@ app.use(
         "upgrade-insecure-requests": null,
       },
     },
-  })
+  }),
 );
 app.use(morgan("dev"));
 app.use(express.json());

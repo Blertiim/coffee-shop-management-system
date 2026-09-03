@@ -32,17 +32,11 @@ const validateUpdateSupplierPayload = (body) => {
   const data = {};
 
   if (body.contactName !== undefined) {
-    data.contactName = ensureRequiredString(
-      body.contactName,
-      "Supplier contact name"
-    );
+    data.contactName = ensureRequiredString(body.contactName, "Supplier contact name");
   }
 
   if (body.companyName !== undefined) {
-    data.companyName = ensureRequiredString(
-      body.companyName,
-      "Supplier company name"
-    );
+    data.companyName = ensureRequiredString(body.companyName, "Supplier company name");
   }
 
   if (body.phone !== undefined) {
@@ -58,10 +52,7 @@ const validateUpdateSupplierPayload = (body) => {
   }
 
   if (body.productType !== undefined) {
-    data.productType = ensureOptionalString(
-      body.productType,
-      "Supplier product type"
-    );
+    data.productType = ensureOptionalString(body.productType, "Supplier product type");
   }
 
   if (Object.keys(data).length === 0) {

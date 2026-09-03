@@ -9,14 +9,8 @@ const {
 const validateCreateInventoryPayload = (body) => ({
   itemName: ensureRequiredString(body.itemName, "Inventory item name"),
   unit: ensureRequiredString(body.unit, "Inventory unit"),
-  currentQuantity: ensureNonNegativeNumber(
-    body.currentQuantity,
-    "Inventory current quantity"
-  ),
-  minimumQuantity: ensureNonNegativeNumber(
-    body.minimumQuantity,
-    "Inventory minimum quantity"
-  ),
+  currentQuantity: ensureNonNegativeNumber(body.currentQuantity, "Inventory current quantity"),
+  minimumQuantity: ensureNonNegativeNumber(body.minimumQuantity, "Inventory minimum quantity"),
   unitPrice: ensurePositiveNumber(body.unitPrice, "Inventory unit price"),
   supplierId: ensureId(body.supplierId, "Supplier id"),
 });
@@ -35,14 +29,14 @@ const validateUpdateInventoryPayload = (body) => {
   if (body.currentQuantity !== undefined) {
     data.currentQuantity = ensureNonNegativeNumber(
       body.currentQuantity,
-      "Inventory current quantity"
+      "Inventory current quantity",
     );
   }
 
   if (body.minimumQuantity !== undefined) {
     data.minimumQuantity = ensureNonNegativeNumber(
       body.minimumQuantity,
-      "Inventory minimum quantity"
+      "Inventory minimum quantity",
     );
   }
 

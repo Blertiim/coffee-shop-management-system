@@ -17,18 +17,11 @@ const validateCreateReservationPayload = (body) => ({
   tableId: ensureId(body.tableId, "Table id"),
   date: ensureDateOnly(body.date, "Reservation date"),
   time: ensureTime(body.time, "Reservation time"),
-  numberOfPeople: ensurePositiveInteger(
-    body.numberOfPeople,
-    "Number of people"
-  ),
+  numberOfPeople: ensurePositiveInteger(body.numberOfPeople, "Number of people"),
   status:
     body.status === undefined
       ? "pending"
-      : ensureEnumValue(
-          body.status,
-          "Reservation status",
-          VALID_RESERVATION_STATUSES
-        ),
+      : ensureEnumValue(body.status, "Reservation status", VALID_RESERVATION_STATUSES),
 });
 
 const validateUpdateReservationPayload = (body) => {
@@ -55,18 +48,11 @@ const validateUpdateReservationPayload = (body) => {
   }
 
   if (body.numberOfPeople !== undefined) {
-    data.numberOfPeople = ensurePositiveInteger(
-      body.numberOfPeople,
-      "Number of people"
-    );
+    data.numberOfPeople = ensurePositiveInteger(body.numberOfPeople, "Number of people");
   }
 
   if (body.status !== undefined) {
-    data.status = ensureEnumValue(
-      body.status,
-      "Reservation status",
-      VALID_RESERVATION_STATUSES
-    );
+    data.status = ensureEnumValue(body.status, "Reservation status", VALID_RESERVATION_STATUSES);
   }
 
   if (Object.keys(data).length === 0) {

@@ -3,14 +3,8 @@ const bcrypt = require("bcryptjs");
 
 const prisma = require("../../config/prisma");
 const { publishRealtimeEvent } = require("../../services/realtime.service");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
-const {
-  clearPosLoginAttemptState,
-} = require("../../services/pos-login-guard.service");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
+const { clearPosLoginAttemptState } = require("../../services/pos-login-guard.service");
 const {
   validateCreateWaiterPayload,
   validateUpdateWaiterPayload,
@@ -38,9 +32,7 @@ const toEmailSlug = (value) =>
     .replace(/^\.+|\.+$/g, "") || "waiter";
 
 const generateWaiterEmail = (fullName) =>
-  `${toEmailSlug(fullName)}.${Date.now().toString(36)}.${Math.floor(
-    Math.random() * 10000
-  )
+  `${toEmailSlug(fullName)}.${Date.now().toString(36)}.${Math.floor(Math.random() * 10000)
     .toString()
     .padStart(4, "0")}@pos.local`;
 
@@ -64,12 +56,7 @@ exports.getAllWaiters = async (req, res) => {
       orderBy: [{ status: "asc" }, { fullName: "asc" }],
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Waiters retrieved successfully",
-      waiters.map(mapWaiter)
-    );
+    return sendSuccess(res, 200, "Waiters retrieved successfully", waiters.map(mapWaiter));
   } catch (error) {
     return handleControllerError(res, error, "Get waiters error");
   }
@@ -97,10 +84,7 @@ exports.createWaiter = async (req, res) => {
           },
         });
       } catch (error) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
-        ) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
           continue;
         }
 
@@ -151,12 +135,7 @@ exports.updateWaiter = async (req, res) => {
       clearPosLoginAttemptState({ identifier: `user:${updatedWaiter.id}` });
     }
 
-    return sendSuccess(
-      res,
-      200,
-      "Waiter updated successfully",
-      mapWaiter(updatedWaiter)
-    );
+    return sendSuccess(res, 200, "Waiter updated successfully", mapWaiter(updatedWaiter));
   } catch (error) {
     return handleControllerError(res, error, "Update waiter error");
   }
@@ -179,12 +158,7 @@ exports.updateWaiterStatus = async (req, res) => {
 
     clearPosLoginAttemptState({ identifier: `user:${updatedWaiter.id}` });
 
-    return sendSuccess(
-      res,
-      200,
-      "Waiter status updated successfully",
-      mapWaiter(updatedWaiter)
-    );
+    return sendSuccess(res, 200, "Waiter status updated successfully", mapWaiter(updatedWaiter));
   } catch (error) {
     return handleControllerError(res, error, "Update waiter status error");
   }
@@ -270,21 +244,12 @@ exports.deleteWaiter = async (req, res) => {
     return sendSuccess(
       res,
       200,
-      deletionSummary.archived
-        ? "Waiter archived successfully"
-        : "Waiter deleted successfully",
-      deletionSummary
+      deletionSummary.archived ? "Waiter archived successfully" : "Waiter deleted successfully",
+      deletionSummary,
     );
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return sendError(
-        res,
-        400,
-        "Cannot delete waiter because related records are still linked."
-      );
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return sendError(res, 400, "Cannot delete waiter because related records are still linked.");
     }
 
     return handleControllerError(res, error, "Delete waiter error");

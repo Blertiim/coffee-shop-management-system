@@ -1,7 +1,7 @@
 const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
-const { handleControllerError, sendSuccess } = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateEmployeePayload,
   validateEmployeeId,
@@ -29,11 +29,7 @@ exports.getEmployeeById = async (req, res) => {
     });
 
     if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-        data: null,
-      });
+      return sendError(res, 404, "Employee not found");
     }
 
     return sendSuccess(res, 200, "Employee retrieved successfully", employee);
@@ -52,15 +48,8 @@ exports.createEmployee = async (req, res) => {
 
     return sendSuccess(res, 201, "Employee created successfully", employee);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Employee email already exists",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Employee email already exists");
     }
 
     return handleControllerError(res, error, "Create employee error");
@@ -77,11 +66,7 @@ exports.updateEmployee = async (req, res) => {
     });
 
     if (!existingEmployee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-        data: null,
-      });
+      return sendError(res, 404, "Employee not found");
     }
 
     const employee = await prisma.employee.update({
@@ -91,15 +76,8 @@ exports.updateEmployee = async (req, res) => {
 
     return sendSuccess(res, 200, "Employee updated successfully", employee);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({
-        success: false,
-        message: "Employee email already exists",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Employee email already exists");
     }
 
     return handleControllerError(res, error, "Update employee error");
@@ -115,11 +93,7 @@ exports.deleteEmployee = async (req, res) => {
     });
 
     if (!existingEmployee) {
-      return res.status(404).json({
-        success: false,
-        message: "Employee not found",
-        data: null,
-      });
+      return sendError(res, 404, "Employee not found");
     }
 
     await prisma.employee.delete({
@@ -128,15 +102,8 @@ exports.deleteEmployee = async (req, res) => {
 
     return sendSuccess(res, 200, "Employee deleted successfully", null);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete an employee linked to existing orders",
-        data: null,
-      });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      return sendError(res, 400, "Cannot delete an employee linked to existing orders");
     }
 
     return handleControllerError(res, error, "Delete employee error");

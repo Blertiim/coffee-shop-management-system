@@ -1,5 +1,6 @@
 const { Prisma } = require("@prisma/client");
 const prisma = require("../../config/prisma");
+const { sendError, sendSuccess, handleControllerError } = require("../../utils/response");
 
 const parseId = (value) => {
   const id = Number(value);
@@ -27,10 +28,9 @@ exports.getAllCategories = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    res.status(200).json(categories);
+    return sendSuccess(res, 200, "Categories retrieved successfully", categories);
   } catch (error) {
-    console.error("Get all categories error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get all categories error");
   }
 };
 
@@ -39,7 +39,7 @@ exports.getCategoryById = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid category id" });
+      return sendError(res, 400, "Invalid category id");
     }
 
     const category = await prisma.category.findUnique({
@@ -47,13 +47,12 @@ exports.getCategoryById = async (req, res) => {
     });
 
     if (!category) {
-      return res.status(404).json({ error: "Category not found" });
+      return sendError(res, 404, "Category not found");
     }
 
-    res.status(200).json(category);
+    return sendSuccess(res, 200, "Category retrieved successfully", category);
   } catch (error) {
-    console.error("Get category by id error:", error);
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Get category by id error");
   }
 };
 
@@ -62,28 +61,20 @@ exports.createCategory = async (req, res) => {
     const name = normalizeCategoryName(req.body.name);
 
     if (!name) {
-      return res.status(400).json({ error: "Category name is required" });
+      return sendError(res, 400, "Category name is required");
     }
 
     const category = await prisma.category.create({
       data: { name },
     });
 
-    res.status(201).json({
-      message: "Category created successfully",
-      category,
-    });
+    return sendSuccess(res, 201, "Category created successfully", category);
   } catch (error) {
-    console.error("Create category error:", error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({ error: "Category name already exists" });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Category name already exists");
     }
 
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Create category error");
   }
 };
 
@@ -92,13 +83,13 @@ exports.updateCategory = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid category id" });
+      return sendError(res, 400, "Invalid category id");
     }
 
     const name = normalizeCategoryName(req.body.name);
 
     if (!name) {
-      return res.status(400).json({ error: "Category name is required" });
+      return sendError(res, 400, "Category name is required");
     }
 
     const existingCategory = await prisma.category.findUnique({
@@ -106,7 +97,7 @@ exports.updateCategory = async (req, res) => {
     });
 
     if (!existingCategory) {
-      return res.status(404).json({ error: "Category not found" });
+      return sendError(res, 404, "Category not found");
     }
 
     const category = await prisma.category.update({
@@ -114,21 +105,13 @@ exports.updateCategory = async (req, res) => {
       data: { name },
     });
 
-    res.status(200).json({
-      message: "Category updated successfully",
-      category,
-    });
+    return sendSuccess(res, 200, "Category updated successfully", category);
   } catch (error) {
-    console.error("Update category error:", error);
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return res.status(409).json({ error: "Category name already exists" });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return sendError(res, 409, "Category name already exists");
     }
 
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Update category error");
   }
 };
 
@@ -137,7 +120,7 @@ exports.deleteCategory = async (req, res) => {
     const id = parseId(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid category id" });
+      return sendError(res, 400, "Invalid category id");
     }
 
     const existingCategory = await prisma.category.findUnique({
@@ -145,7 +128,7 @@ exports.deleteCategory = async (req, res) => {
     });
 
     if (!existingCategory) {
-      return res.status(404).json({ error: "Category not found" });
+      return sendError(res, 404, "Category not found");
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -171,13 +154,8 @@ exports.deleteCategory = async (req, res) => {
       };
     });
 
-    res.status(200).json({
-      message: "Category deleted successfully",
-      data: result,
-    });
+    return sendSuccess(res, 200, "Category deleted successfully", result);
   } catch (error) {
-    console.error("Delete category error:", error);
-
-    res.status(500).json({ error: "Server error" });
+    return handleControllerError(res, error, "Delete category error");
   }
 };

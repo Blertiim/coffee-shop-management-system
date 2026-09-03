@@ -6,8 +6,7 @@ const STATE_TTL_MS = 24 * 60 * 60 * 1000;
 const attemptStates = new Map();
 const cooldownStates = new Map();
 
-const normalizeIdentifier = (value) =>
-  typeof value === "string" ? value.trim() : "";
+const normalizeIdentifier = (value) => (typeof value === "string" ? value.trim() : "");
 
 const normalizeIpAddress = (value) =>
   typeof value === "string" && value.trim() ? value.trim() : "unknown";
@@ -114,11 +113,7 @@ const getPosLoginBlock = ({ identifier, ipAddress, now = Date.now() }) => {
   return null;
 };
 
-const registerFailedPosLoginAttempt = ({
-  identifier,
-  ipAddress,
-  now = Date.now(),
-}) => {
+const registerFailedPosLoginAttempt = ({ identifier, ipAddress, now = Date.now() }) => {
   const normalizedIdentifier = normalizeIdentifier(identifier);
   const scopeKey = buildScopeKey(normalizedIdentifier, ipAddress);
   const { key, state } = getAttemptState(normalizedIdentifier, now);

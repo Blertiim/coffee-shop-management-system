@@ -2,11 +2,7 @@ const PDFDocument = require("pdfkit");
 const prisma = require("../../config/prisma");
 const { syncProductStockAlert } = require("../../services/alert.service");
 const AppError = require("../../utils/app-error");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateSupplierOrderPayload,
   validateSupplierOrderId,
@@ -74,7 +70,7 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
       supplierOrder.receivedAt
         ? INVOICE_DATE_FORMATTER.format(new Date(supplierOrder.receivedAt))
         : "-"
-    }`
+    }`,
   );
 
   if (supplierOrder.notes) {
@@ -100,7 +96,11 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
   doc.text("Stock +", columns.stockQuantity, tableTop);
   doc.text("Unit Cost", columns.unitPrice, tableTop);
   doc.text("Line Total", columns.total, tableTop);
-  doc.moveTo(36, tableTop + 14).lineTo(558, tableTop + 14).strokeColor("#cccccc").stroke();
+  doc
+    .moveTo(36, tableTop + 14)
+    .lineTo(558, tableTop + 14)
+    .strokeColor("#cccccc")
+    .stroke();
 
   let rowY = tableTop + 22;
   doc.fillColor("#111111");
@@ -127,7 +127,11 @@ const streamSupplierInvoicePdf = (res, supplierOrder) => {
     rowY += 24;
   });
 
-  doc.moveTo(36, rowY + 4).lineTo(558, rowY + 4).strokeColor("#cccccc").stroke();
+  doc
+    .moveTo(36, rowY + 4)
+    .lineTo(558, rowY + 4)
+    .strokeColor("#cccccc")
+    .stroke();
   doc.moveDown(1.5);
   doc.fontSize(13).text(`TOTAL: ${formatMoney(supplierOrder.total)} EUR`, {
     align: "right",
@@ -200,14 +204,20 @@ const withItemUnits = (items, productsById) =>
     const fallbackStockUnitsPerPurchaseUnit =
       purchaseUnit === "paketa" && productPackageSize > 0 ? productPackageSize : 1;
     const stockQuantity =
-      item.stockQuantity || item.quantity * (item.stockUnitsPerPurchaseUnit || fallbackStockUnitsPerPurchaseUnit);
+      item.stockQuantity ||
+      item.quantity * (item.stockUnitsPerPurchaseUnit || fallbackStockUnitsPerPurchaseUnit);
     const stockUnitsPerPurchaseUnit =
       item.stockUnitsPerPurchaseUnit ||
       Math.max(1, Math.round(stockQuantity / Math.max(item.quantity, 1)));
 
-    if (purchaseUnit !== stockUnit && !item.stockUnitsPerPurchaseUnit && !item.stockQuantity && productPackageSize <= 0) {
+    if (
+      purchaseUnit !== stockUnit &&
+      !item.stockUnitsPerPurchaseUnit &&
+      !item.stockQuantity &&
+      productPackageSize <= 0
+    ) {
       throw new AppError(
-        `${product?.name || "Product"} needs a conversion: how many ${stockUnit} are in one ${purchaseUnit}`
+        `${product?.name || "Product"} needs a conversion: how many ${stockUnit} are in one ${purchaseUnit}`,
       );
     }
 
@@ -255,12 +265,7 @@ exports.getAllSupplierOrders = async (req, res) => {
       orderBy: [{ orderDate: "desc" }, { createdAt: "desc" }],
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Supplier orders retrieved successfully",
-      supplierOrders
-    );
+    return sendSuccess(res, 200, "Supplier orders retrieved successfully", supplierOrders);
   } catch (error) {
     return handleControllerError(res, error, "Get all supplier orders error");
   }
@@ -279,12 +284,7 @@ exports.getSupplierOrderById = async (req, res) => {
       return sendError(res, 404, "Supplier order not found");
     }
 
-    return sendSuccess(
-      res,
-      200,
-      "Supplier order retrieved successfully",
-      supplierOrder
-    );
+    return sendSuccess(res, 200, "Supplier order retrieved successfully", supplierOrder);
   } catch (error) {
     return handleControllerError(res, error, "Get supplier order by id error");
   }
@@ -306,7 +306,7 @@ exports.downloadSupplierInvoicePdf = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${buildSupplierInvoiceFileName(supplierOrder)}"`
+      `attachment; filename="${buildSupplierInvoiceFileName(supplierOrder)}"`,
     );
 
     streamSupplierInvoicePdf(res, supplierOrder);
@@ -356,12 +356,7 @@ exports.createSupplierOrder = async (req, res) => {
       return (await applySupplierOrderStock(tx, createdSupplierOrder)) || createdSupplierOrder;
     });
 
-    return sendSuccess(
-      res,
-      201,
-      "Supplier order created successfully",
-      supplierOrder
-    );
+    return sendSuccess(res, 201, "Supplier order created successfully", supplierOrder);
   } catch (error) {
     return handleControllerError(res, error, "Create supplier order error");
   }
@@ -383,14 +378,11 @@ exports.updateSupplierOrder = async (req, res) => {
       return sendError(res, 404, "Supplier order not found");
     }
 
-    if (
-      existingSupplierOrder.receivedAt &&
-      Object.keys(data).some((field) => field !== "notes")
-    ) {
+    if (existingSupplierOrder.receivedAt && Object.keys(data).some((field) => field !== "notes")) {
       return sendError(
         res,
         400,
-        "Delivered supplier invoices cannot be changed after stock is applied"
+        "Delivered supplier invoices cannot be changed after stock is applied",
       );
     }
 
@@ -436,12 +428,7 @@ exports.updateSupplierOrder = async (req, res) => {
       return (await applySupplierOrderStock(tx, updatedSupplierOrder)) || updatedSupplierOrder;
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Supplier order updated successfully",
-      supplierOrder
-    );
+    return sendSuccess(res, 200, "Supplier order updated successfully", supplierOrder);
   } catch (error) {
     return handleControllerError(res, error, "Update supplier order error");
   }
@@ -463,7 +450,7 @@ exports.deleteSupplierOrder = async (req, res) => {
       return sendError(
         res,
         400,
-        "Delivered supplier invoices cannot be deleted after stock is applied"
+        "Delivered supplier invoices cannot be deleted after stock is applied",
       );
     }
 

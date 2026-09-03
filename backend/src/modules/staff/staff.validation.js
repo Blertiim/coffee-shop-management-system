@@ -1,9 +1,5 @@
 const AppError = require("../../utils/app-error");
-const {
-  ensureEnumValue,
-  ensureId,
-  ensureRequiredString,
-} = require("../../utils/validation");
+const { ensureEnumValue, ensureId, ensureRequiredString } = require("../../utils/validation");
 
 const VALID_STATUSES = ["active", "inactive"];
 
@@ -32,10 +28,7 @@ const validateUpdateWaiterPayload = (body) => {
   const payload = {};
 
   if (body.fullName !== undefined || body.name !== undefined) {
-    payload.fullName = ensureRequiredString(
-      body.fullName ?? body.name,
-      "Waiter name"
-    );
+    payload.fullName = ensureRequiredString(body.fullName ?? body.name, "Waiter name");
   }
 
   if (body.pin !== undefined) {

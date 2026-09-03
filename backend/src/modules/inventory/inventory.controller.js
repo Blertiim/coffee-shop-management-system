@@ -2,11 +2,7 @@ const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
 const { syncInventoryAlert } = require("../../services/alert.service");
-const {
-  handleControllerError,
-  sendError,
-  sendSuccess,
-} = require("../../utils/response");
+const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
 const {
   validateCreateInventoryPayload,
   validateInventoryId,
@@ -22,12 +18,7 @@ exports.getAllInventory = async (req, res) => {
       orderBy: [{ itemName: "asc" }],
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Inventory items retrieved successfully",
-      inventory
-    );
+    return sendSuccess(res, 200, "Inventory items retrieved successfully", inventory);
   } catch (error) {
     return handleControllerError(res, error, "Get all inventory error");
   }
@@ -48,12 +39,7 @@ exports.getInventoryById = async (req, res) => {
       return sendError(res, 404, "Inventory item not found");
     }
 
-    return sendSuccess(
-      res,
-      200,
-      "Inventory item retrieved successfully",
-      inventoryItem
-    );
+    return sendSuccess(res, 200, "Inventory item retrieved successfully", inventoryItem);
   } catch (error) {
     return handleControllerError(res, error, "Get inventory by id error");
   }
@@ -81,12 +67,7 @@ exports.createInventoryItem = async (req, res) => {
 
     await syncInventoryAlert(inventoryItem);
 
-    return sendSuccess(
-      res,
-      201,
-      "Inventory item created successfully",
-      inventoryItem
-    );
+    return sendSuccess(res, 201, "Inventory item created successfully", inventoryItem);
   } catch (error) {
     return handleControllerError(res, error, "Create inventory item error");
   }
@@ -126,12 +107,7 @@ exports.updateInventoryItem = async (req, res) => {
 
     await syncInventoryAlert(inventoryItem);
 
-    return sendSuccess(
-      res,
-      200,
-      "Inventory item updated successfully",
-      inventoryItem
-    );
+    return sendSuccess(res, 200, "Inventory item updated successfully", inventoryItem);
   } catch (error) {
     return handleControllerError(res, error, "Update inventory item error");
   }
@@ -168,14 +144,11 @@ exports.deleteInventoryItem = async (req, res) => {
 
     return sendSuccess(res, 200, "Inventory item deleted successfully", null);
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
       return sendError(
         res,
         400,
-        "Cannot delete inventory item linked to existing supplier records"
+        "Cannot delete inventory item linked to existing supplier records",
       );
     }
 

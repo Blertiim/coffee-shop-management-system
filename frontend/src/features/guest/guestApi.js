@@ -5,7 +5,7 @@ export const getGuestMenu = async (token, signal) =>
     await apiRequest(`/guest/access/${token}/menu`, {
       method: "GET",
       signal,
-    })
+    }),
   );
 
 export const submitGuestOrder = async (token, payload) =>
@@ -13,5 +13,5 @@ export const submitGuestOrder = async (token, payload) =>
     await apiRequest(`/guest/access/${token}/order`, {
       method: "POST",
       body: payload,
-    })
+    }),
   );

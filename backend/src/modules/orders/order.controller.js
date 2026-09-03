@@ -63,8 +63,7 @@ const orderInclude = {
   },
 };
 
-const normalizeEmail = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const isAdmin = (req) => normalizeRole(req.user && req.user.role) === "admin";
 const isManager = (req) => normalizeRole(req.user && req.user.role) === "manager";
@@ -103,14 +102,14 @@ const canManageOrderLifecycle = (req, order) => {
   return isPosStaff(req) || isAssignedWaiter(req, order) || order.userId === userId;
 };
 
-const normalizeStatus = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const formatMoney = (value) => MONEY_FORMATTER.format(Number(value || 0));
 
 const getOrderSubtotal = (order) => {
   const subtotal =
-    order?.subtotal ?? Number((Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2));
+    order?.subtotal ??
+    Number((Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2));
 
   return Number(subtotal || 0);
 };
@@ -176,7 +175,7 @@ const streamOrderReceiptPdf = (res, order) => {
       order.employee
         ? `${order.employee.firstName} ${order.employee.lastName}`
         : order.user.fullName
-    }`
+    }`,
   );
   doc.text(`Status: ${order.status}`);
   doc.text(`Payment: ${order.paymentMethod || "-"}`);
@@ -190,14 +189,9 @@ const streamOrderReceiptPdf = (res, order) => {
 
     doc
       .fontSize(10)
-      .text(
-        `${index + 1}. ${item.product ? item.product.name : "Product"} x${
-          item.quantity
-        }`,
-        {
-          continued: true,
-        }
-      )
+      .text(`${index + 1}. ${item.product ? item.product.name : "Product"} x${item.quantity}`, {
+        continued: true,
+      })
       .text(` ${formatMoney(lineTotal)} EUR`, { align: "right" });
   });
 
@@ -238,7 +232,7 @@ const buildOrderItems = (products, normalizedItems) => {
     }
 
     const hasRecipe = Boolean(
-      product.recipe?.isActive && product.recipe.items && product.recipe.items.length
+      product.recipe?.isActive && product.recipe.items && product.recipe.items.length,
     );
 
     if (!hasRecipe && isRecipeManagedProduct(product)) {
@@ -363,13 +357,7 @@ const setTableStatusForOrder = async (tx, order, status) => {
   });
 };
 
-const applyOrderStatusTransition = async (
-  tx,
-  req,
-  existingOrder,
-  targetStatus,
-  options = {}
-) => {
+const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus, options = {}) => {
   if (existingOrder.status === targetStatus) {
     throw new AppError(`Order is already ${targetStatus}`);
   }
@@ -424,16 +412,12 @@ const applyOrderStatusTransition = async (
     }
 
     if (existingOrder.status !== "pending_payment") {
-      throw new AppError(
-        "Payment can only be completed after invoice generation",
-        400
-      );
+      throw new AppError("Payment can only be completed after invoice generation", 400);
     }
 
     await setTableStatusForOrder(tx, existingOrder, "available");
 
-    const nextPaymentMethod =
-      options.paymentMethod || existingOrder.paymentMethod || null;
+    const nextPaymentMethod = options.paymentMethod || existingOrder.paymentMethod || null;
 
     return tx.order.update({
       where: { id: existingOrder.id },
@@ -453,7 +437,7 @@ const applyOrderStatusTransition = async (
 
   if (!nextAllowedStatus || targetStatus !== nextAllowedStatus) {
     throw new AppError(
-      `Order status can only move from ${existingOrder.status} to ${nextAllowedStatus}`
+      `Order status can only move from ${existingOrder.status} to ${nextAllowedStatus}`,
     );
   }
 
@@ -488,9 +472,8 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 401, "Invalid authenticated user");
     }
 
-    const { items, tableId, employeeId, paymentMethod, discountType, discountValue } = validateCreateOrderPayload(
-      req.body
-    );
+    const { items, tableId, employeeId, paymentMethod, discountType, discountValue } =
+      validateCreateOrderPayload(req.body);
 
     const createdOrder = await prisma.$transaction(async (tx) => {
       const [table, products, activeOrderOnTable] = await Promise.all([
@@ -696,7 +679,7 @@ exports.appendItemsToOrder = async (req, res) => {
       const totals = buildDiscountTotals(
         nextSubtotal,
         existingOrder.discountType,
-        existingOrder.discountValue
+        existingOrder.discountValue,
       );
 
       return tx.order.update({
@@ -772,12 +755,7 @@ exports.getTodayPaidTotals = async (req, res) => {
       date: dayStart.toISOString().slice(0, 10),
     };
 
-    return sendSuccess(
-      res,
-      200,
-      "Today's paid totals retrieved successfully",
-      payload
-    );
+    return sendSuccess(res, 200, "Today's paid totals retrieved successfully", payload);
   } catch (error) {
     return handleControllerError(res, error, "Get today's paid totals error");
   }
@@ -837,15 +815,12 @@ exports.downloadOrderReceipt = async (req, res) => {
       return sendError(
         res,
         400,
-        "Invoice is available only after the order is moved to pending payment"
+        "Invoice is available only after the order is moved to pending payment",
       );
     }
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${buildReceiptFileName(order)}"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${buildReceiptFileName(order)}"`);
 
     streamOrderReceiptPdf(res, order);
     return undefined;
@@ -860,12 +835,7 @@ exports.updateOrderStatus = async (req, res) => {
     const { status } = validateOrderStatusUpdatePayload(req.body);
     const updatedOrder = await runOrderStatusUpdate(req, id, status);
 
-    return sendSuccess(
-      res,
-      200,
-      "Order status updated successfully",
-      updatedOrder
-    );
+    return sendSuccess(res, 200, "Order status updated successfully", updatedOrder);
   } catch (error) {
     return handleControllerError(res, error, "Update order status error");
   }
@@ -876,12 +846,7 @@ exports.generateInvoice = async (req, res) => {
     const id = validateOrderId(req.params.id);
     const updatedOrder = await runOrderStatusUpdate(req, id, "pending_payment");
 
-    return sendSuccess(
-      res,
-      200,
-      "Invoice generated. Order moved to pending payment",
-      updatedOrder
-    );
+    return sendSuccess(res, 200, "Invoice generated. Order moved to pending payment", updatedOrder);
   } catch (error) {
     return handleControllerError(res, error, "Generate invoice error");
   }
@@ -969,12 +934,7 @@ exports.transferOrderToTable = async (req, res) => {
       });
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Order transferred successfully",
-      updatedOrder
-    );
+    return sendSuccess(res, 200, "Order transferred successfully", updatedOrder);
   } catch (error) {
     return handleControllerError(res, error, "Transfer order error");
   }
@@ -1006,7 +966,7 @@ exports.applyDiscount = async (req, res) => {
       const totals = buildDiscountTotals(
         getOrderSubtotal(existingOrder),
         discountType,
-        discountValue
+        discountValue,
       );
 
       return tx.order.update({
@@ -1036,12 +996,7 @@ exports.completePayment = async (req, res) => {
       paymentMethod,
     });
 
-    return sendSuccess(
-      res,
-      200,
-      "Payment completed successfully",
-      updatedOrder
-    );
+    return sendSuccess(res, 200, "Payment completed successfully", updatedOrder);
   } catch (error) {
     return handleControllerError(res, error, "Complete payment error");
   }

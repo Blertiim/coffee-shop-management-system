@@ -5,8 +5,7 @@ import { getPosStaffProfiles, posLogin } from "./authApi";
 const POS_PROFILE_ROLES = new Set(["waiter", "manager"]);
 const PIN_LENGTH = 4;
 
-const normalizeRole = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 const toRoleLabel = (role) => {
   const normalized = normalizeRole(role);
@@ -61,9 +60,7 @@ export default function usePosLogin(onLoginSuccess) {
       try {
         const response = await getPosStaffProfiles(controller.signal);
         const profiles = Array.isArray(response)
-          ? response
-              .map(mapProfile)
-              .filter((profile) => POS_PROFILE_ROLES.has(profile.role))
+          ? response.map(mapProfile).filter((profile) => POS_PROFILE_ROLES.has(profile.role))
           : [];
 
         if (!isMounted) {
@@ -104,11 +101,8 @@ export default function usePosLogin(onLoginSuccess) {
   }, []);
 
   const selectedStaff = useMemo(
-    () =>
-      staffProfiles.find((staff) => staff.id === selectedStaffId) ||
-      staffProfiles[0] ||
-      null,
-    [selectedStaffId, staffProfiles]
+    () => staffProfiles.find((staff) => staff.id === selectedStaffId) || staffProfiles[0] || null,
+    [selectedStaffId, staffProfiles],
   );
 
   const selectStaff = (staffId) => {

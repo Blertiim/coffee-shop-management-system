@@ -27,8 +27,7 @@ const queryParam = (name, schema, description) => ({
 const idParam = (name = "id", description = "Numeric resource id") =>
   pathParam(name, { type: "integer", minimum: 1 }, description);
 
-const tokenParam = () =>
-  pathParam("token", { type: "string" }, "Guest QR access token");
+const tokenParam = () => pathParam("token", { type: "string" }, "Guest QR access token");
 
 const dateQueryParams = [
   queryParam("from", { type: "string", format: "date", example: "2026-05-31" }, "Start date"),
@@ -129,8 +128,18 @@ const buildOpenApiSpec = (baseUrl) => ({
         properties: {
           tableId: { type: "integer", minimum: 1, example: 1 },
           employeeId: { type: "integer", minimum: 1, nullable: true, example: 1 },
-          paymentMethod: { type: "string", enum: ["cash", "card"], nullable: true, example: "cash" },
-          discountType: { type: "string", enum: ["percent", "fixed"], nullable: true, example: "percent" },
+          paymentMethod: {
+            type: "string",
+            enum: ["cash", "card"],
+            nullable: true,
+            example: "cash",
+          },
+          discountType: {
+            type: "string",
+            enum: ["percent", "fixed"],
+            nullable: true,
+            example: "percent",
+          },
           discountValue: { type: "number", minimum: 0, nullable: true, example: 10 },
           items: {
             type: "array",
@@ -177,7 +186,12 @@ const buildOpenApiSpec = (baseUrl) => ({
       DiscountRequest: {
         type: "object",
         properties: {
-          discountType: { type: "string", enum: ["percent", "fixed"], nullable: true, example: "fixed" },
+          discountType: {
+            type: "string",
+            enum: ["percent", "fixed"],
+            nullable: true,
+            example: "fixed",
+          },
           discountValue: { type: "number", minimum: 0, nullable: true, example: 2.5 },
         },
       },
@@ -219,7 +233,12 @@ const buildOpenApiSpec = (baseUrl) => ({
           companyName: { type: "string", example: "Cafe Supplier LLC" },
           contactName: { type: "string", example: "Arben Supplier" },
           phone: { type: "string", example: "+38344123456" },
-          email: { type: "string", format: "email", nullable: true, example: "supplier@example.com" },
+          email: {
+            type: "string",
+            format: "email",
+            nullable: true,
+            example: "supplier@example.com",
+          },
           address: { type: "string", nullable: true, example: "Prishtine" },
           productType: { type: "string", nullable: true, example: "Coffee and drinks" },
         },
@@ -232,8 +251,17 @@ const buildOpenApiSpec = (baseUrl) => ({
           employeeId: { type: "integer", minimum: 1, nullable: true, example: 1 },
           invoiceNumber: { type: "string", nullable: true, example: "INV-001" },
           orderDate: { type: "string", format: "date-time", example: "2026-05-31T10:00:00.000Z" },
-          expectedDate: { type: "string", format: "date-time", nullable: true, example: "2026-06-02T10:00:00.000Z" },
-          status: { type: "string", enum: ["pending", "approved", "delivered", "cancelled"], example: "delivered" },
+          expectedDate: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            example: "2026-06-02T10:00:00.000Z",
+          },
+          status: {
+            type: "string",
+            enum: ["pending", "approved", "delivered", "cancelled"],
+            example: "delivered",
+          },
           notes: { type: "string", nullable: true, example: "Morning stock delivery" },
           items: {
             type: "array",
@@ -304,10 +332,13 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["manager login", "admin login", "token"],
         code: code("backend/src/modules/auth/auth.routes.js", 33),
         security: false,
-        requestBody: jsonBody({ $ref: "#/components/schemas/LoginRequest" }, {
-          email: "meti.manager@pos.local",
-          password: "1111",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/LoginRequest" },
+          {
+            email: "meti.manager@pos.local",
+            password: "1111",
+          },
+        ),
       }),
     },
     "/api/auth/pos-login": {
@@ -318,10 +349,13 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["banak", "pos", "pin", "waiter", "manager"],
         code: code("backend/src/modules/auth/auth.routes.js", 35),
         security: false,
-        requestBody: jsonBody({ $ref: "#/components/schemas/PosLoginRequest" }, {
-          userId: 15,
-          pin: "1234",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/PosLoginRequest" },
+          {
+            userId: 15,
+            pin: "1234",
+          },
+        ),
       }),
     },
     "/api/auth/pos-staff": {
@@ -348,18 +382,21 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Stock and Invoices",
         keywords: ["manager", "product", "create"],
         code: code("backend/src/modules/products/product.routes.js", 12),
-        requestBody: jsonBody({ $ref: "#/components/schemas/ProductRequest" }, {
-          name: "Espresso",
-          description: "Short coffee",
-          price: 1.5,
-          stock: 50,
-          stockUnit: "cope",
-          unitsPerPackage: null,
-          imageUrl: "",
-          categoryId: 1,
-          directStockIngredientId: null,
-          isAvailable: true,
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/ProductRequest" },
+          {
+            name: "Espresso",
+            description: "Short coffee",
+            price: 1.5,
+            stock: 50,
+            stockUnit: "cope",
+            unitsPerPackage: null,
+            imageUrl: "",
+            categoryId: 1,
+            directStockIngredientId: null,
+            isAvailable: true,
+          },
+        ),
       }),
     },
     "/api/products/{id}/stock": {
@@ -370,9 +407,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["stock", "inventory", "manager"],
         code: code("backend/src/modules/products/product.routes.js", 14),
         parameters: [idParam("id", "Product id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/ProductStockRequest" }, {
-          stock: 40,
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/ProductStockRequest" },
+          {
+            stock: 40,
+          },
+        ),
       }),
     },
     "/api/categories": {
@@ -389,9 +429,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Stock and Invoices",
         keywords: ["manager", "category"],
         code: code("backend/src/modules/categories/category.routes.js", 12),
-        requestBody: jsonBody({ $ref: "#/components/schemas/CategoryRequest" }, {
-          name: "Coffee",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/CategoryRequest" },
+          {
+            name: "Coffee",
+          },
+        ),
       }),
     },
     "/api/orders": {
@@ -401,14 +444,17 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "POS to Dashboard",
         keywords: ["banak", "pos", "order", "dashboard", "sales"],
         code: code("backend/src/modules/orders/order.routes.js", 9),
-        requestBody: jsonBody({ $ref: "#/components/schemas/CreateOrderRequest" }, {
-          tableId: 1,
-          employeeId: null,
-          paymentMethod: "cash",
-          discountType: null,
-          discountValue: null,
-          items: [{ productId: 1, quantity: 2 }],
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/CreateOrderRequest" },
+          {
+            tableId: 1,
+            employeeId: null,
+            paymentMethod: "cash",
+            discountType: null,
+            discountValue: null,
+            items: [{ productId: 1, quantity: 2 }],
+          },
+        ),
       }),
       get: operation({
         tag: "Orders",
@@ -446,9 +492,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["banak", "pos", "order", "items"],
         code: code("backend/src/modules/orders/order.routes.js", 24),
         parameters: [idParam("id", "Order id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/AppendOrderItemsRequest" }, {
-          items: [{ productId: 1, quantity: 1 }],
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/AppendOrderItemsRequest" },
+          {
+            items: [{ productId: 1, quantity: 1 }],
+          },
+        ),
       }),
     },
     "/api/orders/{id}/generate-invoice": {
@@ -469,9 +518,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["transfer", "table", "banak"],
         code: code("backend/src/modules/orders/order.routes.js", 30),
         parameters: [idParam("id", "Order id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/TransferOrderRequest" }, {
-          tableId: 2,
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/TransferOrderRequest" },
+          {
+            tableId: 2,
+          },
+        ),
       }),
     },
     "/api/orders/{id}/discount": {
@@ -482,10 +534,13 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["discount", "coupon", "banak"],
         code: code("backend/src/modules/orders/order.routes.js", 35),
         parameters: [idParam("id", "Order id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/DiscountRequest" }, {
-          discountType: "fixed",
-          discountValue: 2.5,
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/DiscountRequest" },
+          {
+            discountType: "fixed",
+            discountValue: 2.5,
+          },
+        ),
       }),
     },
     "/api/orders/{id}/complete-payment": {
@@ -496,9 +551,13 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["payment", "paid", "banak"],
         code: code("backend/src/modules/orders/order.routes.js", 40),
         parameters: [idParam("id", "Order id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/CompletePaymentRequest" }, {
-          paymentMethod: "card",
-        }, false),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/CompletePaymentRequest" },
+          {
+            paymentMethod: "card",
+          },
+          false,
+        ),
       }),
     },
     "/api/orders/{id}/status": {
@@ -509,9 +568,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["pending", "approved", "delivered", "order"],
         code: code("backend/src/modules/orders/order.routes.js", 45),
         parameters: [idParam("id", "Order id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/OrderStatusRequest" }, {
-          status: "preparing",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/OrderStatusRequest" },
+          {
+            status: "preparing",
+          },
+        ),
       }),
     },
     "/api/dashboard/stats": {
@@ -533,7 +595,11 @@ const buildOpenApiSpec = (baseUrl) => ({
         code: code("backend/src/modules/dashboard/dashboard.routes.js", 14),
         parameters: [
           ...dateQueryParams,
-          queryParam("limit", { type: "integer", minimum: 1, maximum: 200, example: 120 }, "Maximum rows"),
+          queryParam(
+            "limit",
+            { type: "integer", minimum: 1, maximum: 200, example: 120 },
+            "Maximum rows",
+          ),
         ],
       }),
     },
@@ -546,7 +612,11 @@ const buildOpenApiSpec = (baseUrl) => ({
         code: code("backend/src/modules/dashboard/dashboard.routes.js", 15),
         parameters: [
           ...dateQueryParams,
-          queryParam("limit", { type: "integer", minimum: 1, maximum: 200, example: 120 }, "Maximum rows"),
+          queryParam(
+            "limit",
+            { type: "integer", minimum: 1, maximum: 200, example: 120 },
+            "Maximum rows",
+          ),
         ],
       }),
     },
@@ -604,14 +674,17 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Stock and Invoices",
         keywords: ["supplier", "create"],
         code: code("backend/src/modules/suppliers/supplier.routes.js", 14),
-        requestBody: jsonBody({ $ref: "#/components/schemas/SupplierRequest" }, {
-          companyName: "Cafe Supplier LLC",
-          contactName: "Arben Supplier",
-          phone: "+38344123456",
-          email: "supplier@example.com",
-          address: "Prishtine",
-          productType: "Coffee and drinks",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/SupplierRequest" },
+          {
+            companyName: "Cafe Supplier LLC",
+            contactName: "Arben Supplier",
+            phone: "+38344123456",
+            email: "supplier@example.com",
+            address: "Prishtine",
+            productType: "Coffee and drinks",
+          },
+        ),
       }),
     },
     "/api/supplier-orders": {
@@ -628,21 +701,24 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Stock and Invoices",
         keywords: ["save invoice", "incoming invoice", "stock", "package", "kg", "liter", "cope"],
         code: code("backend/src/modules/supplierOrders/supplier-order.routes.js", 15),
-        requestBody: jsonBody({ $ref: "#/components/schemas/SupplierOrderRequest" }, {
-          supplierId: 1,
-          employeeId: null,
-          invoiceNumber: "INV-001",
-          status: "delivered",
-          items: [
-            {
-              productId: 1,
-              quantity: 10,
-              unitPrice: 2.5,
-              unit: "paketa",
-              stockUnitsPerPurchaseUnit: 12,
-            },
-          ],
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/SupplierOrderRequest" },
+          {
+            supplierId: 1,
+            employeeId: null,
+            invoiceNumber: "INV-001",
+            status: "delivered",
+            items: [
+              {
+                productId: 1,
+                quantity: 10,
+                unitPrice: 2.5,
+                unit: "paketa",
+                stockUnitsPerPurchaseUnit: 12,
+              },
+            ],
+          },
+        ),
       }),
     },
     "/api/supplier-orders/{id}/pdf": {
@@ -663,8 +739,16 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["stock alert", "dashboard", "system"],
         code: code("backend/src/modules/system/system.routes.js", 29),
         parameters: [
-          queryParam("status", { type: "string", enum: ["open", "resolved"], example: "open" }, "Alert status"),
-          queryParam("limit", { type: "integer", minimum: 1, maximum: 200, example: 40 }, "Maximum rows"),
+          queryParam(
+            "status",
+            { type: "string", enum: ["open", "resolved"], example: "open" },
+            "Alert status",
+          ),
+          queryParam(
+            "limit",
+            { type: "integer", minimum: 1, maximum: 200, example: 40 },
+            "Maximum rows",
+          ),
         ],
       }),
     },
@@ -678,7 +762,11 @@ const buildOpenApiSpec = (baseUrl) => ({
         security: false,
         parameters: [
           queryParam("token", { type: "string" }, "JWT token used for the realtime stream"),
-          queryParam("channels", { type: "string", example: "orders,tables,dashboard" }, "Comma-separated realtime channels"),
+          queryParam(
+            "channels",
+            { type: "string", example: "orders,tables,dashboard" },
+            "Comma-separated realtime channels",
+          ),
         ],
       }),
     },
@@ -712,9 +800,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         code: code("backend/src/modules/guest/guest.routes.js", 22),
         security: false,
         parameters: [tokenParam()],
-        requestBody: jsonBody({ $ref: "#/components/schemas/GuestOrderRequest" }, {
-          items: [{ productId: 1, quantity: 2 }],
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/GuestOrderRequest" },
+          {
+            items: [{ productId: 1, quantity: 2 }],
+          },
+        ),
       }),
     },
     "/api/staff/waiters": {
@@ -731,10 +822,13 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Staff and Tables",
         keywords: ["waiter", "staff"],
         code: code("backend/src/modules/staff/staff.routes.js", 13),
-        requestBody: jsonBody({ $ref: "#/components/schemas/WaiterRequest" }, {
-          fullName: "Mili Waiter",
-          pin: "1234",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/WaiterRequest" },
+          {
+            fullName: "Mili Waiter",
+            pin: "1234",
+          },
+        ),
       }),
     },
     "/api/tables": {
@@ -751,13 +845,16 @@ const buildOpenApiSpec = (baseUrl) => ({
         flow: "Staff and Tables",
         keywords: ["tables", "manager"],
         code: code("backend/src/modules/tables/table.routes.js", 13),
-        requestBody: jsonBody({ $ref: "#/components/schemas/TableRequest" }, {
-          number: 1,
-          capacity: 4,
-          location: "Main Hall",
-          assignedWaiterId: null,
-          status: "available",
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/TableRequest" },
+          {
+            number: 1,
+            capacity: 4,
+            location: "Main Hall",
+            assignedWaiterId: null,
+            status: "available",
+          },
+        ),
       }),
     },
     "/api/tables/{id}/assignment": {
@@ -768,9 +865,12 @@ const buildOpenApiSpec = (baseUrl) => ({
         keywords: ["table assignment", "waiter", "banak"],
         code: code("backend/src/modules/tables/table.routes.js", 15),
         parameters: [idParam("id", "Table id")],
-        requestBody: jsonBody({ $ref: "#/components/schemas/AssignTableRequest" }, {
-          waiterId: 15,
-        }),
+        requestBody: jsonBody(
+          { $ref: "#/components/schemas/AssignTableRequest" },
+          {
+            waiterId: 15,
+          },
+        ),
       }),
     },
   },

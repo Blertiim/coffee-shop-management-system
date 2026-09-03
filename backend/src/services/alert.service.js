@@ -62,8 +62,7 @@ const syncInventoryAlertWithClient = async (client, inventoryItem) => {
   if (isLow) {
     const payload = {
       type: LOW_INVENTORY_ALERT_TYPE,
-      severity:
-        Number(inventoryItem.currentQuantity) === 0 ? "critical" : "warning",
+      severity: Number(inventoryItem.currentQuantity) === 0 ? "critical" : "warning",
       title: `Low inventory: ${inventoryItem.itemName}`,
       message: buildAlertMessage(inventoryItem),
       status: "open",
@@ -104,7 +103,7 @@ const syncInventoryAlertWithClient = async (client, inventoryItem) => {
 const syncProductStockAlertWithClient = async (
   client,
   product,
-  threshold = DEFAULT_PRODUCT_STOCK_THRESHOLD
+  threshold = DEFAULT_PRODUCT_STOCK_THRESHOLD,
 ) => {
   const entityId = String(product.id);
   const normalizedThreshold = Math.max(Number(threshold) || DEFAULT_PRODUCT_STOCK_THRESHOLD, 0);
@@ -170,7 +169,7 @@ const syncInventoryAlert = async (inventoryItem, tx = prisma) => {
 const syncProductStockAlert = async (
   product,
   threshold = DEFAULT_PRODUCT_STOCK_THRESHOLD,
-  tx = prisma
+  tx = prisma,
 ) => {
   if (!product) {
     return;

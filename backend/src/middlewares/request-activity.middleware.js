@@ -1,9 +1,6 @@
 const { invalidateCacheByPrefix } = require("../services/cache.service");
 const { queueAuditLogFromRequest } = require("../services/audit.service");
-const {
-  inferChannelsFromPath,
-  publishRealtimeEvent,
-} = require("../services/realtime.service");
+const { inferChannelsFromPath, publishRealtimeEvent } = require("../services/realtime.service");
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 

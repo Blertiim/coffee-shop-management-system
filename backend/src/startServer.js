@@ -10,7 +10,7 @@ const { refreshAllInventoryAlerts } = require("./services/alert.service");
 
 const INVENTORY_ALERT_RETRY_MS = Math.max(
   Number(process.env.INVENTORY_ALERT_RETRY_MS || 30000) || 30000,
-  5000
+  5000,
 );
 
 const DEFAULT_PORT = Number(process.env.PORT || 5000) || 5000;
@@ -34,7 +34,7 @@ const runInventoryAlertLoop = async ({
         logger.warn(
           `Inventory alert refresh skipped: database is unavailable at startup. Start MySQL and retrying in ${
             retryDelayMs / 1000
-          }s.`
+          }s.`,
         );
         await wait(retryDelayMs);
         continue;
@@ -117,8 +117,7 @@ const startServer = async (options = {}) => {
             ? "localhost"
             : address.address
           : host;
-      const resolvedPort =
-        typeof address === "object" && address?.port ? address.port : port;
+      const resolvedPort = typeof address === "object" && address?.port ? address.port : port;
       const url = `http://${resolvedHost === "0.0.0.0" ? "localhost" : resolvedHost}:${resolvedPort}`;
 
       if (shouldLogStartup) {
@@ -132,7 +131,7 @@ const startServer = async (options = {}) => {
             logger.error("Failed to close Express server cleanly:", error);
           });
         },
-        { once: true }
+        { once: true },
       );
 
       runInventoryAlertLoop({ signal, logger }).catch((error) => {

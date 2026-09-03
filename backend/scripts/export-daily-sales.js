@@ -9,9 +9,7 @@ const defaultOutputDir = path.resolve(__dirname, "..", "reports");
 const reportOutputDir = process.env.REPORT_OUTPUT_DIR
   ? path.resolve(process.env.REPORT_OUTPUT_DIR)
   : defaultOutputDir;
-const reportSyncDir = process.env.REPORT_SYNC_DIR
-  ? path.resolve(process.env.REPORT_SYNC_DIR)
-  : "";
+const reportSyncDir = process.env.REPORT_SYNC_DIR ? path.resolve(process.env.REPORT_SYNC_DIR) : "";
 
 const toStartOfDay = (date) => {
   const nextDate = new Date(date);
@@ -94,9 +92,7 @@ const run = async () => {
       order.user?.fullName || "",
       Number(order.total || 0).toFixed(2),
       order.updatedAt.toISOString(),
-      order.items
-        .map((item) => `${item.product?.name || "Product"} x${item.quantity}`)
-        .join(" | "),
+      order.items.map((item) => `${item.product?.name || "Product"} x${item.quantity}`).join(" | "),
     ]),
   ];
 
@@ -120,7 +116,7 @@ const run = async () => {
       date: dateKey,
       outputPath,
       syncedPath,
-    })
+    }),
   );
 };
 

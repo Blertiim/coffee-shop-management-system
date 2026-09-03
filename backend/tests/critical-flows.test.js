@@ -56,7 +56,7 @@ const expectOk = async (path, options) => {
   assert.equal(
     result.response.ok,
     true,
-    `${options?.method || "GET"} ${path} failed: ${JSON.stringify(result.body)}`
+    `${options?.method || "GET"} ${path} failed: ${JSON.stringify(result.body)}`,
   );
 
   return result.data;
@@ -166,10 +166,7 @@ before(async () => {
 after(async () => {
   await prisma.order.deleteMany({
     where: {
-      OR: [
-        { id: { in: testState.orderIds } },
-        { tableId: { in: testState.tableIds } },
-      ],
+      OR: [{ id: { in: testState.orderIds } }, { tableId: { in: testState.tableIds } }],
     },
   });
   await prisma.supplierOrder.deleteMany({
@@ -226,7 +223,7 @@ describe("critical API flows", () => {
     const posStaff = await expectOk("/api/auth/pos-staff");
     assert.equal(
       posStaff.some((profile) => profile.id === testState.waiterId && profile.role === "waiter"),
-      true
+      true,
     );
 
     const posLogin = await expectOk("/api/auth/pos-login", {
@@ -296,7 +293,7 @@ describe("critical API flows", () => {
       (log) =>
         log.route === `/api/orders/${createdOrder.id}/complete-payment` &&
         log.method === "PATCH" &&
-        log.statusCode === 200
+        log.statusCode === 200,
     );
     assert.ok(auditLog, "complete payment should be written to audit logs");
   });
@@ -318,7 +315,7 @@ describe("critical API flows", () => {
     const menu = await expectOk(`/api/guest/access/${access.token}/menu`);
     assert.equal(
       menu.products.some((menuProduct) => menuProduct.id === product.id),
-      true
+      true,
     );
 
     const guestOrder = await expectOk(`/api/guest/access/${access.token}/order`, {

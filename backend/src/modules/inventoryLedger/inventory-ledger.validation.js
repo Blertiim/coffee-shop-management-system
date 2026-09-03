@@ -11,10 +11,7 @@ const { assertBaseUnit, assertKnownUnit, normalizeUnit } = require("./unit-conve
 
 const parsePageParams = (query = {}) => {
   const page = Math.max(1, Number.parseInt(query.page || "1", 10) || 1);
-  const pageSize = Math.min(
-    Math.max(1, Number.parseInt(query.pageSize || "25", 10) || 25),
-    100
-  );
+  const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize || "25", 10) || 25), 100);
 
   return {
     page,
@@ -68,7 +65,7 @@ const validateStockIntakePayload = (body = {}) => {
       productId,
       purchasedQuantity: ensurePositiveNumber(
         item?.purchasedQuantity,
-        `Item ${index + 1} purchased quantity`
+        `Item ${index + 1} purchased quantity`,
       ),
       purchasedUnit: validatePurchasedUnit(item?.purchasedUnit, `Item ${index + 1} purchased unit`),
       unitCost: ensurePositiveNumber(item?.unitCost, `Item ${index + 1} unit cost`),
