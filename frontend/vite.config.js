@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiUrl = env.VITE_API_URL || "/api";
   const proxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:5000";
-  const shouldProxyApi = apiUrl.startsWith("/");
+  const shouldProxyApi = apiUrl.startsWith("/") || apiUrl.trim().toLowerCase() === "auto";
 
   const serverConfig = {
     host: true,
