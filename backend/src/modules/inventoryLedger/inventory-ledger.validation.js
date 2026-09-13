@@ -7,11 +7,18 @@ const {
   ensureRequiredString,
 } = require("../../utils/validation");
 const AppError = require("../../utils/app-error");
-const { assertBaseUnit, assertKnownUnit, normalizeUnit } = require("./unit-conversion");
+const {
+  assertBaseUnit,
+  assertKnownUnit,
+  normalizeUnit,
+} = require("./unit-conversion");
 
 const parsePageParams = (query = {}) => {
   const page = Math.max(1, Number.parseInt(query.page || "1", 10) || 1);
-  const pageSize = Math.min(Math.max(1, Number.parseInt(query.pageSize || "25", 10) || 25), 100);
+  const pageSize = Math.min(
+    Math.max(1, Number.parseInt(query.pageSize || "25", 10) || 25),
+    100,
+  );
 
   return {
     page,
@@ -31,6 +38,31 @@ const validateCreateIngredientPayload = (body = {}) => ({
       : ensureNonNegativeNumber(body.minimumQuantity, "Minimum quantity"),
 });
 
+const validateUpdateIngredientPayload = (body = {}) => {
+  const payload = {};
+
+  if (body.name !== undefined) {
+    payload.name = ensureRequiredString(body.name, "Ingredient name");
+  }
+
+  if (body.sku !== undefined) {
+    payload.sku = ensureOptionalString(body.sku, "Ingredient SKU");
+  }
+
+  if (body.baseUnit !== undefined) {
+    payload.baseUnit = assertBaseUnit(body.baseUnit, "Ingredient base unit");
+  }
+
+  if (body.minimumQuantity !== undefined) {
+    payload.minimumQuantity = ensureNonNegativeNumber(
+      body.minimumQuantity,
+      "Minimum quantity",
+    );
+  }
+
+  return payload;
+};
+
 const validatePurchasedUnit = (unit, fieldName) => {
   const normalized = normalizeUnit(unit);
 
@@ -42,39 +74,63 @@ const validatePurchasedUnit = (unit, fieldName) => {
 };
 
 const validateStockIntakePayload = (body = {}) => {
-  const items = ensureArray(body.items, "Stock intake items").map((item, index) => {
-    const ingredientId =
-      item?.ingredientId === undefined || item?.ingredientId === null || item?.ingredientId === ""
-        ? null
-        : ensureId(item.ingredientId, `Item ${index + 1} ingredient id`);
-    const productId =
-      item?.productId === undefined || item?.productId === null || item?.productId === ""
-        ? null
-        : ensureId(item.productId, `Item ${index + 1} product id`);
-
-    if (!ingredientId && !productId) {
-      throw new AppError(`Item ${index + 1} needs a product or ingredient`);
-    }
-
-    if (ingredientId && productId) {
-      throw new AppError(`Item ${index + 1} cannot use product and ingredient together`);
-    }
-
-    return {
-      ingredientId,
-      productId,
-      purchasedQuantity: ensurePositiveNumber(
-        item?.purchasedQuantity,
-        `Item ${index + 1} purchased quantity`,
-      ),
-      purchasedUnit: validatePurchasedUnit(item?.purchasedUnit, `Item ${index + 1} purchased unit`),
-      unitCost: ensurePositiveNumber(item?.unitCost, `Item ${index + 1} unit cost`),
-      totalCost:
-        item?.totalCost === undefined || item?.totalCost === null || item?.totalCost === ""
+  const items = ensureArray(body.items, "Stock intake items").map(
+    (item, index) => {
+      const ingredientId =
+        item?.ingredientId === undefined ||
+        item?.ingredientId === null ||
+        item?.ingredientId === ""
           ? null
-          : ensurePositiveNumber(item.totalCost, `Item ${index + 1} total cost`),
-    };
-  });
+          : ensureId(item.ingredientId, `Item ${index + 1} ingredient id`);
+      const productId =
+        item?.productId === undefined ||
+        item?.productId === null ||
+        item?.productId === ""
+          ? null
+          : ensureId(item.productId, `Item ${index + 1} product id`);
+
+      if (!ingredientId && !productId) {
+        throw new AppError(`Item ${index + 1} needs a product or ingredient`);
+      }
+
+      if (ingredientId && productId) {
+        throw new AppError(
+          `Item ${index + 1} cannot use product and ingredient together`,
+        );
+      }
+
+      return {
+        ingredientId,
+        productId,
+        purchasedQuantity: ensurePositiveNumber(
+          item?.purchasedQuantity,
+          `Item ${index + 1} purchased quantity`,
+        ),
+        purchasedUnit: validatePurchasedUnit(
+          item?.purchasedUnit,
+          `Item ${index + 1} purchased unit`,
+        ),
+        unitCost:
+          item?.unitCost === undefined ||
+          item?.unitCost === null ||
+          item?.unitCost === ""
+            ? 0
+            : ensureNonNegativeNumber(
+                item.unitCost,
+                `Item ${index + 1} unit cost`,
+              ),
+        totalCost:
+          item?.totalCost === undefined ||
+          item?.totalCost === null ||
+          item?.totalCost === ""
+            ? null
+            : ensureNonNegativeNumber(
+                item.totalCost,
+                `Item ${index + 1} total cost`,
+              ),
+      };
+    },
+  );
 
   return {
     supplierId: ensureId(body.supplierId, "Supplier id"),
@@ -87,9 +143,17 @@ const validateStockIntakePayload = (body = {}) => {
 
 const validateRecipePayload = (body = {}) => {
   const items = ensureArray(body.items, "Recipe items").map((item, index) => ({
-    ingredientId: ensureId(item?.ingredientId, `Recipe item ${index + 1} ingredient id`),
-    quantity: ensurePositiveNumber(item?.quantity, `Recipe item ${index + 1} quantity`),
-    unit: normalizeUnit(assertKnownUnit(item?.unit, `Recipe item ${index + 1} unit`)),
+    ingredientId: ensureId(
+      item?.ingredientId,
+      `Recipe item ${index + 1} ingredient id`,
+    ),
+    quantity: ensurePositiveNumber(
+      item?.quantity,
+      `Recipe item ${index + 1} quantity`,
+    ),
+    unit: normalizeUnit(
+      assertKnownUnit(item?.unit, `Recipe item ${index + 1} unit`),
+    ),
   }));
 
   return {
@@ -102,6 +166,7 @@ const validateRecipePayload = (body = {}) => {
 module.exports = {
   parsePageParams,
   validateCreateIngredientPayload,
+  validateUpdateIngredientPayload,
   validateRecipePayload,
   validateStockIntakePayload,
 };

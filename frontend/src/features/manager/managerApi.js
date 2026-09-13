@@ -189,6 +189,23 @@ export const createIngredient = async (token, payload) =>
     }),
   );
 
+export const updateIngredient = async (token, id, payload) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/ingredients/${id}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
+
+export const deleteIngredient = async (token, id) =>
+  unwrapApiData(
+    await apiRequest(`/inventory-ledger/ingredients/${id}`, {
+      method: "DELETE",
+      token,
+    }),
+  );
+
 export const getRecipes = async (token, params = {}, signal) =>
   unwrapApiData(
     await apiRequest(
@@ -484,12 +501,15 @@ export const downloadInvoicePdf = async (token, orderId) => {
 };
 
 export const downloadSupplierInvoicePdf = async (token, supplierOrderId) => {
-  const response = await fetch(buildApiUrl(`/supplier-orders/${supplierOrderId}/pdf`), {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
+  const response = await fetch(
+    buildApiUrl(`/supplier-orders/${supplierOrderId}/pdf`),
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     },
-  });
+  );
 
   if (!response.ok) {
     const error = new Error(await parseDownloadError(response));

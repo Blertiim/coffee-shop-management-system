@@ -7,6 +7,8 @@ import {
   buildRealtimeStreamUrl,
   createCategory,
   createIngredient,
+  updateIngredient,
+  deleteIngredient,
   createProduct,
   createSupplier,
   createSupplierOrder,
@@ -54,13 +56,19 @@ import {
 } from "./managerApi";
 
 const STOCK_INTAKE_ENABLED = true;
+// Receive Stock form is back on (2026-09) — the Supplier and Invoice Number
+// fields are hidden from the form itself (see below); a default supplier is
+// auto-selected in the background so saving still works.
+const RECEIVE_STOCK_ENABLED = true;
 
 const SECTIONS = [
   { key: "overview", label: "Dashboard" },
   { key: "products", label: "Products" },
   { key: "categories", label: "Categories" },
   { key: "stock", label: "Stock" },
-  ...(STOCK_INTAKE_ENABLED ? [{ key: "incoming", label: "Stock In" }] : []),
+  ...(STOCK_INTAKE_ENABLED
+    ? [{ key: "incoming", label: "Stock In & Recipes" }]
+    : []),
   { key: "employees", label: "Staff & Tables" },
   { key: "orders", label: "Orders" },
   { key: "reports", label: "Reports" },
@@ -83,8 +91,18 @@ const getStartOfWeekDate = () => {
 
 const REPORT_FILTER_PRESETS = [
   { key: "today", label: "Today", from: todayDate, to: todayDate },
-  { key: "yesterday", label: "Yesterday", from: yesterdayDate, to: yesterdayDate },
-  { key: "week", label: "This Week", from: getStartOfWeekDate(), to: todayDate },
+  {
+    key: "yesterday",
+    label: "Yesterday",
+    from: yesterdayDate,
+    to: yesterdayDate,
+  },
+  {
+    key: "week",
+    label: "This Week",
+    from: getStartOfWeekDate(),
+    to: todayDate,
+  },
   { key: "custom", label: "Custom", from: todayDate, to: todayDate },
 ];
 
@@ -135,7 +153,6 @@ const defaultSupplierInvoiceForm = {
 
 const defaultIngredientForm = {
   name: "",
-  sku: "",
   baseUnit: "g",
   minimumQuantity: "0",
 };
@@ -195,7 +212,9 @@ const LEDGER_UNITS = [
   { value: "paketa", label: "paketa" },
 ];
 
-const BASE_UNITS = LEDGER_UNITS.filter((unit) => ["g", "ml", "pcs"].includes(unit.value));
+const BASE_UNITS = LEDGER_UNITS.filter((unit) =>
+  ["g", "ml", "pcs"].includes(unit.value),
+);
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -268,7 +287,8 @@ const formatProductOption = (product) => {
 const getProductStockIngredient = (product, ingredientsList) =>
   product?.directStockIngredient ||
   ingredientsList.find(
-    (ingredient) => String(ingredient.id) === String(product?.directStockIngredientId),
+    (ingredient) =>
+      String(ingredient.id) === String(product?.directStockIngredientId),
   ) ||
   ingredientsList.find(
     (ingredient) =>
@@ -305,7 +325,8 @@ const formatStock = (product, ingredientsList = []) => {
 };
 
 const isRecipeManagedProduct = (product) => {
-  const text = `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
+  const text =
+    `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
 
   return (
     text.includes("coffee") ||
@@ -318,7 +339,9 @@ const isRecipeManagedProduct = (product) => {
 };
 
 const getProductAvailability = (product, recipesList, ingredientsList) => {
-  const recipe = recipesList.find((entry) => String(entry.productId) === String(product.id));
+  const recipe = recipesList.find(
+    (entry) => String(entry.productId) === String(product.id),
+  );
   const recipeItems = ensureArray(recipe?.items);
 
   if (!recipe || !recipe.isActive || recipeItems.length === 0) {
@@ -328,14 +351,17 @@ const getProductAvailability = (product, recipesList, ingredientsList) => {
   const itemAvailability = recipeItems.map((item) => {
     const ingredient =
       item.ingredient ||
-      ingredientsList.find((entry) => String(entry.id) === String(item.ingredientId));
+      ingredientsList.find(
+        (entry) => String(entry.id) === String(item.ingredientId),
+      );
     const quantityPerSale = Number(item.quantity || 0);
     const currentQuantity = Number(ingredient?.currentQuantity || 0);
 
     return {
       ingredient,
       quantityPerSale,
-      possibleSales: quantityPerSale > 0 ? Math.floor(currentQuantity / quantityPerSale) : 0,
+      possibleSales:
+        quantityPerSale > 0 ? Math.floor(currentQuantity / quantityPerSale) : 0,
     };
   });
 
@@ -346,10 +372,54 @@ const getProductAvailability = (product, recipesList, ingredientsList) => {
   };
 };
 
+// Real, per-product inventory mode — replaces any hardcoded "Recipe-driven" label.
+// One of: has an active recipe -> "Recipe", is linked to a direct-stock ingredient -> "Direct stock",
+// is a recipe-only category (coffee, ice cream, ...) with no recipe yet -> "Needs recipe",
+// otherwise a plain per-unit counter -> "Simple stock".
+const getInventoryModeLabel = (product, recipesList, ingredientsList) => {
+  const recipe = recipesList.find(
+    (entry) => String(entry.productId) === String(product.id),
+  );
+  const hasActiveRecipe = Boolean(
+    recipe?.isActive && ensureArray(recipe.items).length,
+  );
+
+  if (hasActiveRecipe) {
+    const availability = getProductAvailability(
+      product,
+      recipesList,
+      ingredientsList,
+    );
+    return {
+      text: availability
+        ? `Recipe · ${availability.available} can sell`
+        : "Recipe",
+      tone: availability && availability.available <= 0 ? "warn" : "normal",
+    };
+  }
+
+  if (product?.directStockIngredientId) {
+    const ingredient = ingredientsList.find(
+      (entry) => String(entry.id) === String(product.directStockIngredientId),
+    );
+    return {
+      text: `Direct stock${ingredient ? ` · ${ingredient.name}` : ""}`,
+      tone: "normal",
+    };
+  }
+
+  if (isRecipeManagedProduct(product)) {
+    return { text: "Needs recipe", tone: "warn" };
+  }
+
+  return { text: "Simple stock", tone: "normal" };
+};
+
 const getProductStockUnit = (product) => product?.stockUnit || "cope";
 
 const getDefaultPurchaseUnitForProduct = (product) =>
-  product?.unitsPerPackage && ["cope", "shishe"].includes(getProductStockUnit(product))
+  product?.unitsPerPackage &&
+  ["cope", "shishe"].includes(getProductStockUnit(product))
     ? "paketa"
     : getProductStockUnit(product);
 
@@ -358,16 +428,20 @@ const getDefaultStockUnitsPerPurchaseUnit = (product, purchaseUnit) =>
 
 const getDefaultStockQuantity = (product, purchaseUnit, quantity = "1") =>
   String(
-    Number(quantity || 0) * Number(getDefaultStockUnitsPerPurchaseUnit(product, purchaseUnit) || 1),
+    Number(quantity || 0) *
+      Number(getDefaultStockUnitsPerPurchaseUnit(product, purchaseUnit) || 1),
   );
 
 const calculateInvoiceItemStockQuantity = (item) =>
   Number(
-    item.stockQuantity || Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0),
+    item.stockQuantity ||
+      Number(item.quantity || 0) * Number(item.stockUnitsPerPurchaseUnit || 0),
   );
 
 const formatInvoiceItemStockImpact = (item, product) => {
-  const stockQuantity = Number(item.stockQuantity || calculateInvoiceItemStockQuantity(item));
+  const stockQuantity = Number(
+    item.stockQuantity || calculateInvoiceItemStockQuantity(item),
+  );
   const stockUnit = item.stockUnit || getProductStockUnit(product);
 
   return stockQuantity > 0 ? `${stockQuantity} ${stockUnit}` : `0 ${stockUnit}`;
@@ -395,21 +469,31 @@ const getDirectStockProducts = (productsList) => productsList;
 const resolveStockIntakeItem = (item, productsList, ingredientsList) => {
   const selectedProduct =
     item.sourceType === "product"
-      ? productsList.find((product) => String(product.id) === String(item.productId)) || null
+      ? productsList.find(
+          (product) => String(product.id) === String(item.productId),
+        ) || null
       : null;
   const selectedIngredient =
     selectedProduct?.directStockIngredient ||
-    ingredientsList.find((ingredient) => String(ingredient.id) === String(item.ingredientId)) ||
+    ingredientsList.find(
+      (ingredient) => String(ingredient.id) === String(item.ingredientId),
+    ) ||
     null;
-  const packageSize = Number(selectedProduct?.unitsPerPackage || DEFAULT_PACKAGE_SIZE);
+  const packageSize = Number(
+    selectedProduct?.unitsPerPackage || DEFAULT_PACKAGE_SIZE,
+  );
   const boughtQuantity = Number(item.purchasedQuantity || 0);
   const lineTotalInput = Number(item.unitCost || 0);
   const isPackagePurchase = item.purchasedUnit === "paketa";
   const baseQuantity =
-    isPackagePurchase && packageSize > 0 ? boughtQuantity * packageSize : boughtQuantity;
+    isPackagePurchase && packageSize > 0
+      ? boughtQuantity * packageSize
+      : boughtQuantity;
   const lineTotal = lineTotalInput;
-  const backendUnitCost = boughtQuantity > 0 ? lineTotal / boughtQuantity : lineTotalInput;
-  const stockBaseUnit = selectedIngredient?.baseUnit || (selectedProduct ? "pcs" : "");
+  const backendUnitCost =
+    boughtQuantity > 0 ? lineTotal / boughtQuantity : lineTotalInput;
+  const stockBaseUnit =
+    selectedIngredient?.baseUnit || (selectedProduct ? "pcs" : "");
 
   return {
     baseQuantity,
@@ -438,11 +522,17 @@ const buildGuestOrderUrl = (guestAccess) => {
     return "";
   }
 
-  if (typeof guestAccess.guestOrderUrl === "string" && guestAccess.guestOrderUrl.trim()) {
+  if (
+    typeof guestAccess.guestOrderUrl === "string" &&
+    guestAccess.guestOrderUrl.trim()
+  ) {
     return guestAccess.guestOrderUrl.trim();
   }
 
-  if (typeof guestAccess.localGuestOrderUrl === "string" && guestAccess.localGuestOrderUrl.trim()) {
+  if (
+    typeof guestAccess.localGuestOrderUrl === "string" &&
+    guestAccess.localGuestOrderUrl.trim()
+  ) {
     return guestAccess.localGuestOrderUrl.trim();
   }
 
@@ -454,7 +544,8 @@ const buildGuestOrderUrl = (guestAccess) => {
 };
 
 const statusClass = (status) => {
-  const normalized = typeof status === "string" ? status.trim().toLowerCase() : "";
+  const normalized =
+    typeof status === "string" ? status.trim().toLowerCase() : "";
   if (normalized === "paid") {
     return "border-emerald-400/30 bg-emerald-500/15 text-emerald-300";
   }
@@ -476,7 +567,10 @@ function BarRows({
   formatValue = (value) => `${formatMoney(value)} EUR`,
   getMetaText = null,
 }) {
-  const maxValue = Math.max(...rows.map((entry) => Number(entry[valueKey] || 0)), 1);
+  const maxValue = Math.max(
+    ...rows.map((entry) => Number(entry[valueKey] || 0)),
+    1,
+  );
 
   if (rows.length === 0) {
     return <p className="text-sm text-pos-muted">No data found.</p>;
@@ -486,18 +580,25 @@ function BarRows({
     <div className="space-y-2">
       {rows.map((entry) => {
         const value = Number(entry[valueKey] || 0);
-        const width = value <= 0 ? 0 : Math.max(8, Math.round((value / maxValue) * 100));
-        const metaText = typeof getMetaText === "function" ? getMetaText(entry) : "";
+        const width =
+          value <= 0 ? 0 : Math.max(8, Math.round((value / maxValue) * 100));
+        const metaText =
+          typeof getMetaText === "function" ? getMetaText(entry) : "";
 
         return (
-          <div key={entry[labelKey]} className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div
+            key={entry[labelKey]}
+            className="rounded-xl border border-white/10 bg-black/20 p-3"
+          >
             <div className="mb-2 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="m-0 text-sm font-medium text-white">
                   {formatLabel(entry[labelKey], entry)}
                 </p>
                 {metaText ? (
-                  <p className="m-0 mt-1 text-[11px] text-pos-muted">{metaText}</p>
+                  <p className="m-0 mt-1 text-[11px] text-pos-muted">
+                    {metaText}
+                  </p>
                 ) : null}
               </div>
               <span className="shrink-0 text-xs font-medium text-pos-text">
@@ -505,7 +606,10 @@ function BarRows({
               </span>
             </div>
             <div className="h-2 rounded-full bg-white/10">
-              <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${width}%` }} />
+              <div
+                className={`h-full rounded-full ${colorClass}`}
+                style={{ width: `${width}%` }}
+              />
             </div>
           </div>
         );
@@ -558,11 +662,16 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [categoryForm, setCategoryForm] = useState(defaultCategoryForm);
   const [editingWaiterId, setEditingWaiterId] = useState(null);
   const [waiterForm, setWaiterForm] = useState(defaultWaiterForm);
+  const [editingIngredientId, setEditingIngredientId] = useState(null);
   const [tableForm, setTableForm] = useState(defaultTableForm);
-  const [supplierInvoiceForm, setSupplierInvoiceForm] = useState(defaultSupplierInvoiceForm);
+  const [supplierInvoiceForm, setSupplierInvoiceForm] = useState(
+    defaultSupplierInvoiceForm,
+  );
   const [ingredientForm, setIngredientForm] = useState(defaultIngredientForm);
   const [recipeForm, setRecipeForm] = useState(defaultRecipeForm);
-  const [stockIntakeForm, setStockIntakeForm] = useState(defaultStockIntakeForm);
+  const [stockIntakeForm, setStockIntakeForm] = useState(
+    defaultStockIntakeForm,
+  );
   const [supplierForm, setSupplierForm] = useState(defaultSupplierForm);
 
   const refreshAll = () => setRefreshTick((value) => value + 1);
@@ -600,60 +709,88 @@ export default function ManagerDashboard({ session, onLogout }) {
           {
             key: "stats",
             label: "dashboard stats",
-            load: () => getManagerStats(session.token, filters, controller.signal),
+            load: () =>
+              getManagerStats(session.token, filters, controller.signal),
           },
           {
             key: "topProducts",
             label: "top products",
-            load: () => getTopProducts(session.token, filters, controller.signal),
+            load: () =>
+              getTopProducts(session.token, filters, controller.signal),
           },
           {
             key: "revenueTrend",
             label: "revenue trend",
-            load: () => getRevenueTrend(session.token, filters, controller.signal),
+            load: () =>
+              getRevenueTrend(session.token, filters, controller.signal),
           },
           {
             key: "waiterPerformance",
             label: "waiter ranking",
-            load: () => getWaiterPerformance(session.token, filters, controller.signal),
+            load: () =>
+              getWaiterPerformance(session.token, filters, controller.signal),
           },
           {
             key: "orders",
             label: "orders",
             load: () =>
-              getDashboardOrders(session.token, { ...filters, limit: 120 }, controller.signal),
+              getDashboardOrders(
+                session.token,
+                { ...filters, limit: 120 },
+                controller.signal,
+              ),
           },
           {
             key: "invoices",
             label: "invoices",
             load: () =>
-              getDashboardInvoices(session.token, { ...filters, limit: 120 }, controller.signal),
+              getDashboardInvoices(
+                session.token,
+                { ...filters, limit: 120 },
+                controller.signal,
+              ),
           },
           {
             key: "summary",
             label: "daily summary",
-            load: () => getDailySummary(session.token, { date: filters.from }, controller.signal),
+            load: () =>
+              getDailySummary(
+                session.token,
+                { date: filters.from },
+                controller.signal,
+              ),
           },
           {
             key: "lowStock",
             label: "stock alerts",
-            load: () => getLowStockProducts(session.token, { threshold: 5 }, controller.signal),
+            load: () =>
+              getLowStockProducts(
+                session.token,
+                { threshold: 5 },
+                controller.signal,
+              ),
           },
           {
             key: "advancedReport",
             label: "advanced report",
-            load: () => getAdvancedReport(session.token, filters, controller.signal),
+            load: () =>
+              getAdvancedReport(session.token, filters, controller.signal),
           },
           {
             key: "alerts",
             label: "system alerts",
             load: () =>
-              getSystemAlerts(session.token, { status: "open", limit: 20 }, controller.signal),
+              getSystemAlerts(
+                session.token,
+                { status: "open", limit: 20 },
+                controller.signal,
+              ),
           },
           {
             key: "auditTrail",
             label: "audit trail",
-            load: () => getAuditLogs(session.token, { limit: 16 }, controller.signal),
+            load: () =>
+              getAuditLogs(session.token, { limit: 16 }, controller.signal),
           },
           {
             key: "products",
@@ -675,27 +812,48 @@ export default function ManagerDashboard({ session, onLogout }) {
                 {
                   key: "supplierOrders",
                   label: "incoming invoices",
-                  load: () => getSupplierOrders(session.token, controller.signal),
+                  load: () =>
+                    getSupplierOrders(session.token, controller.signal),
                 },
                 {
                   key: "ingredients",
                   label: "ingredients",
-                  load: () => getIngredients(session.token, { pageSize: 100 }, controller.signal),
+                  load: () =>
+                    getIngredients(
+                      session.token,
+                      { pageSize: 100 },
+                      controller.signal,
+                    ),
                 },
                 {
                   key: "recipes",
                   label: "recipes",
-                  load: () => getRecipes(session.token, { pageSize: 100 }, controller.signal),
+                  load: () =>
+                    getRecipes(
+                      session.token,
+                      { pageSize: 100 },
+                      controller.signal,
+                    ),
                 },
                 {
                   key: "stockIntakes",
                   label: "stock intakes",
-                  load: () => getStockIntakes(session.token, { pageSize: 50 }, controller.signal),
+                  load: () =>
+                    getStockIntakes(
+                      session.token,
+                      { pageSize: 50 },
+                      controller.signal,
+                    ),
                 },
                 {
                   key: "stockMovements",
                   label: "stock movements",
-                  load: () => getStockMovements(session.token, { pageSize: 50 }, controller.signal),
+                  load: () =>
+                    getStockMovements(
+                      session.token,
+                      { pageSize: 50 },
+                      controller.signal,
+                    ),
                 },
               ]
             : []),
@@ -710,14 +868,17 @@ export default function ManagerDashboard({ session, onLogout }) {
             load: () => getTables(session.token, controller.signal),
           },
         ];
-        const results = await Promise.allSettled(requests.map((request) => request.load()));
+        const results = await Promise.allSettled(
+          requests.map((request) => request.load()),
+        );
 
         if (!mounted) {
           return;
         }
 
         const authFailure = results.find(
-          (result) => result.status === "rejected" && isAuthError(result.reason),
+          (result) =>
+            result.status === "rejected" && isAuthError(result.reason),
         );
 
         if (authFailure) {
@@ -726,14 +887,19 @@ export default function ManagerDashboard({ session, onLogout }) {
         }
 
         const getResultValue = (key, fallbackValue) => {
-          const requestIndex = requests.findIndex((request) => request.key === key);
+          const requestIndex = requests.findIndex(
+            (request) => request.key === key,
+          );
           const result = results[requestIndex];
           return result?.status === "fulfilled" ? result.value : fallbackValue;
         };
 
         const failedRequests = results
           .map((result, index) => ({ result, request: requests[index] }))
-          .filter(({ result }) => result.status === "rejected" && !isAbortError(result.reason));
+          .filter(
+            ({ result }) =>
+              result.status === "rejected" && !isAbortError(result.reason),
+          );
 
         const nextStats = getResultValue("stats", null);
         const nextTopProducts = getResultValue("topProducts", []);
@@ -742,10 +908,16 @@ export default function ManagerDashboard({ session, onLogout }) {
         const nextOrders = getResultValue("orders", null);
         const nextInvoices = getResultValue("invoices", null);
         const nextSummary = getResultValue("summary", null);
-        const nextLowStock = getResultValue("lowStock", { products: [], threshold: 5 });
+        const nextLowStock = getResultValue("lowStock", {
+          products: [],
+          threshold: 5,
+        });
         const nextAdvancedReport = getResultValue("advancedReport", null);
         const nextAlerts = getResultValue("alerts", { alerts: [], count: 0 });
-        const nextAuditTrail = getResultValue("auditTrail", { logs: [], count: 0 });
+        const nextAuditTrail = getResultValue("auditTrail", {
+          logs: [],
+          count: 0,
+        });
         const nextProducts = getResultValue("products", []);
         const nextCategories = getResultValue("categories", []);
         const nextSuppliers = getResultValue("suppliers", []);
@@ -753,7 +925,9 @@ export default function ManagerDashboard({ session, onLogout }) {
         const nextIngredients = getResultValue("ingredients", { items: [] });
         const nextRecipes = getResultValue("recipes", { items: [] });
         const nextStockIntakes = getResultValue("stockIntakes", { items: [] });
-        const nextStockMovements = getResultValue("stockMovements", { items: [] });
+        const nextStockMovements = getResultValue("stockMovements", {
+          items: [],
+        });
         const nextWaiters = getResultValue("waiters", []);
         const nextTables = getResultValue("tables", []);
 
@@ -780,17 +954,25 @@ export default function ManagerDashboard({ session, onLogout }) {
         setSupplierOrders(ensureArray(nextSupplierOrders));
         setIngredients(ensureArray(nextIngredients?.items || nextIngredients));
         setRecipes(ensureArray(nextRecipes?.items || nextRecipes));
-        setStockIntakes(ensureArray(nextStockIntakes?.items || nextStockIntakes));
-        setStockMovements(ensureArray(nextStockMovements?.items || nextStockMovements));
+        setStockIntakes(
+          ensureArray(nextStockIntakes?.items || nextStockIntakes),
+        );
+        setStockMovements(
+          ensureArray(nextStockMovements?.items || nextStockMovements),
+        );
         setWaiters(ensureArray(nextWaiters));
         setTables(ensureArray(nextTables));
 
         if (failedRequests.length) {
-          const visibleLabels = failedRequests.slice(0, 3).map(({ request }) => request.label);
+          const visibleLabels = failedRequests
+            .slice(0, 3)
+            .map(({ request }) => request.label);
           const extraCount = failedRequests.length - visibleLabels.length;
           const suffix = extraCount > 0 ? ` and ${extraCount} more` : "";
 
-          setError(`Some manager data could not load: ${visibleLabels.join(", ")}${suffix}.`);
+          setError(
+            `Some manager data could not load: ${visibleLabels.join(", ")}${suffix}.`,
+          );
         }
       } catch (requestError) {
         if (!mounted || isAbortError(requestError)) {
@@ -819,10 +1001,19 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const overviewCards = useMemo(
     () => [
-      { label: "Total Revenue", value: `${formatMoney(stats?.totalRevenue)} EUR` },
-      { label: "Today Revenue", value: `${formatMoney(stats?.todayRevenue)} EUR` },
+      {
+        label: "Total Revenue",
+        value: `${formatMoney(stats?.totalRevenue)} EUR`,
+      },
+      {
+        label: "Today Revenue",
+        value: `${formatMoney(stats?.todayRevenue)} EUR`,
+      },
       { label: "Orders Today", value: stats?.todayOrders || 0 },
-      { label: "Avg Order", value: `${formatMoney(stats?.averageOrderValue)} EUR` },
+      {
+        label: "Avg Order",
+        value: `${formatMoney(stats?.averageOrderValue)} EUR`,
+      },
       { label: "Open Orders", value: stats?.totalPendingOrders || 0 },
       { label: "Active Tables", value: stats?.activeTables || 0 },
       { label: "Open Alerts", value: systemAlerts?.count || 0 },
@@ -844,7 +1035,10 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const supplierInvoiceTotal = useMemo(
     () =>
-      supplierInvoiceForm.items.reduce((sum, item) => sum + calculateInvoiceItemLineTotal(item), 0),
+      supplierInvoiceForm.items.reduce(
+        (sum, item) => sum + calculateInvoiceItemLineTotal(item),
+        0,
+      ),
     [supplierInvoiceForm.items],
   );
 
@@ -886,7 +1080,10 @@ export default function ManagerDashboard({ session, onLogout }) {
     [selectedQrTableId, tables],
   );
 
-  const guestOrderUrl = useMemo(() => buildGuestOrderUrl(guestAccess), [guestAccess]);
+  const guestOrderUrl = useMemo(
+    () => buildGuestOrderUrl(guestAccess),
+    [guestAccess],
+  );
 
   useEffect(() => {
     if (!waiters.length) {
@@ -920,12 +1117,17 @@ export default function ManagerDashboard({ session, onLogout }) {
 
       let didChangeItem = false;
       const nextItems = current.items.map((item) => {
-        const nextProductId = item.productId || (products[0]?.id ? String(products[0].id) : "");
+        const nextProductId =
+          item.productId || (products[0]?.id ? String(products[0].id) : "");
         const selectedProduct =
-          products.find((product) => String(product.id) === String(nextProductId)) || null;
-        const nextUnit = item.unit || getDefaultPurchaseUnitForProduct(selectedProduct);
+          products.find(
+            (product) => String(product.id) === String(nextProductId),
+          ) || null;
+        const nextUnit =
+          item.unit || getDefaultPurchaseUnitForProduct(selectedProduct);
         const nextStockQuantity =
-          item.stockQuantity || getDefaultStockQuantity(selectedProduct, nextUnit, item.quantity);
+          item.stockQuantity ||
+          getDefaultStockQuantity(selectedProduct, nextUnit, item.quantity);
 
         if (
           nextProductId !== item.productId ||
@@ -966,22 +1168,29 @@ export default function ManagerDashboard({ session, onLogout }) {
           item.sourceType || (directProducts.length ? "product" : "ingredient");
         const nextProductId =
           nextSourceType === "product"
-            ? item.productId || (directProducts[0]?.id ? String(directProducts[0].id) : "")
+            ? item.productId ||
+              (directProducts[0]?.id ? String(directProducts[0].id) : "")
             : "";
         const selectedProduct =
-          directProducts.find((product) => String(product.id) === String(nextProductId)) || null;
+          directProducts.find(
+            (product) => String(product.id) === String(nextProductId),
+          ) || null;
         const nextIngredientId =
           nextSourceType === "product"
             ? selectedProduct?.directStockIngredientId
               ? String(selectedProduct.directStockIngredientId)
               : ""
-            : item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
+            : item.ingredientId ||
+              (ingredients[0]?.id ? String(ingredients[0].id) : "");
         const selectedIngredient =
-          ingredients.find((ingredient) => String(ingredient.id) === String(nextIngredientId)) ||
-          null;
+          ingredients.find(
+            (ingredient) => String(ingredient.id) === String(nextIngredientId),
+          ) || null;
         const nextUnit =
           item.purchasedUnit ||
-          (nextSourceType === "product" && selectedProduct?.unitsPerPackage ? "paketa" : null) ||
+          (nextSourceType === "product" && selectedProduct?.unitsPerPackage
+            ? "paketa"
+            : null) ||
           (selectedIngredient?.baseUnit === "pcs" ? "pcs" : "kg");
 
         if (
@@ -1017,10 +1226,12 @@ export default function ManagerDashboard({ session, onLogout }) {
       let didChangeItem = false;
       const nextItems = current.items.map((item) => {
         const nextIngredientId =
-          item.ingredientId || (ingredients[0]?.id ? String(ingredients[0].id) : "");
+          item.ingredientId ||
+          (ingredients[0]?.id ? String(ingredients[0].id) : "");
         const selectedIngredient =
-          ingredients.find((ingredient) => String(ingredient.id) === String(nextIngredientId)) ||
-          null;
+          ingredients.find(
+            (ingredient) => String(ingredient.id) === String(nextIngredientId),
+          ) || null;
         const nextUnit = item.unit || selectedIngredient?.baseUnit || "g";
 
         if (nextIngredientId !== item.ingredientId || nextUnit !== item.unit) {
@@ -1034,7 +1245,8 @@ export default function ManagerDashboard({ session, onLogout }) {
         };
       });
 
-      const nextProductId = current.productId || (products[0]?.id ? String(products[0].id) : "");
+      const nextProductId =
+        current.productId || (products[0]?.id ? String(products[0].id) : "");
 
       if (nextProductId === current.productId && !didChangeItem) {
         return current;
@@ -1086,7 +1298,9 @@ export default function ManagerDashboard({ session, onLogout }) {
             return;
           }
 
-          setError(requestError.message || "Failed to prepare guest QR access.");
+          setError(
+            requestError.message || "Failed to prepare guest QR access.",
+          );
         }
       })
       .finally(() => {
@@ -1168,7 +1382,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const toggleAssignedTable = (tableId) => {
     setAssignedTableIds((current) =>
-      current.includes(tableId) ? current.filter((id) => id !== tableId) : [...current, tableId],
+      current.includes(tableId)
+        ? current.filter((id) => id !== tableId)
+        : [...current, tableId],
     );
   };
 
@@ -1183,7 +1399,9 @@ export default function ManagerDashboard({ session, onLogout }) {
       price: String(product.price ?? ""),
       stock: String(product.stock ?? ""),
       stockUnit: product.stockUnit || "cope",
-      unitsPerPackage: product.unitsPerPackage ? String(product.unitsPerPackage) : "",
+      unitsPerPackage: product.unitsPerPackage
+        ? String(product.unitsPerPackage)
+        : "",
       directStockIngredientId: product.directStockIngredientId
         ? String(product.directStockIngredientId)
         : "",
@@ -1289,6 +1507,31 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const resetIngredientForm = () => {
     setIngredientForm(defaultIngredientForm);
+    setEditingIngredientId(null);
+  };
+
+  const beginEditIngredient = (ingredient) => {
+    setEditingIngredientId(ingredient.id);
+    setIngredientForm({
+      name: ingredient.name || "",
+      baseUnit: ingredient.baseUnit || "g",
+      minimumQuantity: String(ingredient.minimumQuantity ?? "0"),
+    });
+  };
+
+  const handleDeleteIngredient = async (ingredient) => {
+    await runAction(async () => {
+      await deleteIngredient(session.token, ingredient.id);
+      setIngredients((current) =>
+        current.map((entry) =>
+          entry.id === ingredient.id ? { ...entry, isActive: false } : entry,
+        ),
+      );
+
+      if (editingIngredientId === ingredient.id) {
+        resetIngredientForm();
+      }
+    }, "Ingredient deleted.");
   };
 
   const resetRecipeForm = () => {
@@ -1310,7 +1553,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     const product = getDirectStockProducts(products)[0] || null;
     const ingredient =
       product?.directStockIngredient ||
-      ingredients.find((entry) => entry.id === product?.directStockIngredientId) ||
+      ingredients.find(
+        (entry) => entry.id === product?.directStockIngredientId,
+      ) ||
       ingredients[0] ||
       null;
     setStockIntakeForm({
@@ -1346,7 +1591,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     const product = getDirectStockProducts(products)[0] || null;
     const ingredient =
       product?.directStockIngredient ||
-      ingredients.find((entry) => entry.id === product?.directStockIngredientId) ||
+      ingredients.find(
+        (entry) => entry.id === product?.directStockIngredientId,
+      ) ||
       ingredients[0] ||
       null;
     setStockIntakeForm((current) => ({
@@ -1373,7 +1620,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     const printWindow = window.open("", "_blank", "width=900,height=700");
 
     if (!printWindow) {
-      setError("Popup blocked. Allow popups to print the stock intake invoice.");
+      setError(
+        "Popup blocked. Allow popups to print the stock intake invoice.",
+      );
       return;
     }
 
@@ -1514,9 +1763,12 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const onProductSubmit = async (event) => {
     event.preventDefault();
-    const normalizedStock = productForm.stock === "" ? undefined : Number(productForm.stock);
+    const normalizedStock =
+      productForm.stock === "" ? undefined : Number(productForm.stock);
     const normalizedUnitsPerPackage =
-      productForm.unitsPerPackage === "" ? null : Number(productForm.unitsPerPackage);
+      productForm.unitsPerPackage === ""
+        ? null
+        : Number(productForm.unitsPerPackage);
     const normalizedCategoryId =
       productForm.categoryId === "uncategorized"
         ? null
@@ -1536,7 +1788,9 @@ export default function ManagerDashboard({ session, onLogout }) {
       imageUrl: productForm.imageUrl || null,
       description: productForm.description || null,
       isAvailable: Boolean(productForm.isAvailable),
-      ...(normalizedCategoryId !== undefined ? { categoryId: normalizedCategoryId } : {}),
+      ...(normalizedCategoryId !== undefined
+        ? { categoryId: normalizedCategoryId }
+        : {}),
       ...(normalizedStock !== undefined ? { stock: normalizedStock } : {}),
     };
 
@@ -1558,18 +1812,37 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     const payload = {
       name: ingredientForm.name.trim(),
-      sku: ingredientForm.sku || null,
       baseUnit: ingredientForm.baseUnit,
       minimumQuantity: Number(ingredientForm.minimumQuantity || 0),
     };
 
-    await runAction(async () => {
-      const ingredient = await createIngredient(session.token, payload);
-      setIngredients((current) =>
-        [...current, ingredient].sort((left, right) => left.name.localeCompare(right.name)),
-      );
-      resetIngredientForm();
-    }, "Ingredient created.");
+    await runAction(
+      async () => {
+        if (editingIngredientId) {
+          const ingredient = await updateIngredient(
+            session.token,
+            editingIngredientId,
+            payload,
+          );
+          setIngredients((current) =>
+            current.map((entry) =>
+              entry.id === ingredient.id ? ingredient : entry,
+            ),
+          );
+          resetIngredientForm();
+          return;
+        }
+
+        const ingredient = await createIngredient(session.token, payload);
+        setIngredients((current) =>
+          [...current, ingredient].sort((left, right) =>
+            left.name.localeCompare(right.name),
+          ),
+        );
+        resetIngredientForm();
+      },
+      editingIngredientId ? "Ingredient updated." : "Ingredient created.",
+    );
   };
 
   const onRecipeSubmit = async (event) => {
@@ -1582,7 +1855,8 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     if (
       recipeForm.items.some(
-        (item) => !item.ingredientId || Number(item.quantity || 0) <= 0 || !item.unit,
+        (item) =>
+          !item.ingredientId || Number(item.quantity || 0) <= 0 || !item.unit,
       )
     ) {
       setError("Every recipe item needs an ingredient, quantity, and unit.");
@@ -1627,13 +1901,13 @@ export default function ManagerDashboard({ session, onLogout }) {
         return (
           !hasStockTarget ||
           Number(item.purchasedQuantity || 0) <= 0 ||
-          Number(item.unitCost || 0) <= 0 ||
+          Number(item.unitCost || 0) < 0 ||
           !item.purchasedUnit
         );
       })
     ) {
       setError(
-        "Every stock intake item needs a product/ingredient, quantity, unit, and total cost.",
+        "Every stock intake item needs a product/ingredient, quantity, and unit.",
       );
       return;
     }
@@ -1676,7 +1950,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
         if (updatedIngredients.length) {
           setIngredients((current) => {
-            const nextById = new Map(current.map((ingredient) => [ingredient.id, ingredient]));
+            const nextById = new Map(
+              current.map((ingredient) => [ingredient.id, ingredient]),
+            );
 
             updatedIngredients.forEach((ingredient) => {
               nextById.set(ingredient.id, ingredient);
@@ -1712,7 +1988,8 @@ export default function ManagerDashboard({ session, onLogout }) {
 
             return {
               ...product,
-              directStockIngredientId: product.directStockIngredientId || linkedIngredient.id,
+              directStockIngredientId:
+                product.directStockIngredientId || linkedIngredient.id,
               directStockIngredient: linkedIngredient,
             };
           }),
@@ -1755,7 +2032,8 @@ export default function ManagerDashboard({ session, onLogout }) {
     if (
       supplierInvoiceForm.items.some(
         (item) =>
-          !Number.isInteger(Number(item.quantity)) || !Number.isInteger(Number(item.stockQuantity)),
+          !Number.isInteger(Number(item.quantity)) ||
+          !Number.isInteger(Number(item.stockQuantity)),
       )
     ) {
       setError("Purchase quantity and stock quantity must be whole numbers.");
@@ -1773,7 +2051,9 @@ export default function ManagerDashboard({ session, onLogout }) {
       items: supplierInvoiceForm.items.map((item) => ({
         productId: Number(item.productId),
         quantity: Number(item.quantity),
-        unitPrice: Number((Number(item.unitPrice) / Number(item.quantity)).toFixed(4)),
+        unitPrice: Number(
+          (Number(item.unitPrice) / Number(item.quantity)).toFixed(4),
+        ),
         unit: item.unit || "cope",
         stockQuantity: calculateInvoiceItemStockQuantity(item),
       })),
@@ -1787,13 +2067,17 @@ export default function ManagerDashboard({ session, onLogout }) {
           current.map((product) => {
             const receivedItem =
               supplierOrder.status === "delivered"
-                ? ensureArray(supplierOrder.items).find((item) => item.productId === product.id)
+                ? ensureArray(supplierOrder.items).find(
+                    (item) => item.productId === product.id,
+                  )
                 : null;
 
             return receivedItem
               ? {
                   ...product,
-                  stock: Number(product.stock || 0) + Number(receivedItem.stockQuantity || 0),
+                  stock:
+                    Number(product.stock || 0) +
+                    Number(receivedItem.stockQuantity || 0),
                 }
               : product;
           }),
@@ -1815,9 +2099,13 @@ export default function ManagerDashboard({ session, onLogout }) {
 
   const markSupplierInvoiceDelivered = async (supplierOrder) => {
     await runAction(async () => {
-      const updatedSupplierOrder = await updateSupplierOrder(session.token, supplierOrder.id, {
-        status: "delivered",
-      });
+      const updatedSupplierOrder = await updateSupplierOrder(
+        session.token,
+        supplierOrder.id,
+        {
+          status: "delivered",
+        },
+      );
 
       setSupplierOrders((current) =>
         current.map((entry) =>
@@ -1833,7 +2121,9 @@ export default function ManagerDashboard({ session, onLogout }) {
           return receivedItem
             ? {
                 ...product,
-                stock: Number(product.stock || 0) + Number(receivedItem.stockQuantity || 0),
+                stock:
+                  Number(product.stock || 0) +
+                  Number(receivedItem.stockQuantity || 0),
               }
             : product;
         }),
@@ -1885,11 +2175,17 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(
       async () => {
         if (editingCategoryId) {
-          const updatedCategory = await updateCategory(session.token, editingCategoryId, payload);
+          const updatedCategory = await updateCategory(
+            session.token,
+            editingCategoryId,
+            payload,
+          );
           setCategories((current) =>
             sortCategoriesByNewest(
               current.map((entry) =>
-                entry.id === editingCategoryId ? updatedCategory || entry : entry,
+                entry.id === editingCategoryId
+                  ? updatedCategory || entry
+                  : entry,
               ),
             ),
           );
@@ -1909,7 +2205,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(
       async () => {
         await deleteCategory(session.token, category.id);
-        setCategories((current) => current.filter((entry) => entry.id !== category.id));
+        setCategories((current) =>
+          current.filter((entry) => entry.id !== category.id),
+        );
         setProducts((current) =>
           current.map((product) =>
             product.categoryId === category.id
@@ -1926,14 +2224,18 @@ export default function ManagerDashboard({ session, onLogout }) {
           resetCategoryForm();
         }
       },
-      productCount > 0 ? "Category deleted. Products moved to Uncategorized." : "Category deleted.",
+      productCount > 0
+        ? "Category deleted. Products moved to Uncategorized."
+        : "Category deleted.",
     );
   };
 
   const handleDeleteProduct = async (product) => {
     await runAction(async () => {
       await deleteProduct(session.token, product.id);
-      setProducts((current) => current.filter((entry) => entry.id !== product.id));
+      setProducts((current) =>
+        current.filter((entry) => entry.id !== product.id),
+      );
 
       if (editingProductId === product.id) {
         resetProductForm();
@@ -1980,7 +2282,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(async () => {
       const createdTable = await createTable(session.token, payload);
       setTables((current) =>
-        [...current, createdTable].sort((left, right) => left.number - right.number),
+        [...current, createdTable].sort(
+          (left, right) => left.number - right.number,
+        ),
       );
       resetTableForm();
     }, "Table created.");
@@ -2017,7 +2321,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(async () => {
       const response = await deleteWaiter(session.token, waiter.id);
 
-      setWaiters((current) => current.filter((entry) => entry.id !== waiter.id));
+      setWaiters((current) =>
+        current.filter((entry) => entry.id !== waiter.id),
+      );
       setTables((current) =>
         current.map((table) =>
           table.assignedWaiterId === waiter.id
@@ -2030,11 +2336,14 @@ export default function ManagerDashboard({ session, onLogout }) {
         ),
       );
 
-      setSelectedWaiterForTables((current) => (current === waiter.id ? null : current));
+      setSelectedWaiterForTables((current) =>
+        current === waiter.id ? null : current,
+      );
       setAssignedTableIds((current) =>
         current.filter(
           (tableId) =>
-            !response?.unassignedTableIds || !response.unassignedTableIds.includes(tableId),
+            !response?.unassignedTableIds ||
+            !response.unassignedTableIds.includes(tableId),
         ),
       );
       resetWaiterForm();
@@ -2045,8 +2354,12 @@ export default function ManagerDashboard({ session, onLogout }) {
     await runAction(async () => {
       await deleteTable(session.token, table.id);
       setTables((current) => current.filter((entry) => entry.id !== table.id));
-      setAssignedTableIds((current) => current.filter((tableId) => tableId !== table.id));
-      setSelectedQrTableId((current) => (current === table.id ? null : current));
+      setAssignedTableIds((current) =>
+        current.filter((tableId) => tableId !== table.id),
+      );
+      setSelectedQrTableId((current) =>
+        current === table.id ? null : current,
+      );
     }, `Table ${table.number} removed.`);
   };
 
@@ -2071,7 +2384,10 @@ export default function ManagerDashboard({ session, onLogout }) {
     }
 
     await runAction(async () => {
-      const payload = await rotateGuestQrAccess(session.token, selectedQrTableId);
+      const payload = await rotateGuestQrAccess(
+        session.token,
+        selectedQrTableId,
+      );
       setGuestAccess(payload);
     }, "Guest QR token rotated.");
   };
@@ -2132,7 +2448,9 @@ export default function ManagerDashboard({ session, onLogout }) {
         <aside className="pos-panel-soft flex flex-col gap-3 p-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
             <span className="pos-badge">Manager</span>
-            <h2 className="mt-3 text-lg font-bold text-white">{session.user?.fullName}</h2>
+            <h2 className="mt-3 text-lg font-bold text-white">
+              {session.user?.fullName}
+            </h2>
             <p className="mt-1 text-xs uppercase tracking-wide text-pos-muted">
               {String(session.user?.role || "").toUpperCase()}
             </p>
@@ -2156,10 +2474,18 @@ export default function ManagerDashboard({ session, onLogout }) {
           </nav>
 
           <div className="mt-auto grid gap-2">
-            <button className="pos-button pos-button-muted" type="button" onClick={refreshAll}>
+            <button
+              className="pos-button pos-button-muted"
+              type="button"
+              onClick={refreshAll}
+            >
               Refresh
             </button>
-            <button className="pos-button pos-button-danger" type="button" onClick={onLogout}>
+            <button
+              className="pos-button pos-button-danger"
+              type="button"
+              onClick={onLogout}
+            >
               Logout
             </button>
           </div>
@@ -2170,9 +2496,12 @@ export default function ManagerDashboard({ session, onLogout }) {
             <div>
               <h1 className="pos-title">Manager Dashboard</h1>
               <p className="pos-subtitle mt-2">
-                Full control over operations, products, staff, tables, and date-based sales.
+                Full control over operations, products, staff, tables, and
+                date-based sales.
               </p>
-              <p className="mt-1 text-xs font-medium text-pos-muted">Today: {currentDateLabel}</p>
+              <p className="mt-1 text-xs font-medium text-pos-muted">
+                Today: {currentDateLabel}
+              </p>
             </div>
 
             <div className="flex flex-wrap items-end gap-2">
@@ -2198,7 +2527,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <input
                   type="date"
                   value={filters.from}
-                  onChange={(event) => onChangeCustomFilterDate("from", event.target.value)}
+                  onChange={(event) =>
+                    onChangeCustomFilterDate("from", event.target.value)
+                  }
                   className="mt-1 block rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                 />
               </label>
@@ -2207,7 +2538,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <input
                   type="date"
                   value={filters.to}
-                  onChange={(event) => onChangeCustomFilterDate("to", event.target.value)}
+                  onChange={(event) =>
+                    onChangeCustomFilterDate("to", event.target.value)
+                  }
                   className="mt-1 block rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                 />
               </label>
@@ -2230,19 +2563,28 @@ export default function ManagerDashboard({ session, onLogout }) {
             <section className="grid min-h-0 grid-cols-1 gap-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {overviewCards.map((card) => (
-                  <article key={card.label} className="pos-panel rounded-xl p-4">
+                  <article
+                    key={card.label}
+                    className="pos-panel rounded-xl p-4"
+                  >
                     <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
                       {card.label}
                     </p>
-                    <p className="m-0 mt-2 text-2xl font-bold text-white">{card.value}</p>
+                    <p className="m-0 mt-2 text-2xl font-bold text-white">
+                      {card.value}
+                    </p>
                   </article>
                 ))}
               </div>
 
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Daily Revenue (7 days)</h3>
-                  <p className="mb-3 mt-1 text-xs text-pos-muted">Paid orders trend</p>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Daily Revenue (7 days)
+                  </h3>
+                  <p className="mb-3 mt-1 text-xs text-pos-muted">
+                    Paid orders trend
+                  </p>
                   <BarRows
                     rows={revenueTrend}
                     labelKey="date"
@@ -2256,8 +2598,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Sales Per Waiter</h3>
-                  <p className="mb-3 mt-1 text-xs text-pos-muted">Ranking by sales</p>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Sales Per Waiter
+                  </h3>
+                  <p className="mb-3 mt-1 text-xs text-pos-muted">
+                    Ranking by sales
+                  </p>
                   <BarRows
                     rows={waiterPerformance}
                     labelKey="waiterName"
@@ -2270,15 +2616,22 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Top Selling Products</h3>
-                  <p className="mb-3 mt-1 text-xs text-pos-muted">Based on paid orders</p>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Top Selling Products
+                  </h3>
+                  <p className="mb-3 mt-1 text-xs text-pos-muted">
+                    Based on paid orders
+                  </p>
                   {topProducts.length === 0 ? (
                     <p className="text-sm text-pos-muted">No paid sales yet.</p>
                   ) : (
                     <div className="space-y-2">
                       {topProducts.slice(0, 5).map((entry, index) => (
                         <div
-                          key={entry.product?.id || `${entry.product?.name}-${index}`}
+                          key={
+                            entry.product?.id ||
+                            `${entry.product?.name}-${index}`
+                          }
                           className="rounded-xl border border-white/10 bg-black/20 p-3"
                         >
                           <div className="flex items-center justify-between gap-3">
@@ -2304,9 +2657,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <article className="pos-panel rounded-xl p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="m-0 text-base font-semibold text-white">System Alerts</h3>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        System Alerts
+                      </h3>
                       <p className="mb-3 mt-1 text-xs text-pos-muted">
-                        Automatic inventory alerts when stock drops below minimum.
+                        Automatic inventory alerts when stock drops below
+                        minimum.
                       </p>
                     </div>
                     <span
@@ -2322,7 +2678,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                   <div className="space-y-2">
                     {ensureArray(systemAlerts?.alerts).length === 0 ? (
-                      <p className="text-sm text-pos-muted">No active system alerts.</p>
+                      <p className="text-sm text-pos-muted">
+                        No active system alerts.
+                      </p>
                     ) : (
                       ensureArray(systemAlerts?.alerts)
                         .slice(0, 6)
@@ -2332,12 +2690,16 @@ export default function ManagerDashboard({ session, onLogout }) {
                             className="rounded-xl border border-orange-300/25 bg-orange-500/10 p-3"
                           >
                             <div className="flex items-center justify-between gap-3">
-                              <p className="m-0 text-sm font-semibold text-white">{alert.title}</p>
+                              <p className="m-0 text-sm font-semibold text-white">
+                                {alert.title}
+                              </p>
                               <span className="text-xs uppercase tracking-wide text-orange-200">
                                 {alert.severity}
                               </span>
                             </div>
-                            <p className="m-0 mt-1 text-xs text-orange-100/85">{alert.message}</p>
+                            <p className="m-0 mt-1 text-xs text-orange-100/85">
+                              {alert.message}
+                            </p>
                             <p className="m-0 mt-2 text-[11px] text-orange-100/70">
                               {formatDateTime(alert.createdAt)}
                             </p>
@@ -2350,7 +2712,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <article className="pos-panel rounded-xl p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="m-0 text-base font-semibold text-white">Audit Trail</h3>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        Audit Trail
+                      </h3>
                       <p className="mb-3 mt-1 text-xs text-pos-muted">
                         Secure log of staff actions, edits, and POS activity.
                       </p>
@@ -2368,7 +2732,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                   <div className="space-y-2">
                     {ensureArray(auditTrail?.logs).length === 0 ? (
-                      <p className="text-sm text-pos-muted">No audit events captured yet.</p>
+                      <p className="text-sm text-pos-muted">
+                        No audit events captured yet.
+                      </p>
                     ) : (
                       ensureArray(auditTrail?.logs)
                         .slice(0, 8)
@@ -2385,7 +2751,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 {entry.statusCode}
                               </span>
                             </div>
-                            <p className="m-0 mt-1 text-xs text-pos-muted">{entry.action}</p>
+                            <p className="m-0 mt-1 text-xs text-pos-muted">
+                              {entry.action}
+                            </p>
                             <p className="m-0 mt-2 text-[11px] text-pos-muted">
                               {formatDateTime(entry.createdAt)}
                             </p>
@@ -2410,14 +2778,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                     placeholder="Name"
                     value={productForm.name}
                     onChange={(event) =>
-                      setProductForm((current) => ({ ...current, name: event.target.value }))
+                      setProductForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   />
                   <select
                     value={productForm.categoryId}
                     onChange={(event) =>
-                      setProductForm((current) => ({ ...current, categoryId: event.target.value }))
+                      setProductForm((current) => ({
+                        ...current,
+                        categoryId: event.target.value,
+                      }))
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   >
@@ -2438,7 +2812,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Price"
                       value={productForm.price}
                       onChange={(event) =>
-                        setProductForm((current) => ({ ...current, price: event.target.value }))
+                        setProductForm((current) => ({
+                          ...current,
+                          price: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
@@ -2475,19 +2852,26 @@ export default function ManagerDashboard({ session, onLogout }) {
                         .map((ingredient) => (
                           <option key={ingredient.id} value={ingredient.id}>
                             {ingredient.name} |{" "}
-                            {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
+                            {formatQuantity(
+                              ingredient.currentQuantity,
+                              ingredient.baseUnit,
+                            )}
                           </option>
                         ))}
                     </select>
                     <span className="text-[11px] normal-case tracking-normal text-pos-muted">
-                      For direct sale items like orange juice, cola, water, cans, and snacks.
+                      For direct sale items like orange juice, cola, water,
+                      cans, and snacks.
                     </span>
                   </label>
                   <input
                     placeholder="Image URL"
                     value={productForm.imageUrl}
                     onChange={(event) =>
-                      setProductForm((current) => ({ ...current, imageUrl: event.target.value }))
+                      setProductForm((current) => ({
+                        ...current,
+                        imageUrl: event.target.value,
+                      }))
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   />
@@ -2541,7 +2925,9 @@ export default function ManagerDashboard({ session, onLogout }) {
               </article>
 
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Products</h3>
+                <h3 className="m-0 text-base font-semibold text-white">
+                  Products
+                </h3>
                 <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
@@ -2555,93 +2941,129 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {products.map((product) => (
-                        <tr key={product.id} className="border-t border-white/10">
-                          <td className="px-3 py-2 text-white">{product.name}</td>
-                          <td className="px-3 py-2 text-pos-muted">
-                            {product.category?.name || "Uncategorized"}
-                          </td>
-                          <td className="px-3 py-2 text-pos-muted">
-                            {formatMoney(product.price)} EUR
-                          </td>
-                          <td className="px-3 py-2 text-pos-muted">Recipe-driven</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`rounded-full border px-2 py-1 text-xs ${
-                                product.isAvailable
-                                  ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
-                                  : "border-red-400/30 bg-red-500/15 text-red-300"
+                      {products.map((product) => {
+                        const inventoryMode = getInventoryModeLabel(
+                          product,
+                          recipes,
+                          ingredients,
+                        );
+
+                        return (
+                          <tr
+                            key={product.id}
+                            className="border-t border-white/10"
+                          >
+                            <td className="px-3 py-2 text-white">
+                              {product.name}
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {product.category?.name || "Uncategorized"}
+                            </td>
+                            <td className="px-3 py-2 text-pos-muted">
+                              {formatMoney(product.price)} EUR
+                            </td>
+                            <td
+                              className={`px-3 py-2 ${
+                                inventoryMode.tone === "warn"
+                                  ? "text-red-300"
+                                  : "text-pos-muted"
                               }`}
                             >
-                              {product.isAvailable ? "Enabled" : "Disabled"}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <div className="inline-flex gap-2">
-                              <button
-                                className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                type="button"
-                                onClick={() => beginEditProduct(product)}
+                              {inventoryMode.text}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span
+                                className={`rounded-full border px-2 py-1 text-xs ${
+                                  product.isAvailable
+                                    ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                                    : "border-red-400/30 bg-red-500/15 text-red-300"
+                                }`}
                               >
-                                Edit
-                              </button>
-                              <button
-                                className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/25"
-                                type="button"
-                                onClick={() => {
-                                  const nextPrice = window.prompt(
-                                    `Set new price for ${product.name}`,
-                                    String(product.price),
-                                  );
+                                {product.isAvailable ? "Enabled" : "Disabled"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="inline-flex gap-2">
+                                <button
+                                  className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                                  type="button"
+                                  onClick={() => beginEditProduct(product)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/25"
+                                  type="button"
+                                  onClick={() => {
+                                    const nextPrice = window.prompt(
+                                      `Set new price for ${product.name}`,
+                                      String(product.price),
+                                    );
 
-                                  if (nextPrice === null) {
-                                    return;
+                                    if (nextPrice === null) {
+                                      return;
+                                    }
+
+                                    const parsedPrice = Number(nextPrice);
+                                    if (
+                                      Number.isNaN(parsedPrice) ||
+                                      parsedPrice < 0
+                                    ) {
+                                      setError(
+                                        "Price must be a number greater than or equal to 0.",
+                                      );
+                                      return;
+                                    }
+
+                                    runAction(
+                                      () =>
+                                        updateProduct(
+                                          session.token,
+                                          product.id,
+                                          {
+                                            price: parsedPrice,
+                                          },
+                                        ),
+                                      "Product price updated.",
+                                    );
+                                  }}
+                                >
+                                  Edit Price
+                                </button>
+                                <button
+                                  className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                                  type="button"
+                                  onClick={() =>
+                                    runAction(
+                                      () =>
+                                        updateProduct(
+                                          session.token,
+                                          product.id,
+                                          {
+                                            isAvailable: !product.isAvailable,
+                                          },
+                                        ),
+                                      product.isAvailable
+                                        ? "Product disabled."
+                                        : "Product enabled.",
+                                    )
                                   }
-
-                                  const parsedPrice = Number(nextPrice);
-                                  if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
-                                    setError("Price must be a number greater than or equal to 0.");
-                                    return;
-                                  }
-
-                                  runAction(
-                                    () =>
-                                      updateProduct(session.token, product.id, {
-                                        price: parsedPrice,
-                                      }),
-                                    "Product price updated.",
-                                  );
-                                }}
-                              >
-                                Edit Price
-                              </button>
-                              <button
-                                className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                type="button"
-                                onClick={() =>
-                                  runAction(
-                                    () =>
-                                      updateProduct(session.token, product.id, {
-                                        isAvailable: !product.isAvailable,
-                                      }),
-                                    product.isAvailable ? "Product disabled." : "Product enabled.",
-                                  )
-                                }
-                              >
-                                {product.isAvailable ? "Disable" : "Enable"}
-                              </button>
-                              <button
-                                className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
-                                type="button"
-                                disabled={isSaving}
-                                onClick={() => handleDeleteProduct(product)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                >
+                                  {product.isAvailable ? "Disable" : "Enable"}
+                                </button>
+                                <button
+                                  className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
+                                  type="button"
+                                  disabled={isSaving}
+                                  onClick={() => handleDeleteProduct(product)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2661,7 +3083,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                     placeholder="Category name"
                     value={categoryForm.name}
                     onChange={(event) =>
-                      setCategoryForm((current) => ({ ...current, name: event.target.value }))
+                      setCategoryForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
                     }
                     className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                   />
@@ -2700,29 +3125,38 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </p>
                     ) : (
                       <div className="scroll-y mt-3 max-h-[240px] space-y-2 overflow-y-auto pr-1">
-                        {editingCategoryProducts.map((product) => (
-                          <button
-                            key={product.id}
-                            type="button"
-                            className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
-                            onClick={() => {
-                              setActiveSection("products");
-                              beginEditProduct(product);
-                            }}
-                          >
-                            <div className="min-w-0">
-                              <p className="m-0 truncate text-sm font-semibold text-white">
-                                {product.name}
-                              </p>
-                              <p className="m-0 mt-1 text-xs text-pos-muted">
-                                {formatMoney(product.price)} EUR | Recipe-driven inventory
-                              </p>
-                            </div>
-                            <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
-                              Edit Product
-                            </span>
-                          </button>
-                        ))}
+                        {editingCategoryProducts.map((product) => {
+                          const inventoryMode = getInventoryModeLabel(
+                            product,
+                            recipes,
+                            ingredients,
+                          );
+
+                          return (
+                            <button
+                              key={product.id}
+                              type="button"
+                              className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left transition hover:bg-white/10"
+                              onClick={() => {
+                                setActiveSection("products");
+                                beginEditProduct(product);
+                              }}
+                            >
+                              <div className="min-w-0">
+                                <p className="m-0 truncate text-sm font-semibold text-white">
+                                  {product.name}
+                                </p>
+                                <p className="m-0 mt-1 text-xs text-pos-muted">
+                                  {formatMoney(product.price)} EUR |{" "}
+                                  {inventoryMode.text}
+                                </p>
+                              </div>
+                              <span className="ml-3 shrink-0 text-[11px] font-semibold text-sky-200">
+                                Edit Product
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2730,7 +3164,9 @@ export default function ManagerDashboard({ session, onLogout }) {
               </article>
 
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Categories</h3>
+                <h3 className="m-0 text-base font-semibold text-white">
+                  Categories
+                </h3>
                 <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
@@ -2749,13 +3185,21 @@ export default function ManagerDashboard({ session, onLogout }) {
                         </tr>
                       ) : (
                         categories.map((category) => {
-                          const count = productCountByCategoryId.get(category.id) || 0;
+                          const count =
+                            productCountByCategoryId.get(category.id) || 0;
 
                           return (
-                            <tr key={category.id} className="border-t border-white/10">
-                              <td className="px-3 py-2 text-white">{category.name}</td>
+                            <tr
+                              key={category.id}
+                              className="border-t border-white/10"
+                            >
+                              <td className="px-3 py-2 text-white">
+                                {category.name}
+                              </td>
                               <td className="px-3 py-2 text-pos-muted">
-                                {count > 0 ? `${count} product${count > 1 ? "s" : ""}` : "Empty"}
+                                {count > 0
+                                  ? `${count} product${count > 1 ? "s" : ""}`
+                                  : "Empty"}
                                 {count > 0 ? (
                                   <div className="mt-1 text-[11px] text-orange-200/85">
                                     Products will move to Uncategorized
@@ -2767,7 +3211,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   <button
                                     className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-200 hover:bg-sky-500/25"
                                     type="button"
-                                    onClick={() => startAddProductFromCategory(category.id)}
+                                    onClick={() =>
+                                      startAddProductFromCategory(category.id)
+                                    }
                                   >
                                     Add Product
                                   </button>
@@ -2786,7 +3232,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                     }`}
                                     type="button"
                                     disabled={isSaving}
-                                    onClick={() => handleDeleteCategory(category, count)}
+                                    onClick={() =>
+                                      handleDeleteCategory(category, count)
+                                    }
                                   >
                                     Delete
                                   </button>
@@ -2806,10 +3254,14 @@ export default function ManagerDashboard({ session, onLogout }) {
           {activeSection === "stock" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
               <article className="pos-panel min-h-0 rounded-xl p-4">
-                <h3 className="m-0 text-base font-semibold text-white">Product Stock</h3>
+                <h3 className="m-0 text-base font-semibold text-white">
+                  Product Stock
+                </h3>
                 <p className="m-0 mt-1 text-xs text-pos-muted">
-                  Vodka, beer, juices, water, and similar products show normal stock. Coffee and ice
-                  cream show recipe-based availability.
+                  Any product with a saved recipe shows how many sales its
+                  ingredients can still make. Everything else uses a simple
+                  per-unit count (or a linked ingredient for direct-sale items).
+                  Set this up in "Stock In &amp; Recipes".
                 </p>
                 <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
                   <table className="w-full text-left text-sm">
@@ -2824,7 +3276,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <tbody>
                       {products.map((product) => {
                         const recipeManaged = isRecipeManagedProduct(product);
-                        const availability = getProductAvailability(product, recipes, ingredients);
+                        const availability = getProductAvailability(
+                          product,
+                          recipes,
+                          ingredients,
+                        );
                         const stockText =
                           recipeManaged && availability
                             ? `${availability.available} can sell`
@@ -2833,10 +3289,15 @@ export default function ManagerDashboard({ session, onLogout }) {
                               : formatStock(product);
 
                         return (
-                          <tr key={product.id} className="border-t border-white/10">
+                          <tr
+                            key={product.id}
+                            className="border-t border-white/10"
+                          >
                             <td className="px-3 py-2 text-white">
                               {product.name}
-                              <p className="m-0 text-xs text-pos-muted">#{product.id}</p>
+                              <p className="m-0 text-xs text-pos-muted">
+                                #{product.id}
+                              </p>
                             </td>
                             <td className="px-3 py-2 text-pos-muted">
                               {product.category?.name || "Uncategorized"}
@@ -2848,7 +3309,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   (recipeManaged
                                     ? Number(availability?.available || 0) <=
                                       Number(lowStock.threshold || 5)
-                                    : Number(product.stock || 0) <= Number(lowStock.threshold || 5))
+                                    : Number(product.stock || 0) <=
+                                      Number(lowStock.threshold || 5))
                                     ? "text-red-300"
                                     : "text-pos-text"
                                 }`}
@@ -2867,9 +3329,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </div>
 
                 <div className="mt-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Ingredient Stock</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Ingredient Stock
+                  </h3>
                   <p className="m-0 mt-1 text-xs text-pos-muted">
-                    Raw ingredients used by coffee and ice cream recipes.
+                    Raw ingredients used by any saved recipe — coffee,
+                    cocktails, ice cream, or a spirit poured by the shot.
                   </p>
                   <div className="scroll-y mt-3 max-h-[32vh] overflow-y-auto rounded-xl border border-white/10">
                     <table className="w-full text-left text-sm">
@@ -2881,23 +3346,37 @@ export default function ManagerDashboard({ session, onLogout }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {ingredients.map((ingredient) => (
-                          <tr key={ingredient.id} className="border-t border-white/10 align-top">
-                            <td className="px-3 py-2 text-white">
-                              {ingredient.name}
-                              <p className="m-0 text-xs text-pos-muted">
-                                #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2 text-pos-muted">{ingredient.baseUnit}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-pos-text">
-                              {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
-                            </td>
-                          </tr>
-                        ))}
+                        {ingredients
+                          .filter((ingredient) => ingredient.isActive !== false)
+                          .map((ingredient) => (
+                            <tr
+                              key={ingredient.id}
+                              className="border-t border-white/10 align-top"
+                            >
+                              <td className="px-3 py-2 text-white">
+                                {ingredient.name}
+                                <p className="m-0 text-xs text-pos-muted">
+                                  #{ingredient.id}{" "}
+                                  {ingredient.sku ? `| ${ingredient.sku}` : ""}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 text-pos-muted">
+                                {ingredient.baseUnit}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-pos-text">
+                                {formatQuantity(
+                                  ingredient.currentQuantity,
+                                  ingredient.baseUnit,
+                                )}
+                              </td>
+                            </tr>
+                          ))}
                         {ingredients.length === 0 ? (
                           <tr>
-                            <td colSpan="3" className="px-3 py-6 text-center text-pos-muted">
+                            <td
+                              colSpan="3"
+                              className="px-3 py-6 text-center text-pos-muted"
+                            >
                               No ingredients yet.
                             </td>
                           </tr>
@@ -2919,8 +3398,12 @@ export default function ManagerDashboard({ session, onLogout }) {
                           key={`inventory-${alert.id}`}
                           className="rounded-xl border border-orange-400/30 bg-orange-500/10 p-3"
                         >
-                          <p className="m-0 text-sm font-semibold text-orange-100">{alert.title}</p>
-                          <p className="m-0 mt-1 text-xs text-orange-100/85">{alert.message}</p>
+                          <p className="m-0 text-sm font-semibold text-orange-100">
+                            {alert.title}
+                          </p>
+                          <p className="m-0 mt-1 text-xs text-orange-100/85">
+                            {alert.message}
+                          </p>
                         </div>
                       ))
                     : null}
@@ -2930,8 +3413,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                       Number(ingredient.minimumQuantity || 0) > 0 &&
                       Number(ingredient.currentQuantity || 0) <=
                         Number(ingredient.minimumQuantity || 0),
-                  ).length === 0 && ensureArray(lowStock.inventoryAlerts).length === 0 ? (
-                    <p className="text-sm text-pos-muted">No low-stock alerts right now.</p>
+                  ).length === 0 &&
+                  ensureArray(lowStock.inventoryAlerts).length === 0 ? (
+                    <p className="text-sm text-pos-muted">
+                      No low-stock alerts right now.
+                    </p>
                   ) : (
                     ingredients
                       .filter(
@@ -2949,9 +3435,16 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {ingredient.name}
                           </p>
                           <p className="m-0 mt-1 text-xs text-red-200/90">
-                            Stock: {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}{" "}
+                            Stock:{" "}
+                            {formatQuantity(
+                              ingredient.currentQuantity,
+                              ingredient.baseUnit,
+                            )}{" "}
                             | Minimum:{" "}
-                            {formatQuantity(ingredient.minimumQuantity, ingredient.baseUnit)}
+                            {formatQuantity(
+                              ingredient.minimumQuantity,
+                              ingredient.baseUnit,
+                            )}
                           </p>
                         </div>
                       ))
@@ -2962,14 +3455,28 @@ export default function ManagerDashboard({ session, onLogout }) {
           ) : null}
 
           {STOCK_INTAKE_ENABLED && activeSection === "incoming" ? (
-            <section className="grid min-h-0 grid-cols-1 gap-4 2xl:grid-cols-[420px_520px_minmax(0,1fr)]">
+            <section
+              className={`grid min-h-0 grid-cols-1 gap-4 ${
+                RECEIVE_STOCK_ENABLED
+                  ? "2xl:grid-cols-[420px_520px_minmax(0,1fr)]"
+                  : "2xl:grid-cols-[420px_minmax(0,1fr)]"
+              }`}
+            >
               <div className="grid min-h-0 gap-4">
                 <article className="pos-panel rounded-xl p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="m-0 text-base font-semibold text-white">Ingredients</h3>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-pos-accent text-[11px] font-bold text-slate-950">
+                          1
+                        </span>
+                        Define Ingredients
+                      </h3>
                       <p className="m-0 mt-1 text-xs text-pos-muted">
-                        Track raw stock in base units: grams, milliliters, or pieces.
+                        One-time setup: name every raw ingredient and its real
+                        unit (grams, milliliters, or pieces). This only creates
+                        the ingredient — it starts at 0. Add real quantity next,
+                        in "Receive Stock" (right side).
                       </p>
                     </div>
                     <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-200">
@@ -2977,7 +3484,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </span>
                   </div>
 
-                  <form className="mt-4 grid gap-3" onSubmit={onIngredientSubmit}>
+                  <form
+                    className="mt-4 grid gap-3"
+                    onSubmit={onIngredientSubmit}
+                  >
                     <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
                       Ingredient name
                       <input
@@ -2985,26 +3495,15 @@ export default function ManagerDashboard({ session, onLogout }) {
                         placeholder="Coffee Beans"
                         value={ingredientForm.name}
                         onChange={(event) =>
-                          setIngredientForm((current) => ({ ...current, name: event.target.value }))
+                          setIngredientForm((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
                         }
                         className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                       />
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                        SKU
-                        <input
-                          placeholder="Optional"
-                          value={ingredientForm.sku}
-                          onChange={(event) =>
-                            setIngredientForm((current) => ({
-                              ...current,
-                              sku: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
-                        />
-                      </label>
+                    <div>
                       <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
                         Base unit
                         <select
@@ -3042,17 +3541,30 @@ export default function ManagerDashboard({ session, onLogout }) {
                         className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                       />
                       <span className="text-[11px] normal-case tracking-normal text-pos-muted">
-                        Optional. Leave 0 if you do not want low-stock alerts for this ingredient
-                        yet.
+                        Optional. Leave 0 if you do not want low-stock alerts
+                        for this ingredient yet.
                       </span>
                     </label>
-                    <button
-                      className="pos-button pos-button-primary"
-                      type="submit"
-                      disabled={isSaving}
-                    >
-                      Add Ingredient
-                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="pos-button pos-button-primary"
+                        type="submit"
+                        disabled={isSaving}
+                      >
+                        {editingIngredientId
+                          ? "Update Ingredient"
+                          : "Add Ingredient"}
+                      </button>
+                      {editingIngredientId ? (
+                        <button
+                          className="pos-button pos-button-muted"
+                          type="button"
+                          onClick={resetIngredientForm}
+                        >
+                          Cancel Edit
+                        </button>
+                      ) : null}
+                    </div>
                   </form>
 
                   <div className="scroll-y mt-4 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
@@ -3061,26 +3573,65 @@ export default function ManagerDashboard({ session, onLogout }) {
                         <tr>
                           <th className="px-3 py-2">Ingredient</th>
                           <th className="px-3 py-2 text-right">Stock</th>
+                          <th className="px-3 py-2 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {ingredients.map((ingredient) => (
-                          <tr key={ingredient.id} className="border-t border-white/10">
-                            <td className="px-3 py-2 text-white">
-                              {ingredient.name}
-                              <p className="m-0 text-xs text-pos-muted">
-                                #{ingredient.id} {ingredient.sku ? `| ${ingredient.sku}` : ""}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2 text-right font-semibold text-pos-text">
-                              {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
-                            </td>
-                          </tr>
-                        ))}
-                        {ingredients.length === 0 ? (
+                        {ingredients
+                          .filter((ingredient) => ingredient.isActive !== false)
+                          .map((ingredient) => (
+                            <tr
+                              key={ingredient.id}
+                              className="border-t border-white/10"
+                            >
+                              <td className="px-3 py-2 text-white">
+                                {ingredient.name}
+                                <p className="m-0 text-xs text-pos-muted">
+                                  #{ingredient.id}{" "}
+                                  {ingredient.sku ? `| ${ingredient.sku}` : ""}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-pos-text">
+                                {formatQuantity(
+                                  ingredient.currentQuantity,
+                                  ingredient.baseUnit,
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="inline-flex gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                                    onClick={() =>
+                                      beginEditIngredient(ingredient)
+                                    }
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
+                                    disabled={isSaving}
+                                    onClick={() =>
+                                      handleDeleteIngredient(ingredient)
+                                    }
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        {ingredients.filter(
+                          (ingredient) => ingredient.isActive !== false,
+                        ).length === 0 ? (
                           <tr>
-                            <td colSpan="2" className="px-3 py-6 text-center text-pos-muted">
-                              Add Coffee Beans, Milk, cups, bottles, or other ingredients.
+                            <td
+                              colSpan="3"
+                              className="px-3 py-6 text-center text-pos-muted"
+                            >
+                              Add Coffee Beans, Milk, cups, bottles, or other
+                              ingredients.
                             </td>
                           </tr>
                         ) : null}
@@ -3090,16 +3641,27 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Recipe Builder</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-pos-accent text-[11px] font-bold text-slate-950">
+                      2
+                    </span>
+                    Recipe Builder
+                  </h3>
                   <p className="m-0 mt-1 text-xs text-pos-muted">
-                    Connect sale products to ingredient consumption, e.g. Espresso = 8g coffee.
+                    Make a product sellable by portions instead of whole units:
+                    pick the product, then list exactly what one sale consumes —
+                    e.g. Espresso = 8g coffee, Mojito = 50ml rum + 100ml soda +
+                    lime, or a Raki shot = 20ml from the bottle.
                   </p>
                   <form className="mt-4 grid gap-3" onSubmit={onRecipeSubmit}>
                     <select
                       required
                       value={recipeForm.productId}
                       onChange={(event) =>
-                        setRecipeForm((current) => ({ ...current, productId: event.target.value }))
+                        setRecipeForm((current) => ({
+                          ...current,
+                          productId: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     >
@@ -3134,19 +3696,32 @@ export default function ManagerDashboard({ session, onLogout }) {
                           value={item.ingredientId}
                           onChange={(event) => {
                             const ingredient = ingredients.find(
-                              (entry) => String(entry.id) === String(event.target.value),
+                              (entry) =>
+                                String(entry.id) === String(event.target.value),
                             );
-                            updateRecipeItem(index, "ingredientId", event.target.value);
-                            updateRecipeItem(index, "unit", ingredient?.baseUnit || "g");
+                            updateRecipeItem(
+                              index,
+                              "ingredientId",
+                              event.target.value,
+                            );
+                            updateRecipeItem(
+                              index,
+                              "unit",
+                              ingredient?.baseUnit || "g",
+                            );
                           }}
                           className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                         >
                           <option value="">Ingredient</option>
-                          {ingredients.map((ingredient) => (
-                            <option key={ingredient.id} value={ingredient.id}>
-                              {ingredient.name} ({ingredient.baseUnit})
-                            </option>
-                          ))}
+                          {ingredients
+                            .filter(
+                              (ingredient) => ingredient.isActive !== false,
+                            )
+                            .map((ingredient) => (
+                              <option key={ingredient.id} value={ingredient.id}>
+                                {ingredient.name} ({ingredient.baseUnit})
+                              </option>
+                            ))}
                         </select>
                         <div className="grid grid-cols-[1fr_130px] gap-2">
                           <input
@@ -3157,14 +3732,22 @@ export default function ManagerDashboard({ session, onLogout }) {
                             placeholder="Quantity per sale"
                             value={item.quantity}
                             onChange={(event) =>
-                              updateRecipeItem(index, "quantity", event.target.value)
+                              updateRecipeItem(
+                                index,
+                                "quantity",
+                                event.target.value,
+                              )
                             }
                             className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                           />
                           <select
                             value={item.unit}
                             onChange={(event) =>
-                              updateRecipeItem(index, "unit", event.target.value)
+                              updateRecipeItem(
+                                index,
+                                "unit",
+                                event.target.value,
+                              )
                             }
                             className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                           >
@@ -3189,7 +3772,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Recipe notes optional"
                       value={recipeForm.notes}
                       onChange={(event) =>
-                        setRecipeForm((current) => ({ ...current, notes: event.target.value }))
+                        setRecipeForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
                       }
                       className="min-h-[64px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
@@ -3213,123 +3799,37 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
               </div>
 
-              <article className="pos-panel rounded-xl p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="m-0 text-base font-semibold text-white">Stock Intake</h3>
-                    <p className="m-0 mt-1 text-xs text-pos-muted">
-                      Receive ingredients from suppliers. Confirmed intake updates stock and writes
-                      movements.
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-sky-300/25 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
-                    Transaction safe
-                  </span>
-                </div>
-
-                <form className="mt-4 grid gap-4" onSubmit={onStockIntakeSubmit}>
-                  <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                    Supplier
-                    <select
-                      required
-                      value={stockIntakeForm.supplierId}
-                      onChange={(event) =>
-                        setStockIntakeForm((current) => ({
-                          ...current,
-                          supplierId: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
-                    >
-                      <option value="">Select supplier</option>
-                      {suppliers.map((supplier) => (
-                        <option key={supplier.id} value={supplier.id}>
-                          {supplier.companyName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <details className="rounded-lg border border-white/10 bg-black/15 p-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-pos-text">
-                      Add supplier
-                    </summary>
-                    <div className="mt-3 grid gap-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          placeholder="Company"
-                          value={supplierForm.companyName}
-                          onChange={(event) =>
-                            setSupplierForm((current) => ({
-                              ...current,
-                              companyName: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                        />
-                        <input
-                          placeholder="Contact"
-                          value={supplierForm.contactName}
-                          onChange={(event) =>
-                            setSupplierForm((current) => ({
-                              ...current,
-                              contactName: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          placeholder="Phone"
-                          value={supplierForm.phone}
-                          onChange={(event) =>
-                            setSupplierForm((current) => ({
-                              ...current,
-                              phone: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                        />
-                        <input
-                          type="email"
-                          placeholder="Email"
-                          value={supplierForm.email}
-                          onChange={(event) =>
-                            setSupplierForm((current) => ({
-                              ...current,
-                              email: event.target.value,
-                            }))
-                          }
-                          className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="pos-button pos-button-muted"
-                        disabled={isSaving}
-                        onClick={onSupplierSubmit}
-                      >
-                        Save Supplier
-                      </button>
+              {RECEIVE_STOCK_ENABLED ? (
+                <article className="pos-panel rounded-xl p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-pos-accent text-[11px] font-bold text-slate-950">
+                          3
+                        </span>
+                        Receive Stock (Stock Intake)
+                      </h3>
+                      <p className="m-0 mt-1 text-xs text-pos-muted">
+                        This is what actually adds quantity to an ingredient —
+                        every time a delivery arrives, record it here. Confirmed
+                        intake updates stock and writes a permanent movement
+                        record.
+                      </p>
                     </div>
-                  </details>
+                    <span className="rounded-full border border-sky-300/25 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
+                      Transaction safe
+                    </span>
+                  </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                      Invoice number
-                      <input
-                        placeholder="INV-2026-001"
-                        value={stockIntakeForm.invoiceNumber}
-                        onChange={(event) =>
-                          setStockIntakeForm((current) => ({
-                            ...current,
-                            invoiceNumber: event.target.value,
-                          }))
-                        }
-                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                      />
-                    </label>
+                  <form
+                    className="mt-4 grid gap-4"
+                    onSubmit={onStockIntakeSubmit}
+                  >
+                    {/* Supplier + Invoice Number fields are intentionally hidden
+                        per manager request (2026-09) — a default supplier is
+                        auto-selected via the effect that syncs stockIntakeForm
+                        whenever `suppliers` loads, so submission still works. */}
+
                     <label className="flex items-center gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-sm text-pos-text">
                       <input
                         type="checkbox"
@@ -3343,256 +3843,306 @@ export default function ManagerDashboard({ session, onLogout }) {
                       />
                       Confirm and apply stock
                     </label>
-                  </div>
 
-                  <div className="grid gap-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="m-0 text-sm font-semibold text-white">Items</p>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
-                        onClick={addStockIntakeItem}
-                      >
-                        Add item
-                      </button>
-                    </div>
-
-                    {stockIntakeForm.items.map((item, index) => {
-                      const {
-                        baseQuantity,
-                        lineTotal,
-                        packageSize,
-                        selectedIngredient,
-                        selectedProduct,
-                        stockBaseUnit,
-                      } = resolveStockIntakeItem(item, products, ingredients);
-
-                      return (
-                        <div
-                          key={index}
-                          className="grid gap-3 rounded-xl border border-white/10 bg-black/15 p-3"
+                    <div className="grid gap-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="m-0 text-sm font-semibold text-white">
+                          Items
+                        </p>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
+                          onClick={addStockIntakeItem}
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
-                              Intake item {index + 1}
-                            </p>
-                            <button
-                              type="button"
-                              className="rounded-lg border border-red-300/40 bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200"
-                              onClick={() => removeStockIntakeItem(index)}
-                              disabled={stockIntakeForm.items.length === 1}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                          <select
-                            required
-                            value={
-                              item.sourceType === "ingredient"
-                                ? `ingredient:${item.ingredientId}`
-                                : `product:${item.productId}`
-                            }
-                            onChange={(event) => {
-                              const [sourceType, sourceId] = event.target.value.split(":");
-                              const product =
-                                sourceType === "product"
-                                  ? products.find((entry) => String(entry.id) === String(sourceId))
-                                  : null;
-                              const ingredient =
-                                sourceType === "product"
-                                  ? product?.directStockIngredient ||
-                                    ingredients.find(
-                                      (entry) =>
-                                        String(entry.id) ===
-                                        String(product?.directStockIngredientId),
-                                    )
-                                  : ingredients.find(
-                                      (entry) => String(entry.id) === String(sourceId),
-                                    );
+                          Add item
+                        </button>
+                      </div>
 
-                              updateStockIntakeItem(index, "sourceType", sourceType);
-                              updateStockIntakeItem(
-                                index,
-                                "productId",
-                                product?.id ? String(product.id) : "",
-                              );
-                              updateStockIntakeItem(
-                                index,
-                                "ingredientId",
-                                ingredient?.id ? String(ingredient.id) : "",
-                              );
-                              updateStockIntakeItem(
-                                index,
-                                "purchasedUnit",
-                                sourceType === "product" && product?.unitsPerPackage
-                                  ? "paketa"
-                                  : sourceType === "product"
-                                    ? "pcs"
-                                    : ingredient?.baseUnit === "pcs"
-                                      ? "pcs"
-                                      : "kg",
-                              );
-                            }}
-                            className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      {stockIntakeForm.items.map((item, index) => {
+                        const {
+                          baseQuantity,
+                          lineTotal,
+                          packageSize,
+                          selectedIngredient,
+                          selectedProduct,
+                          stockBaseUnit,
+                        } = resolveStockIntakeItem(item, products, ingredients);
+
+                        return (
+                          <div
+                            key={index}
+                            className="grid gap-3 rounded-xl border border-white/10 bg-black/15 p-3"
                           >
-                            <option value="">Product or ingredient</option>
-                            {products.map((product) => (
-                              <option key={`product-${product.id}`} value={`product:${product.id}`}>
-                                Product: {product.name}
-                                {product.unitsPerPackage
-                                  ? ` | 1 paketa = ${product.unitsPerPackage} pcs`
-                                  : ""}
-                                {!product.directStockIngredientId ? " | auto stock pcs" : ""}
-                              </option>
-                            ))}
-                            {ingredients.map((ingredient) => (
-                              <option
-                                key={`ingredient-${ingredient.id}`}
-                                value={`ingredient:${ingredient.id}`}
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="m-0 text-xs font-semibold uppercase tracking-wide text-pos-muted">
+                                Intake item {index + 1}
+                              </p>
+                              <button
+                                type="button"
+                                className="rounded-lg border border-red-300/40 bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200"
+                                onClick={() => removeStockIntakeItem(index)}
+                                disabled={stockIntakeForm.items.length === 1}
                               >
-                                Ingredient: {ingredient.name} | Stock{" "}
-                                {formatQuantity(ingredient.currentQuantity, ingredient.baseUnit)}
-                              </option>
-                            ))}
-                          </select>
-
-                          <div className="grid gap-3 md:grid-cols-3">
-                            <input
+                                Remove
+                              </button>
+                            </div>
+                            <select
                               required
-                              type="number"
-                              min="0.001"
-                              step="0.001"
-                              placeholder="Quantity bought"
-                              value={item.purchasedQuantity}
-                              onChange={(event) =>
+                              value={
+                                item.sourceType === "ingredient"
+                                  ? `ingredient:${item.ingredientId}`
+                                  : `product:${item.productId}`
+                              }
+                              onChange={(event) => {
+                                const [sourceType, sourceId] =
+                                  event.target.value.split(":");
+                                const product =
+                                  sourceType === "product"
+                                    ? products.find(
+                                        (entry) =>
+                                          String(entry.id) === String(sourceId),
+                                      )
+                                    : null;
+                                const ingredient =
+                                  sourceType === "product"
+                                    ? product?.directStockIngredient ||
+                                      ingredients.find(
+                                        (entry) =>
+                                          String(entry.id) ===
+                                          String(
+                                            product?.directStockIngredientId,
+                                          ),
+                                      )
+                                    : ingredients.find(
+                                        (entry) =>
+                                          String(entry.id) === String(sourceId),
+                                      );
+
                                 updateStockIntakeItem(
                                   index,
-                                  "purchasedQuantity",
-                                  event.target.value,
-                                )
-                              }
-                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                            />
-                            <select
-                              value={item.purchasedUnit}
-                              onChange={(event) =>
-                                updateStockIntakeItem(index, "purchasedUnit", event.target.value)
-                              }
+                                  "sourceType",
+                                  sourceType,
+                                );
+                                updateStockIntakeItem(
+                                  index,
+                                  "productId",
+                                  product?.id ? String(product.id) : "",
+                                );
+                                updateStockIntakeItem(
+                                  index,
+                                  "ingredientId",
+                                  ingredient?.id ? String(ingredient.id) : "",
+                                );
+                                updateStockIntakeItem(
+                                  index,
+                                  "purchasedUnit",
+                                  sourceType === "product" &&
+                                    product?.unitsPerPackage
+                                    ? "paketa"
+                                    : sourceType === "product"
+                                      ? "pcs"
+                                      : ingredient?.baseUnit === "pcs"
+                                        ? "pcs"
+                                        : "kg",
+                                );
+                              }}
                               className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                             >
-                              {LEDGER_UNITS.map((unit) => (
-                                <option key={unit.value} value={unit.value}>
-                                  {unit.value}
+                              <option value="">Product or ingredient</option>
+                              {products.map((product) => (
+                                <option
+                                  key={`product-${product.id}`}
+                                  value={`product:${product.id}`}
+                                >
+                                  Product: {product.name}
+                                  {product.unitsPerPackage
+                                    ? ` | 1 paketa = ${product.unitsPerPackage} pcs`
+                                    : ""}
+                                  {!product.directStockIngredientId
+                                    ? " | auto stock pcs"
+                                    : ""}
                                 </option>
                               ))}
+                              {ingredients
+                                .filter(
+                                  (ingredient) => ingredient.isActive !== false,
+                                )
+                                .map((ingredient) => (
+                                  <option
+                                    key={`ingredient-${ingredient.id}`}
+                                    value={`ingredient:${ingredient.id}`}
+                                  >
+                                    Ingredient: {ingredient.name} | Stock{" "}
+                                    {formatQuantity(
+                                      ingredient.currentQuantity,
+                                      ingredient.baseUnit,
+                                    )}
+                                  </option>
+                                ))}
                             </select>
-                            <input
-                              required
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              placeholder="Total paid for this item"
-                              value={item.unitCost}
-                              onChange={(event) =>
-                                updateStockIntakeItem(index, "unitCost", event.target.value)
-                              }
-                              className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                            />
-                          </div>
 
-                          <div className="grid gap-2 text-xs sm:grid-cols-3">
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                              <p className="m-0 text-pos-muted">Line total</p>
-                              <p className="m-0 mt-1 font-semibold text-white">
-                                {formatMoney(lineTotal)} EUR
-                              </p>
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <input
+                                required
+                                type="number"
+                                min="0.001"
+                                step="0.001"
+                                placeholder="Quantity bought"
+                                value={item.purchasedQuantity}
+                                onChange={(event) =>
+                                  updateStockIntakeItem(
+                                    index,
+                                    "purchasedQuantity",
+                                    event.target.value,
+                                  )
+                                }
+                                className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                              />
+                              <select
+                                value={item.purchasedUnit}
+                                onChange={(event) =>
+                                  updateStockIntakeItem(
+                                    index,
+                                    "purchasedUnit",
+                                    event.target.value,
+                                  )
+                                }
+                                className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                              >
+                                {LEDGER_UNITS.map((unit) => (
+                                  <option key={unit.value} value={unit.value}>
+                                    {unit.value}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="Total paid (optional)"
+                                value={item.unitCost}
+                                onChange={(event) =>
+                                  updateStockIntakeItem(
+                                    index,
+                                    "unitCost",
+                                    event.target.value,
+                                  )
+                                }
+                                className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                              />
                             </div>
-                            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
-                              <p className="m-0 text-emerald-100/80">Internal stock</p>
-                              <p className="m-0 mt-1 font-semibold text-emerald-200">
-                                {selectedIngredient || selectedProduct
-                                  ? item.purchasedQuantity
-                                    ? item.purchasedUnit === "paketa"
-                                      ? `${item.purchasedQuantity} paketa x ${packageSize || 0} = ${formatQuantity(baseQuantity, stockBaseUnit)}`
-                                      : `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${stockBaseUnit}`
-                                    : `Enter quantity; it will be stored as ${stockBaseUnit || "base stock"}`
-                                  : "Choose product or ingredient"}
-                              </p>
-                              {selectedProduct && !selectedProduct.directStockIngredientId ? (
-                                <p className="m-0 mt-1 text-[11px] text-emerald-100/80">
-                                  Backend will auto-create a stock item for this product.
+
+                            <div className="grid gap-2 text-xs sm:grid-cols-3">
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="m-0 text-pos-muted">Line total</p>
+                                <p className="m-0 mt-1 font-semibold text-white">
+                                  {formatMoney(lineTotal)} EUR
                                 </p>
-                              ) : null}
-                              {selectedProduct &&
-                              item.purchasedUnit === "paketa" &&
-                              !selectedProduct.unitsPerPackage ? (
-                                <p className="m-0 mt-1 text-[11px] text-orange-100">
-                                  Package size is missing; using default 12 pcs per paketa.
+                              </div>
+                              <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
+                                <p className="m-0 text-emerald-100/80">
+                                  Internal stock
                                 </p>
-                              ) : null}
-                            </div>
-                            <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                              <p className="m-0 text-pos-muted">Movement</p>
-                              <p className="m-0 mt-1 font-semibold text-white">
-                                {stockIntakeForm.confirm ? "IN history created" : "Draft only"}
-                              </p>
+                                <p className="m-0 mt-1 font-semibold text-emerald-200">
+                                  {selectedIngredient || selectedProduct
+                                    ? item.purchasedQuantity
+                                      ? item.purchasedUnit === "paketa"
+                                        ? `${item.purchasedQuantity} paketa x ${packageSize || 0} = ${formatQuantity(baseQuantity, stockBaseUnit)}`
+                                        : `${item.purchasedQuantity} ${item.purchasedUnit} will be stored as ${stockBaseUnit}`
+                                      : `Enter quantity; it will be stored as ${stockBaseUnit || "base stock"}`
+                                    : "Choose product or ingredient"}
+                                </p>
+                                {selectedProduct &&
+                                !selectedProduct.directStockIngredientId ? (
+                                  <p className="m-0 mt-1 text-[11px] text-emerald-100/80">
+                                    Backend will auto-create a stock item for
+                                    this product.
+                                  </p>
+                                ) : null}
+                                {selectedProduct &&
+                                item.purchasedUnit === "paketa" &&
+                                !selectedProduct.unitsPerPackage ? (
+                                  <p className="m-0 mt-1 text-[11px] text-orange-100">
+                                    Package size is missing; using default 12
+                                    pcs per paketa.
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p className="m-0 text-pos-muted">Movement</p>
+                                <p className="m-0 mt-1 font-semibold text-white">
+                                  {stockIntakeForm.confirm
+                                    ? "IN history created"
+                                    : "Draft only"}
+                                </p>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <textarea
-                    placeholder="Notes optional"
-                    value={stockIntakeForm.notes}
-                    onChange={(event) =>
-                      setStockIntakeForm((current) => ({ ...current, notes: event.target.value }))
-                    }
-                    className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
-
-                  <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-pos-muted">Intake total</span>
-                      <span className="text-base font-semibold text-white">
-                        {formatMoney(
-                          stockIntakeForm.items.reduce(
-                            (sum, item) => sum + calculateStockIntakeLineTotal(item),
-                            0,
-                          ),
-                        )}{" "}
-                        EUR
-                      </span>
+                        );
+                      })}
                     </div>
-                    <p className="m-0 text-xs text-pos-muted">
-                      Confirmed intakes update ingredient stock and create immutable stock
-                      movements.
-                    </p>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      className="pos-button pos-button-primary"
-                      type="submit"
-                      disabled={isSaving}
-                    >
-                      {stockIntakeForm.confirm ? "Save & Apply Stock" : "Save Draft"}
-                    </button>
-                    <button
-                      className="pos-button pos-button-muted"
-                      type="button"
-                      onClick={resetStockIntakeForm}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </form>
-              </article>
+                    <textarea
+                      placeholder="Notes optional"
+                      value={stockIntakeForm.notes}
+                      onChange={(event) =>
+                        setStockIntakeForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      className="min-h-[72px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+
+                    <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-pos-muted">
+                          Intake total
+                        </span>
+                        <span className="text-base font-semibold text-white">
+                          {formatMoney(
+                            stockIntakeForm.items.reduce(
+                              (sum, item) =>
+                                sum + calculateStockIntakeLineTotal(item),
+                              0,
+                            ),
+                          )}{" "}
+                          EUR
+                        </span>
+                      </div>
+                      <p className="m-0 text-xs text-pos-muted">
+                        Confirmed intakes update ingredient stock and create
+                        immutable stock movements.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="pos-button pos-button-primary"
+                        type="submit"
+                        disabled={isSaving}
+                      >
+                        {stockIntakeForm.confirm
+                          ? "Save & Apply Stock"
+                          : "Save Draft"}
+                      </button>
+                      <button
+                        className="pos-button pos-button-muted"
+                        type="button"
+                        onClick={resetStockIntakeForm}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                </article>
+              ) : null}
 
               <div className="grid min-h-0 gap-4">
                 <article className="pos-panel min-h-0 rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Stock Intakes</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Stock Intakes
+                  </h3>
                   <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
@@ -3606,7 +4156,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </thead>
                       <tbody>
                         {stockIntakes.map((intake) => (
-                          <tr key={intake.id} className="border-t border-white/10 align-top">
+                          <tr
+                            key={intake.id}
+                            className="border-t border-white/10 align-top"
+                          >
                             <td className="px-3 py-2 text-white">
                               {intake.invoiceNumber || `#${intake.id}`}
                               <p className="m-0 mt-1 text-xs text-pos-muted">
@@ -3620,7 +4173,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                               {ensureArray(intake.items).map((item) => (
                                 <p key={item.id} className="m-0">
                                   {item.ingredient?.name || "Ingredient"} +{" "}
-                                  {formatQuantity(item.baseQuantity, item.baseUnit)}
+                                  {formatQuantity(
+                                    item.baseQuantity,
+                                    item.baseUnit,
+                                  )}
                                 </p>
                               ))}
                             </td>
@@ -3640,7 +4196,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                         ))}
                         {stockIntakes.length === 0 ? (
                           <tr>
-                            <td colSpan="5" className="px-3 py-6 text-center text-pos-muted">
+                            <td
+                              colSpan="5"
+                              className="px-3 py-6 text-center text-pos-muted"
+                            >
                               No stock intakes yet.
                             </td>
                           </tr>
@@ -3651,7 +4210,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel min-h-0 rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Stock Movements</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Stock Movements
+                  </h3>
                   <p className="m-0 mt-1 text-xs text-pos-muted">
                     Every IN or OUT stock change is stored here.
                   </p>
@@ -3667,7 +4228,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </thead>
                       <tbody>
                         {stockMovements.map((movement) => (
-                          <tr key={movement.id} className="border-t border-white/10">
+                          <tr
+                            key={movement.id}
+                            className="border-t border-white/10"
+                          >
                             <td className="px-3 py-2">
                               <span
                                 className={`rounded-full border px-2 py-1 text-xs ${
@@ -3681,7 +4245,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                             </td>
                             <td className="px-3 py-2 text-white">
                               {movement.ingredient?.name || "Ingredient"}
-                              <p className="m-0 text-xs text-pos-muted">{movement.sourceType}</p>
+                              <p className="m-0 text-xs text-pos-muted">
+                                {movement.sourceType}
+                              </p>
                             </td>
                             <td className="px-3 py-2 text-pos-text">
                               {movement.type === "IN" ? "+" : "-"}
@@ -3694,7 +4260,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                         ))}
                         {stockMovements.length === 0 ? (
                           <tr>
-                            <td colSpan="4" className="px-3 py-6 text-center text-pos-muted">
+                            <td
+                              colSpan="4"
+                              className="px-3 py-6 text-center text-pos-muted"
+                            >
                               No stock movement history yet.
                             </td>
                           </tr>
@@ -3705,7 +4274,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Active Recipes</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Active Recipes
+                  </h3>
                   <div className="mt-3 grid gap-2">
                     {recipes.map((recipe) => (
                       <div
@@ -3713,7 +4284,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                         className="rounded-xl border border-white/10 bg-black/15 p-3"
                       >
                         <p className="m-0 text-sm font-semibold text-white">
-                          {recipe.product?.name || `Product #${recipe.productId}`}
+                          {recipe.product?.name ||
+                            `Product #${recipe.productId}`}
                         </p>
                         <p className="m-0 mt-1 text-xs text-pos-muted">
                           {ensureArray(recipe.items)
@@ -3726,7 +4298,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </div>
                     ))}
                     {recipes.length === 0 ? (
-                      <p className="text-sm text-pos-muted">No recipes configured yet.</p>
+                      <p className="text-sm text-pos-muted">
+                        No recipes configured yet.
+                      </p>
                     ) : null}
                   </div>
                 </article>
@@ -3739,9 +4313,12 @@ export default function ManagerDashboard({ session, onLogout }) {
               <article className="pos-panel rounded-xl p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="m-0 text-base font-semibold text-white">Stock Intake</h3>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Stock Intake
+                    </h3>
                     <p className="m-0 mt-1 text-xs text-pos-muted">
-                      Enter what arrived from a supplier. Delivered invoices apply stock once.
+                      Enter what arrived from a supplier. Delivered invoices
+                      apply stock once.
                     </p>
                   </div>
                   <span
@@ -3757,7 +4334,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                   </span>
                 </div>
 
-                <form className="mt-4 grid gap-4" onSubmit={onSupplierInvoiceSubmit}>
+                <form
+                  className="mt-4 grid gap-4"
+                  onSubmit={onSupplierInvoiceSubmit}
+                >
                   <label className="grid gap-1 text-xs font-semibold uppercase tracking-wide text-pos-muted">
                     Supplier
                     <select
@@ -3784,7 +4364,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <summary className="cursor-pointer text-sm font-semibold text-pos-text">
                       Add supplier
                     </summary>
-                    <div className="mt-3 grid gap-2" onSubmit={onSupplierSubmit}>
+                    <div
+                      className="mt-3 grid gap-2"
+                      onSubmit={onSupplierSubmit}
+                    >
                       <div className="grid grid-cols-2 gap-2">
                         <input
                           placeholder="Company"
@@ -3935,7 +4518,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                   <div className="grid gap-2">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="m-0 text-sm font-semibold text-white">Items</p>
+                      <p className="m-0 text-sm font-semibold text-white">
+                        Items
+                      </p>
                       <button
                         type="button"
                         className="rounded-lg border border-white/20 px-3 py-2 text-sm text-pos-text hover:bg-white/10"
@@ -3947,11 +4532,16 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                     {supplierInvoiceForm.items.map((item, index) => {
                       const selectedProduct =
-                        products.find((product) => String(product.id) === String(item.productId)) ||
-                        null;
+                        products.find(
+                          (product) =>
+                            String(product.id) === String(item.productId),
+                        ) || null;
                       const stockUnit = getProductStockUnit(selectedProduct);
                       const lineTotal = calculateInvoiceItemLineTotal(item);
-                      const stockAfter = calculateInvoiceItemStockAfter(item, selectedProduct);
+                      const stockAfter = calculateInvoiceItemStockAfter(
+                        item,
+                        selectedProduct,
+                      );
 
                       return (
                         <div
@@ -3980,28 +4570,34 @@ export default function ManagerDashboard({ session, onLogout }) {
                               onChange={(event) =>
                                 setSupplierInvoiceForm((current) => ({
                                   ...current,
-                                  items: current.items.map((entry, itemIndex) => {
-                                    if (itemIndex !== index) {
-                                      return entry;
-                                    }
+                                  items: current.items.map(
+                                    (entry, itemIndex) => {
+                                      if (itemIndex !== index) {
+                                        return entry;
+                                      }
 
-                                    const nextProduct = products.find(
-                                      (product) =>
-                                        String(product.id) === String(event.target.value),
-                                    );
-                                    const nextUnit = getDefaultPurchaseUnitForProduct(nextProduct);
+                                      const nextProduct = products.find(
+                                        (product) =>
+                                          String(product.id) ===
+                                          String(event.target.value),
+                                      );
+                                      const nextUnit =
+                                        getDefaultPurchaseUnitForProduct(
+                                          nextProduct,
+                                        );
 
-                                    return {
-                                      ...entry,
-                                      productId: event.target.value,
-                                      unit: nextUnit,
-                                      stockQuantity: getDefaultStockQuantity(
-                                        nextProduct,
-                                        nextUnit,
-                                        entry.quantity,
-                                      ),
-                                    };
-                                  }),
+                                      return {
+                                        ...entry,
+                                        productId: event.target.value,
+                                        unit: nextUnit,
+                                        stockQuantity: getDefaultStockQuantity(
+                                          nextProduct,
+                                          nextUnit,
+                                          entry.quantity,
+                                        ),
+                                      };
+                                    },
+                                  ),
                                 }))
                               }
                               className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
@@ -4017,9 +4613,10 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                           {selectedProduct ? (
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2 text-xs text-pos-muted">
-                              Buying as {item.unit || stockUnit}; stock will be added to{" "}
-                              {selectedProduct.name} in {stockUnit}. For coffee in kg, enter how
-                              many espresso portions that kg purchase should add.
+                              Buying as {item.unit || stockUnit}; stock will be
+                              added to {selectedProduct.name} in {stockUnit}.
+                              For coffee in kg, enter how many espresso portions
+                              that kg purchase should add.
                             </div>
                           ) : null}
 
@@ -4036,18 +4633,20 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 onChange={(event) =>
                                   setSupplierInvoiceForm((current) => ({
                                     ...current,
-                                    items: current.items.map((entry, itemIndex) =>
-                                      itemIndex === index
-                                        ? {
-                                            ...entry,
-                                            quantity: event.target.value,
-                                            stockQuantity: getDefaultStockQuantity(
-                                              selectedProduct,
-                                              entry.unit || stockUnit,
-                                              event.target.value,
-                                            ),
-                                          }
-                                        : entry,
+                                    items: current.items.map(
+                                      (entry, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...entry,
+                                              quantity: event.target.value,
+                                              stockQuantity:
+                                                getDefaultStockQuantity(
+                                                  selectedProduct,
+                                                  entry.unit || stockUnit,
+                                                  event.target.value,
+                                                ),
+                                            }
+                                          : entry,
                                     ),
                                   }))
                                 }
@@ -4064,18 +4663,20 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                                   setSupplierInvoiceForm((current) => ({
                                     ...current,
-                                    items: current.items.map((entry, itemIndex) =>
-                                      itemIndex === index
-                                        ? {
-                                            ...entry,
-                                            unit: nextUnit,
-                                            stockQuantity: getDefaultStockQuantity(
-                                              selectedProduct,
-                                              nextUnit,
-                                              entry.quantity,
-                                            ),
-                                          }
-                                        : entry,
+                                    items: current.items.map(
+                                      (entry, itemIndex) =>
+                                        itemIndex === index
+                                          ? {
+                                              ...entry,
+                                              unit: nextUnit,
+                                              stockQuantity:
+                                                getDefaultStockQuantity(
+                                                  selectedProduct,
+                                                  nextUnit,
+                                                  entry.quantity,
+                                                ),
+                                            }
+                                          : entry,
                                     ),
                                   }));
                                 }}
@@ -4124,7 +4725,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 placeholder="EUR total"
                                 value={item.unitPrice}
                                 onChange={(event) =>
-                                  updateSupplierInvoiceItem(index, "unitPrice", event.target.value)
+                                  updateSupplierInvoiceItem(
+                                    index,
+                                    "unitPrice",
+                                    event.target.value,
+                                  )
                                 }
                                 className="min-w-0 rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm font-medium normal-case tracking-normal text-white"
                               />
@@ -4139,15 +4744,24 @@ export default function ManagerDashboard({ session, onLogout }) {
                               </p>
                             </div>
                             <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-2">
-                              <p className="m-0 text-emerald-100/80">Stock increase</p>
+                              <p className="m-0 text-emerald-100/80">
+                                Stock increase
+                              </p>
                               <p className="m-0 mt-1 font-semibold text-emerald-200">
-                                + {formatInvoiceItemStockImpact(item, selectedProduct)}
+                                +{" "}
+                                {formatInvoiceItemStockImpact(
+                                  item,
+                                  selectedProduct,
+                                )}
                               </p>
                             </div>
                             <div className="rounded-lg border border-white/10 bg-black/20 p-2">
-                              <p className="m-0 text-pos-muted">Stock after save</p>
+                              <p className="m-0 text-pos-muted">
+                                Stock after save
+                              </p>
                               <p className="m-0 mt-1 font-semibold text-white">
-                                {supplierInvoiceForm.status === "delivered" && selectedProduct
+                                {supplierInvoiceForm.status === "delivered" &&
+                                selectedProduct
                                   ? `${stockAfter} ${stockUnit}`
                                   : "No change yet"}
                               </p>
@@ -4175,7 +4789,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
                   <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-pos-muted">Invoice total</span>
+                      <span className="text-sm text-pos-muted">
+                        Invoice total
+                      </span>
                       <span className="text-base font-semibold text-white">
                         {formatMoney(supplierInvoiceTotal)} EUR
                       </span>
@@ -4211,7 +4827,9 @@ export default function ManagerDashboard({ session, onLogout }) {
               <article className="pos-panel min-h-0 rounded-xl p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="m-0 text-base font-semibold text-white">Invoice History</h3>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Invoice History
+                    </h3>
                     <p className="m-0 mt-1 text-xs text-pos-muted">
                       Pending entries do not change stock until delivered.
                     </p>
@@ -4231,9 +4849,13 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </thead>
                     <tbody>
                       {supplierOrders.map((supplierOrder) => (
-                        <tr key={supplierOrder.id} className="border-t border-white/10 align-top">
+                        <tr
+                          key={supplierOrder.id}
+                          className="border-t border-white/10 align-top"
+                        >
                           <td className="px-3 py-2 text-white">
-                            {supplierOrder.invoiceNumber || `#${supplierOrder.id}`}
+                            {supplierOrder.invoiceNumber ||
+                              `#${supplierOrder.id}`}
                             <p className="m-0 mt-1 text-xs text-pos-muted">
                               {formatDate(supplierOrder.orderDate)}
                             </p>
@@ -4244,18 +4866,30 @@ export default function ManagerDashboard({ session, onLogout }) {
                           <td className="px-3 py-2 text-pos-muted">
                             <div className="grid gap-1">
                               {ensureArray(supplierOrder.items).map((item) => {
-                                const itemUnit = item.unit || item.product?.stockUnit || "cope";
-                                const itemLineTotal = calculateInvoiceItemLineTotal(item);
+                                const itemUnit =
+                                  item.unit ||
+                                  item.product?.stockUnit ||
+                                  "cope";
+                                const itemLineTotal =
+                                  calculateInvoiceItemLineTotal(item);
 
                                 return (
-                                  <div key={item.id || item.productId} className="grid gap-0.5">
+                                  <div
+                                    key={item.id || item.productId}
+                                    className="grid gap-0.5"
+                                  >
                                     <span className="font-medium text-pos-text">
-                                      {item.product?.name || "Product"} #{item.productId}
+                                      {item.product?.name || "Product"} #
+                                      {item.productId}
                                     </span>
                                     <span className="text-xs text-pos-muted">
-                                      Bought {item.quantity} {itemUnit} | Stock +{" "}
-                                      {formatInvoiceItemStockImpact(item, item.product)} |{" "}
-                                      {formatMoney(itemLineTotal)} EUR
+                                      Bought {item.quantity} {itemUnit} | Stock
+                                      +{" "}
+                                      {formatInvoiceItemStockImpact(
+                                        item,
+                                        item.product,
+                                      )}{" "}
+                                      | {formatMoney(itemLineTotal)} EUR
                                     </span>
                                   </div>
                                 );
@@ -4282,7 +4916,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 <button
                                   type="button"
                                   className="rounded-lg border border-emerald-300/40 bg-emerald-500/15 px-2 py-1 text-xs text-emerald-100 hover:bg-emerald-500/25"
-                                  onClick={() => markSupplierInvoiceDelivered(supplierOrder)}
+                                  onClick={() =>
+                                    markSupplierInvoiceDelivered(supplierOrder)
+                                  }
                                 >
                                   Mark delivered
                                 </button>
@@ -4297,7 +4933,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                                 onClick={() =>
                                   runAction(
                                     () =>
-                                      downloadSupplierInvoicePdf(session.token, supplierOrder.id),
+                                      downloadSupplierInvoicePdf(
+                                        session.token,
+                                        supplierOrder.id,
+                                      ),
                                     "Incoming invoice PDF downloaded.",
                                   )
                                 }
@@ -4310,7 +4949,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       ))}
                       {supplierOrders.length === 0 ? (
                         <tr>
-                          <td colSpan="6" className="px-3 py-6 text-center text-pos-muted">
+                          <td
+                            colSpan="6"
+                            className="px-3 py-6 text-center text-pos-muted"
+                          >
                             No incoming invoices yet.
                           </td>
                         </tr>
@@ -4338,18 +4980,27 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Waiter name"
                       value={waiterForm.fullName}
                       onChange={(event) =>
-                        setWaiterForm((current) => ({ ...current, fullName: event.target.value }))
+                        setWaiterForm((current) => ({
+                          ...current,
+                          fullName: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
                     <input
                       required={!editingWaiterId}
-                      placeholder={editingWaiterId ? "New PIN (optional)" : "PIN (4 digits)"}
+                      placeholder={
+                        editingWaiterId
+                          ? "New PIN (optional)"
+                          : "PIN (4 digits)"
+                      }
                       value={waiterForm.pin}
                       onChange={(event) =>
                         setWaiterForm((current) => ({
                           ...current,
-                          pin: event.target.value.replace(/\D/g, "").slice(0, 4),
+                          pin: event.target.value
+                            .replace(/\D/g, "")
+                            .slice(0, 4),
                         }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
@@ -4357,7 +5008,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <select
                       value={waiterForm.status}
                       onChange={(event) =>
-                        setWaiterForm((current) => ({ ...current, status: event.target.value }))
+                        setWaiterForm((current) => ({
+                          ...current,
+                          status: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     >
@@ -4384,7 +5038,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Table Management</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Table Management
+                  </h3>
                   <p className="mt-2 text-xs text-pos-muted">
                     Add new tables and remove old ones from the same place.
                   </p>
@@ -4396,7 +5052,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Table number"
                       value={tableForm.number}
                       onChange={(event) =>
-                        setTableForm((current) => ({ ...current, number: event.target.value }))
+                        setTableForm((current) => ({
+                          ...current,
+                          number: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
@@ -4407,7 +5066,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Capacity"
                       value={tableForm.capacity}
                       onChange={(event) =>
-                        setTableForm((current) => ({ ...current, capacity: event.target.value }))
+                        setTableForm((current) => ({
+                          ...current,
+                          capacity: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
@@ -4416,7 +5078,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                       placeholder="Location"
                       value={tableForm.location}
                       onChange={(event) =>
-                        setTableForm((current) => ({ ...current, location: event.target.value }))
+                        setTableForm((current) => ({
+                          ...current,
+                          location: event.target.value,
+                        }))
                       }
                       className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                     />
@@ -4441,7 +5106,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                   <div className="mt-4 rounded-xl border border-white/10">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-3">
                       <div>
-                        <h4 className="m-0 text-sm font-semibold text-white">Existing Tables</h4>
+                        <h4 className="m-0 text-sm font-semibold text-white">
+                          Existing Tables
+                        </h4>
                         <p className="m-0 mt-1 text-[11px] text-pos-muted">
                           Delete a table here when you no longer need it.
                         </p>
@@ -4464,7 +5131,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                         <tbody>
                           {tables.length === 0 ? (
                             <tr className="border-t border-white/10">
-                              <td className="px-3 py-6 text-pos-muted" colSpan={4}>
+                              <td
+                                className="px-3 py-6 text-pos-muted"
+                                colSpan={4}
+                              >
                                 No tables yet. Add your first table.
                               </td>
                             </tr>
@@ -4477,10 +5147,15 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   key={`manage-table-inline-${table.id}`}
                                   className="border-t border-white/10"
                                 >
-                                  <td className="px-3 py-2 text-white">Table {table.number}</td>
-                                  <td className="px-3 py-2 text-pos-muted">{table.capacity}</td>
+                                  <td className="px-3 py-2 text-white">
+                                    Table {table.number}
+                                  </td>
                                   <td className="px-3 py-2 text-pos-muted">
-                                    {table.assignedWaiter?.fullName || "Unassigned"}
+                                    {table.capacity}
+                                  </td>
+                                  <td className="px-3 py-2 text-pos-muted">
+                                    {table.assignedWaiter?.fullName ||
+                                      "Unassigned"}
                                   </td>
                                   <td className="px-3 py-2 text-right">
                                     <button
@@ -4503,7 +5178,9 @@ export default function ManagerDashboard({ session, onLogout }) {
 
               <div className="grid min-h-0 grid-cols-1 gap-4">
                 <article className="pos-panel min-h-0 rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Waiters</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Waiters
+                  </h3>
                   <div className="scroll-y mt-3 max-h-[30vh] overflow-y-auto rounded-xl border border-white/10">
                     <table className="w-full text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
@@ -4518,14 +5195,22 @@ export default function ManagerDashboard({ session, onLogout }) {
                       <tbody>
                         {waiters.length === 0 ? (
                           <tr className="border-t border-white/10">
-                            <td className="px-3 py-6 text-pos-muted" colSpan={5}>
+                            <td
+                              className="px-3 py-6 text-pos-muted"
+                              colSpan={5}
+                            >
                               No waiters yet. Add your first waiter.
                             </td>
                           </tr>
                         ) : (
                           waiters.map((waiter) => (
-                            <tr key={waiter.id} className="border-t border-white/10">
-                              <td className="px-3 py-2 text-white">{waiter.fullName}</td>
+                            <tr
+                              key={waiter.id}
+                              className="border-t border-white/10"
+                            >
+                              <td className="px-3 py-2 text-white">
+                                {waiter.fullName}
+                              </td>
                               <td className="px-3 py-2">
                                 <span
                                   className={`rounded-full border px-2 py-1 text-xs ${
@@ -4537,7 +5222,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   {waiter.status}
                                 </span>
                               </td>
-                              <td className="px-3 py-2 text-pos-muted">{waiter.email}</td>
+                              <td className="px-3 py-2 text-pos-muted">
+                                {waiter.email}
+                              </td>
                               <td className="px-3 py-2 text-pos-muted">
                                 {(tablesByWaiter.get(waiter.id) || []).length}
                               </td>
@@ -4553,7 +5240,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                                   <button
                                     className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/25"
                                     type="button"
-                                    onClick={() => setSelectedWaiterForTables(waiter.id)}
+                                    onClick={() =>
+                                      setSelectedWaiterForTables(waiter.id)
+                                    }
                                   >
                                     Assign Tables
                                   </button>
@@ -4563,17 +5252,25 @@ export default function ManagerDashboard({ session, onLogout }) {
                                     onClick={() =>
                                       runAction(
                                         () =>
-                                          updateWaiterStatus(session.token, waiter.id, {
-                                            status:
-                                              waiter.status === "active" ? "inactive" : "active",
-                                          }),
+                                          updateWaiterStatus(
+                                            session.token,
+                                            waiter.id,
+                                            {
+                                              status:
+                                                waiter.status === "active"
+                                                  ? "inactive"
+                                                  : "active",
+                                            },
+                                          ),
                                         waiter.status === "active"
                                           ? "Waiter disabled."
                                           : "Waiter enabled.",
                                       )
                                     }
                                   >
-                                    {waiter.status === "active" ? "Disable" : "Enable"}
+                                    {waiter.status === "active"
+                                      ? "Disable"
+                                      : "Enable"}
                                   </button>
                                   <button
                                     className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
@@ -4595,7 +5292,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <article className="pos-panel min-h-0 rounded-xl p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h3 className="m-0 text-base font-semibold text-white">Table Assignment</h3>
+                      <h3 className="m-0 text-base font-semibold text-white">
+                        Table Assignment
+                      </h3>
                       <p className="mt-1 text-xs text-pos-muted">
                         Select a waiter and assign/unassign tables.
                       </p>
@@ -4646,7 +5345,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                       .slice()
                       .sort((left, right) => left.number - right.number)
                       .map((table) => {
-                        const isAssignedToSelected = assignedTableIds.includes(table.id);
+                        const isAssignedToSelected = assignedTableIds.includes(
+                          table.id,
+                        );
                         const isAssignedToAnother =
                           table.assignedWaiterId &&
                           table.assignedWaiterId !== selectedWaiterForTables;
@@ -4667,7 +5368,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                             <p className="m-0 text-sm font-semibold text-white">
                               Table {table.number}
                             </p>
-                            <p className="m-0 mt-1 text-xs text-pos-muted">{table.location}</p>
+                            <p className="m-0 mt-1 text-xs text-pos-muted">
+                              {table.location}
+                            </p>
                             <p className="m-0 mt-1 text-xs text-pos-muted">
                               {table.assignedWaiter?.fullName
                                 ? `Assigned: ${table.assignedWaiter.fullName}`
@@ -4732,7 +5435,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                       </label>
                       <select
                         value={selectedQrTableId || ""}
-                        onChange={(event) => setSelectedQrTableId(Number(event.target.value))}
+                        onChange={(event) =>
+                          setSelectedQrTableId(Number(event.target.value))
+                        }
                         className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                       >
                         {tables
@@ -4750,10 +5455,13 @@ export default function ManagerDashboard({ session, onLogout }) {
                           Selected Table
                         </p>
                         <p className="m-0 mt-2 text-lg font-semibold text-white">
-                          {selectedQrTable ? `Table ${selectedQrTable.number}` : "No table"}
+                          {selectedQrTable
+                            ? `Table ${selectedQrTable.number}`
+                            : "No table"}
                         </p>
                         <p className="m-0 mt-1 text-xs text-pos-muted">
-                          {selectedQrTable?.location || "Select a table to prepare guest ordering."}
+                          {selectedQrTable?.location ||
+                            "Select a table to prepare guest ordering."}
                         </p>
                       </div>
                     </div>
@@ -4769,7 +5477,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                           />
                         ) : (
                           <p className="text-sm text-pos-muted">
-                            {isQrLoading ? "Preparing QR..." : "QR link not ready."}
+                            {isQrLoading
+                              ? "Preparing QR..."
+                              : "QR link not ready."}
                           </p>
                         )}
                       </div>
@@ -4782,8 +5492,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                           {guestOrderUrl || "Preparing guest ordering link..."}
                         </p>
                         <p className="m-0 mt-3 text-xs text-pos-muted">
-                          Guests can scan the QR code, browse ready-to-order products, and append
-                          items directly to the table ticket without staff refreshing the page.
+                          Guests can scan the QR code, browse ready-to-order
+                          products, and append items directly to the table
+                          ticket without staff refreshing the page.
                         </p>
                         <div className="mt-4 flex flex-wrap gap-2">
                           <button
@@ -4791,7 +5502,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                             className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
                             onClick={() => {
                               if (guestOrderUrl) {
-                                window.open(guestOrderUrl, "_blank", "noopener,noreferrer");
+                                window.open(
+                                  guestOrderUrl,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                );
                               }
                             }}
                             disabled={!guestOrderUrl}
@@ -4821,8 +5536,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 Orders ({ordersData.orders.length})
               </h3>
               <p className="mt-1 text-xs text-pos-muted">
-                Paid Revenue: {formatMoney(ordersData.summary?.paidRevenue)} EUR | Average Paid
-                Order: {formatMoney(ordersData.summary?.averagePaidOrder)} EUR
+                Paid Revenue: {formatMoney(ordersData.summary?.paidRevenue)} EUR
+                | Average Paid Order:{" "}
+                {formatMoney(ordersData.summary?.averagePaidOrder)} EUR
               </p>
               <div className="scroll-y mt-3 max-h-[62vh] overflow-y-auto rounded-xl border border-white/10">
                 <table className="w-full text-left text-sm">
@@ -4856,18 +5572,22 @@ export default function ManagerDashboard({ session, onLogout }) {
                             {order.status}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-pos-muted">{formatMoney(order.total)} EUR</td>
+                        <td className="px-3 py-2 text-pos-muted">
+                          {formatMoney(order.total)} EUR
+                        </td>
                         <td className="px-3 py-2 text-pos-muted">
                           {formatDateTime(order.createdAt)}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          {order.status === "paid" || order.status === "pending_payment" ? (
+                          {order.status === "paid" ||
+                          order.status === "pending_payment" ? (
                             <button
                               type="button"
                               className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
                               onClick={() =>
                                 runAction(
-                                  () => downloadInvoicePdf(session.token, order.id),
+                                  () =>
+                                    downloadInvoicePdf(session.token, order.id),
                                   `Invoice PDF downloaded for order #${order.id}.`,
                                 )
                               }
@@ -4891,9 +5611,12 @@ export default function ManagerDashboard({ session, onLogout }) {
               <article className="pos-panel rounded-xl p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="m-0 text-base font-semibold text-white">Advanced Reports</h3>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Advanced Reports
+                    </h3>
                     <p className="mt-1 text-xs text-pos-muted">
-                      Daily, monthly, product, and employee sales analytics with export support.
+                      Daily, monthly, product, and employee sales analytics with
+                      export support.
                     </p>
                   </div>
                   <div className="inline-flex gap-2">
@@ -4919,13 +5642,16 @@ export default function ManagerDashboard({ session, onLogout }) {
 
               <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Period Summary</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Period Summary
+                  </h3>
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                       <p className="m-0 text-xs text-pos-muted">Revenue</p>
                       <p className="m-0 mt-1 text-xl font-bold text-white">
                         {formatMoney(
-                          advancedReport?.totals?.totalRevenue ?? dailySummary?.totalRevenue,
+                          advancedReport?.totals?.totalRevenue ??
+                            dailySummary?.totalRevenue,
                         )}{" "}
                         EUR
                       </p>
@@ -4934,7 +5660,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                       <p className="m-0 text-xs text-pos-muted">Expenses</p>
                       <p className="m-0 mt-1 text-xl font-bold text-white">
                         {formatMoney(
-                          advancedReport?.totals?.totalExpenses ?? dailySummary?.totalExpenses,
+                          advancedReport?.totals?.totalExpenses ??
+                            dailySummary?.totalExpenses,
                         )}{" "}
                         EUR
                       </p>
@@ -4943,7 +5670,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                       <p className="m-0 text-xs text-pos-muted">Net Revenue</p>
                       <p className="m-0 mt-1 text-xl font-bold text-white">
                         {formatMoney(
-                          advancedReport?.totals?.netRevenue ?? dailySummary?.netRevenue,
+                          advancedReport?.totals?.netRevenue ??
+                            dailySummary?.netRevenue,
                         )}{" "}
                         EUR
                       </p>
@@ -4951,7 +5679,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                       <p className="m-0 text-xs text-pos-muted">Paid Orders</p>
                       <p className="m-0 mt-1 text-xl font-bold text-white">
-                        {advancedReport?.totals?.paidOrders ?? dailySummary?.paidOrders ?? 0}
+                        {advancedReport?.totals?.paidOrders ??
+                          dailySummary?.paidOrders ??
+                          0}
                       </p>
                     </div>
                   </div>
@@ -4973,8 +5703,10 @@ export default function ManagerDashboard({ session, onLogout }) {
                               Order #{invoice.id}
                             </p>
                             <p className="m-0 mt-1 text-xs text-pos-muted">
-                              {invoice.table ? `Table ${invoice.table.number}` : "No table"} |{" "}
-                              {formatDateTime(invoice.updatedAt)}
+                              {invoice.table
+                                ? `Table ${invoice.table.number}`
+                                : "No table"}{" "}
+                              | {formatDateTime(invoice.updatedAt)}
                             </p>
                           </div>
                           <div className="text-right">
@@ -4986,7 +5718,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                               className="mt-2 rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
                               onClick={() =>
                                 runAction(
-                                  () => downloadInvoicePdf(session.token, invoice.id),
+                                  () =>
+                                    downloadInvoicePdf(
+                                      session.token,
+                                      invoice.id,
+                                    ),
                                   `Invoice PDF downloaded for order #${invoice.id}.`,
                                 )
                               }
@@ -5001,7 +5737,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Monthly Sales</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Monthly Sales
+                  </h3>
                   <p className="mb-3 mt-1 text-xs text-pos-muted">
                     Rolling monthly performance for the selected date range.
                   </p>
@@ -5018,12 +5756,16 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Sales By Product</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Sales By Product
+                  </h3>
                   <p className="mb-3 mt-1 text-xs text-pos-muted">
                     Best-performing products in the current report window.
                   </p>
                   <BarRows
-                    rows={ensureArray(advancedReport?.salesByProduct || []).slice(0, 8)}
+                    rows={ensureArray(
+                      advancedReport?.salesByProduct || [],
+                    ).slice(0, 8)}
                     labelKey="productName"
                     valueKey="revenue"
                     colorClass="bg-cyan-400"
@@ -5034,12 +5776,16 @@ export default function ManagerDashboard({ session, onLogout }) {
                 </article>
 
                 <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">Sales By Employee</h3>
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Sales By Employee
+                  </h3>
                   <p className="mb-3 mt-1 text-xs text-pos-muted">
                     Paid order performance by staff member.
                   </p>
                   <BarRows
-                    rows={ensureArray(advancedReport?.salesByEmployee || []).slice(0, 8)}
+                    rows={ensureArray(
+                      advancedReport?.salesByEmployee || [],
+                    ).slice(0, 8)}
                     labelKey="employeeName"
                     valueKey="totalSales"
                     colorClass="bg-emerald-400"

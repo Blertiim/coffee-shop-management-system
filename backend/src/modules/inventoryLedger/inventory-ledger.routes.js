@@ -10,6 +10,8 @@ router.use(authMiddleware, adminOrManager);
 
 router.get("/ingredients", inventoryLedgerController.listIngredients);
 router.post("/ingredients", inventoryLedgerController.createIngredient);
+router.put("/ingredients/:id", inventoryLedgerController.updateIngredient);
+router.delete("/ingredients/:id", inventoryLedgerController.deleteIngredient);
 router.get("/recipes", inventoryLedgerController.listRecipes);
 router.put("/recipes", inventoryLedgerController.upsertRecipe);
 router.get("/stock-intakes", inventoryLedgerController.listStockIntakes);
