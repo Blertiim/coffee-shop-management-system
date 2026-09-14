@@ -3,7 +3,9 @@ const router = express.Router();
 const authController = require("./auth.controller");
 const authMiddleware = require("../../middlewares/auth.middleware");
 const { adminOrManager } = require("../../middlewares/role.middleware");
-const { createRateLimiter } = require("../../middlewares/rate-limit.middleware");
+const {
+  createRateLimiter,
+} = require("../../middlewares/rate-limit.middleware");
 
 const loginRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -25,12 +27,27 @@ const posLoginRateLimiter = createRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
   message: "Too many PIN attempts. Please wait a few minutes and try again.",
-  keyGenerator: (req) => `${req.ip || "unknown"}:${String(req.body?.userId || "unknown").trim()}`,
+  keyGenerator: (req) =>
+    `${req.ip || "unknown"}:${String(req.body?.userId || "unknown").trim()}`,
 });
 
-router.post("/register", authMiddleware, adminOrManager, authController.register);
+router.post(
+  "/register",
+  authMiddleware,
+  adminOrManager,
+  authController.register,
+);
 router.post("/login", loginRateLimiter, authController.login);
-router.get("/pos-staff", posStaffRateLimiter, authController.getPosStaffProfiles);
+router.get(
+  "/pos-staff",
+  posStaffRateLimiter,
+  authController.getPosStaffProfiles,
+);
 router.post("/pos-login", posLoginRateLimiter, authController.posLogin);
+
+// Self-service — any logged-in user (waiter/manager/admin) can rename their
+// own account. No role gate: it always acts on req.user.id, never a
+// body-supplied id.
+router.patch("/me", authMiddleware, authController.updateMyProfile);
 
 module.exports = router;

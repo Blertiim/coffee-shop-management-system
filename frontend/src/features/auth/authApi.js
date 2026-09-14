@@ -24,3 +24,13 @@ export const posLogin = async (payload) =>
       body: payload,
     }),
   );
+
+// Public — no auth required; the login screen fetches this before anyone
+// is signed in.
+export const getBranding = async (signal) =>
+  unwrapApiData(
+    await apiRequest("/system/branding", {
+      method: "GET",
+      signal,
+    }),
+  );

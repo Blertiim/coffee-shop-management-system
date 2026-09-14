@@ -9,6 +9,15 @@ export const getTables = async (token, signal) =>
     }),
   );
 
+export const updateTablePosition = async (token, tableId, payload) =>
+  unwrapApiData(
+    await apiRequest(`/tables/${tableId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
+
 export const getCategories = async (token, signal) =>
   unwrapApiData(
     await apiRequest("/categories", {

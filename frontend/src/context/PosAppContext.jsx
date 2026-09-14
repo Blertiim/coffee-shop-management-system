@@ -1,12 +1,24 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+} from "react";
 
-import { clearStoredSession, getStoredSession, saveStoredSession } from "../lib/authStorage";
+import {
+  clearStoredSession,
+  getStoredSession,
+  saveStoredSession,
+} from "../lib/authStorage";
 import { buildApiUrl } from "../lib/api";
 
 const POS_ALLOWED_ROLES = new Set(["admin", "waiter", "staff", "manager"]);
 const PosAppContext = createContext(null);
 
-const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeRole = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const isManagerRole = (role) => {
   const normalized = normalizeRole(role);
@@ -89,7 +101,9 @@ const reducer = (state, action) => {
       return {
         ...state,
         session: action.payload,
-        screen: isManagerRole(action.payload?.user?.role) ? "manager" : "tables",
+        screen: isManagerRole(action.payload?.user?.role)
+          ? "manager"
+          : "tables",
         selectedTable: null,
         notice: null,
         guestOrderAlert: null,
@@ -116,7 +130,9 @@ const reducer = (state, action) => {
         screen: "order",
         notice: null,
         guestOrderAlert:
-          state.guestOrderAlert?.tableId === action.payload?.id ? null : state.guestOrderAlert,
+          state.guestOrderAlert?.tableId === action.payload?.id
+            ? null
+            : state.guestOrderAlert,
         highlightedGuestTableId:
           state.highlightedGuestTableId === action.payload?.id
             ? null
@@ -159,7 +175,8 @@ const reducer = (state, action) => {
       ) {
         return {
           ...state,
-          highlightedGuestTableId: nextAlert.tableId || state.highlightedGuestTableId,
+          highlightedGuestTableId:
+            nextAlert.tableId || state.highlightedGuestTableId,
           tablesRefreshToken: state.tablesRefreshToken + 1,
         };
       }
@@ -178,8 +195,27 @@ const reducer = (state, action) => {
         ...state,
         guestOrderAlert: null,
         dismissedGuestOrderEventId:
-          state.guestOrderAlert?.eventId || state.dismissedGuestOrderEventId || null,
+          state.guestOrderAlert?.eventId ||
+          state.dismissedGuestOrderEventId ||
+          null,
       };
+
+    case "UPDATE_SESSION_USER": {
+      if (!state.session) {
+        return state;
+      }
+
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          user: {
+            ...state.session.user,
+            ...action.payload,
+          },
+        },
+      };
+    }
 
     default:
       return state;
@@ -244,7 +280,11 @@ export function PosAppProvider({ children }) {
       source.removeEventListener("update", handleUpdate);
       source.close();
     };
-  }, [state.session?.token, state.session?.user?.id, state.session?.user?.role]);
+  }, [
+    state.session?.token,
+    state.session?.user?.id,
+    state.session?.user?.role,
+  ]);
 
   const loginSuccess = useCallback((loginResponse, staffProfile) => {
     const nextSession = {
@@ -256,7 +296,9 @@ export function PosAppProvider({ children }) {
     const normalizedRole = normalizeRole(nextSession.user?.role);
 
     if (!POS_ALLOWED_ROLES.has(normalizedRole)) {
-      throw new Error("This POS login is only available for cafe staff accounts.");
+      throw new Error(
+        "This POS login is only available for cafe staff accounts.",
+      );
     }
 
     dispatch({
@@ -305,6 +347,13 @@ export function PosAppProvider({ children }) {
     });
   }, []);
 
+  const updateSessionUser = useCallback((patch) => {
+    dispatch({
+      type: "UPDATE_SESSION_USER",
+      payload: patch,
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       ...state,
@@ -316,6 +365,7 @@ export function PosAppProvider({ children }) {
       dismissNotice,
       dismissGuestOrderAlert,
       receiveGuestOrderAlert,
+      updateSessionUser,
     }),
     [
       dismissGuestOrderAlert,
@@ -327,10 +377,13 @@ export function PosAppProvider({ children }) {
       selectTable,
       showNotice,
       state,
+      updateSessionUser,
     ],
   );
 
-  return <PosAppContext.Provider value={value}>{children}</PosAppContext.Provider>;
+  return (
+    <PosAppContext.Provider value={value}>{children}</PosAppContext.Provider>
+  );
 }
 
 export const usePosApp = () => {

@@ -21,6 +21,7 @@ model User {
   auditLogs      AuditLog[] @relation("AuditActor")
   stockIntakes   StockIntake[] @relation("StockIntakeCreator")
   stockMovements StockMovement[] @relation("StockMovementCreator")
+  dailyClosings  DailyClosing[] @relation("DailyClosingCreator")
 }
 
 model Category {
@@ -61,6 +62,11 @@ model Table {
   location         String
   status           String             @default("available")
   assignedWaiterId Int?
+  // Manager-arranged floor position, as a percentage (0-100) of the table
+  // canvas. Null means "not positioned yet" — the UI falls back to an
+  // auto-generated grid slot until a manager drags the table into place.
+  positionX        Float?
+  positionY        Float?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   orders           Order[]
@@ -381,6 +387,45 @@ model SystemAlert {
 
   @@index([status, createdAt])
   @@index([type, entityType, entityId])
+}
+
+// Permanent snapshot of a day's sales, generated on demand by a manager
+// ("Mbyllja Ditore"). Creating a closing never blocks or hides subsequent
+// orders/data for that date — it is purely a saved, downloadable record,
+// kept for reconciling the physical cash register against the system.
+model DailyClosing {
+  id               Int      @id @default(autoincrement())
+  date             DateTime @unique @db.Date
+  totalRevenue     Float
+  totalExpenses    Float
+  netRevenue       Float
+  totalOrders      Int
+  paidOrders       Int
+  averagePaidOrder Float
+  cashTotal        Float    @default(0)
+  cardTotal        Float    @default(0)
+  otherTotal       Float    @default(0)
+  // Snapshot of per-product quantities/revenue for the closed day (name,
+  // category, quantitySold, revenue) — stored at closing time so the record
+  // stays accurate even if products are later renamed, recategorized, or
+  // deleted.
+  productBreakdown Json?
+  closedById       Int
+  closedBy         User     @relation("DailyClosingCreator", fields: [closedById], references: [id])
+  createdAt        DateTime @default(now())
+
+  @@index([closedById])
+}
+
+// Simple key/value store for editable site-wide settings — currently just
+// the bar's display name shown on the staff login screen (so a manager can
+// rebrand it, e.g. "ROSIT BAR" -> "BOLERO BAR", without a code change).
+model SystemSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model TableAccessToken {

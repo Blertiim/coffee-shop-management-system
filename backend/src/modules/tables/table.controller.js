@@ -1,7 +1,11 @@
 const { Prisma } = require("@prisma/client");
 
 const prisma = require("../../config/prisma");
-const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
+const {
+  handleControllerError,
+  sendError,
+  sendSuccess,
+} = require("../../utils/response");
 const { normalizeRole } = require("../../middlewares/role.middleware");
 const {
   validateAssignTablePayload,
@@ -12,7 +16,12 @@ const {
 } = require("./table.validation");
 
 const ARCHIVED_TABLE_STATUS = "archived";
-const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
+const ACTIVE_ORDER_STATUSES = [
+  "pending",
+  "preparing",
+  "served",
+  "pending_payment",
+];
 const GUEST_USER_EMAIL = "guest.orders@system.local";
 
 const tableInclude = {
@@ -77,7 +86,10 @@ const isGuestOriginOrder = (order) => {
 const mapTable = (table) => {
   const activeOrder = Array.isArray(table?.orders) ? table.orders[0] : null;
   const itemCount = Array.isArray(activeOrder?.items)
-    ? activeOrder.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+    ? activeOrder.items.reduce(
+        (sum, item) => sum + Number(item.quantity || 0),
+        0,
+      )
     : 0;
 
   return {
@@ -123,27 +135,17 @@ const ensureWaiterUser = async (tx, waiterId) => {
 
 exports.getAllTables = async (req, res) => {
   try {
-    const userId = req.user && req.user.id;
-    const userRole = normalizeRole(req.user && req.user.role);
-
-    let where = {
+    // Every logged-in role (waiter, manager, admin) sees every non-archived
+    // table, in every section. "assignedWaiterId" only tracks who is
+    // serving a table for display purposes — it never restricts which
+    // tables a waiter can see or open, otherwise a waiter with no tables
+    // assigned in a given section would see that whole section as empty
+    // even though tables exist there.
+    const where = {
       status: {
         not: ARCHIVED_TABLE_STATUS,
       },
     };
-
-    if (userRole === "waiter") {
-      if (!userId) {
-        return sendSuccess(res, 200, "Tables retrieved successfully", []);
-      }
-
-      where = {
-        assignedWaiterId: userId,
-        status: {
-          not: ARCHIVED_TABLE_STATUS,
-        },
-      };
-    }
 
     const tables = await prisma.table.findMany({
       where,
@@ -151,7 +153,12 @@ exports.getAllTables = async (req, res) => {
       orderBy: { number: "asc" },
     });
 
-    return sendSuccess(res, 200, "Tables retrieved successfully", tables.map(mapTable));
+    return sendSuccess(
+      res,
+      200,
+      "Tables retrieved successfully",
+      tables.map(mapTable),
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get all tables error");
   }
@@ -170,7 +177,12 @@ exports.getTableById = async (req, res) => {
       return sendError(res, 404, "Table not found");
     }
 
-    return sendSuccess(res, 200, "Table retrieved successfully", mapTable(table));
+    return sendSuccess(
+      res,
+      200,
+      "Table retrieved successfully",
+      mapTable(table),
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get table by id error");
   }
@@ -213,7 +225,10 @@ exports.createTable = async (req, res) => {
       return sendError(res, 400, "Assigned user must have waiter role");
     }
 
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       return sendError(res, 409, "Table number already exists");
     }
 
@@ -235,7 +250,10 @@ exports.updateTable = async (req, res) => {
     }
 
     const updatedTable = await prisma.$transaction(async (tx) => {
-      if (data.assignedWaiterId !== undefined && data.assignedWaiterId !== null) {
+      if (
+        data.assignedWaiterId !== undefined &&
+        data.assignedWaiterId !== null
+      ) {
         try {
           await ensureWaiterUser(tx, data.assignedWaiterId);
         } catch (lookupError) {
@@ -268,7 +286,10 @@ exports.updateTable = async (req, res) => {
       return sendError(res, 400, "Assigned user must have waiter role");
     }
 
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       return sendError(res, 409, "Table number already exists");
     }
 
@@ -337,12 +358,21 @@ exports.deleteTable = async (req, res) => {
     return sendSuccess(
       res,
       200,
-      relationSummary.archived ? "Table archived successfully" : "Table deleted successfully",
+      relationSummary.archived
+        ? "Table archived successfully"
+        : "Table deleted successfully",
       relationSummary,
     );
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
-      return sendError(res, 400, "Cannot delete a table that is linked to orders or reservations");
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003"
+    ) {
+      return sendError(
+        res,
+        400,
+        "Cannot delete a table that is linked to orders or reservations",
+      );
     }
 
     return handleControllerError(res, error, "Delete table error");
@@ -389,7 +419,9 @@ exports.assignTableToWaiter = async (req, res) => {
     return sendSuccess(
       res,
       200,
-      waiterId ? "Table assigned successfully" : "Table unassigned successfully",
+      waiterId
+        ? "Table assigned successfully"
+        : "Table unassigned successfully",
       updatedTable,
     );
   } catch (error) {
@@ -485,7 +517,12 @@ exports.setWaiterTableAssignments = async (req, res) => {
       });
     });
 
-    return sendSuccess(res, 200, "Waiter table assignments updated successfully", result);
+    return sendSuccess(
+      res,
+      200,
+      "Waiter table assignments updated successfully",
+      result,
+    );
   } catch (error) {
     if (error.message === "WAITER_NOT_FOUND") {
       return sendError(res, 404, "Waiter not found");
@@ -499,6 +536,10 @@ exports.setWaiterTableAssignments = async (req, res) => {
       return sendError(res, 404, "One or more tables were not found");
     }
 
-    return handleControllerError(res, error, "Set waiter table assignments error");
+    return handleControllerError(
+      res,
+      error,
+      "Set waiter table assignments error",
+    );
   }
 };

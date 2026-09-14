@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import PosQrCode from "../../components/PosQrCode";
 import PosScreenLoader from "../../components/PosScreenLoader";
+import { usePosApp } from "../../context/PosAppContext";
 import {
   assignTableToWaiter,
   buildRealtimeStreamUrl,
@@ -15,17 +16,26 @@ import {
   createStockIntake,
   createTable,
   createWaiter,
+  createDailyClosing,
   deleteCategory,
   deleteProduct,
   deleteTable,
   deleteWaiter,
+  updateTable,
+  updateTablePosition,
   downloadAdvancedReportCsv,
   downloadAdvancedReportPdf,
+  downloadDailyClosingPdf,
   downloadInvoicePdf,
   downloadSupplierInvoicePdf,
   getAdvancedReport,
   getAuditLogs,
+  getBranding,
+  updateBranding,
+  updateMyProfile,
   getCategories,
+  getDailyClosingPreview,
+  getDailyClosings,
   getDailySummary,
   getDashboardInvoices,
   getDashboardOrders,
@@ -72,6 +82,7 @@ const SECTIONS = [
   { key: "employees", label: "Staff & Tables" },
   { key: "orders", label: "Orders" },
   { key: "reports", label: "Reports" },
+  { key: "closing", label: "Mbyllja Ditore" },
 ];
 
 const todayDate = new Date().toISOString().slice(0, 10);
@@ -127,10 +138,68 @@ const defaultWaiterForm = {
   status: "active",
 };
 
+// Fixed set of locations — must match the section keys the waiter-facing
+// "Tavolinat" screen filters by (TableSelectionScreen.jsx MONITOR_SECTIONS),
+// so a table always lands in exactly one section and never "leaks" into
+// another one due to a typo or inconsistent casing in a free-text field.
+const TABLE_LOCATION_OPTIONS = ["Main Hall", "Terrace 1", "Terrace 2"];
+
 const defaultTableForm = {
   number: "",
   capacity: "4",
-  location: "Main Hall",
+  location: TABLE_LOCATION_OPTIONS[0],
+};
+
+// Same layout math as the waiter-facing "Tavolinat" screen, so a table
+// dragged here shows up in the same spot there.
+const TABLE_ARRANGE_SLOT_PRESETS = [
+  { left: 2.2, top: 6.4, width: 14.2, height: 9 },
+  { left: 17.5, top: 6.4, width: 14.2, height: 9 },
+  { left: 32.8, top: 6.4, width: 14.2, height: 9 },
+  { left: 48.1, top: 6.4, width: 14.2, height: 9 },
+  { left: 63.4, top: 6.4, width: 14.2, height: 9 },
+  { left: 78.7, top: 6.4, width: 14.2, height: 9 },
+  { left: 2.2, top: 16.6, width: 14.2, height: 9 },
+  { left: 17.5, top: 16.6, width: 14.2, height: 9 },
+  { left: 32.8, top: 16.6, width: 14.2, height: 9 },
+  { left: 48.1, top: 16.6, width: 14.2, height: 9 },
+  { left: 63.4, top: 16.6, width: 14.2, height: 9 },
+  { left: 78.7, top: 16.6, width: 14.2, height: 9 },
+  { left: 2.2, top: 26.8, width: 14.2, height: 9 },
+  { left: 17.5, top: 26.8, width: 14.2, height: 9 },
+  { left: 32.8, top: 26.8, width: 14.2, height: 9 },
+];
+
+const getFallbackArrangeSlot = (index) => {
+  const fallbackIndex = Math.max(0, index - TABLE_ARRANGE_SLOT_PRESETS.length);
+  const columns = 6;
+  const column = fallbackIndex % columns;
+  const row = Math.floor(fallbackIndex / columns);
+
+  return {
+    left: 2.2 + column * 15.3,
+    top: 37 + row * 10.2,
+    width: 14.2,
+    height: 9,
+  };
+};
+
+const TABLE_ARRANGE_DEFAULT_SIZE = { width: 14.2, height: 9 };
+
+const hasCustomTablePosition = (table) =>
+  typeof table?.positionX === "number" && typeof table?.positionY === "number";
+
+const resolveTableArrangeSlot = (table, index) => {
+  if (hasCustomTablePosition(table)) {
+    return {
+      left: table.positionX,
+      top: table.positionY,
+      width: TABLE_ARRANGE_DEFAULT_SIZE.width,
+      height: TABLE_ARRANGE_DEFAULT_SIZE.height,
+    };
+  }
+
+  return TABLE_ARRANGE_SLOT_PRESETS[index] || getFallbackArrangeSlot(index);
 };
 
 const defaultSupplierInvoiceForm = {
@@ -619,6 +688,7 @@ function BarRows({
 }
 
 export default function ManagerDashboard({ session, onLogout }) {
+  const { updateSessionUser } = usePosApp();
   const [activeSection, setActiveSection] = useState("overview");
   const [filters, setFilters] = useState({ from: todayDate, to: todayDate });
   const [reportPreset, setReportPreset] = useState("today");
@@ -649,18 +719,33 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [stockMovements, setStockMovements] = useState([]);
   const [waiters, setWaiters] = useState([]);
   const [tables, setTables] = useState([]);
+  const [arrangeLocation, setArrangeLocation] = useState("all");
+  const [tableDragState, setTableDragState] = useState(null);
+  const [savingTablePositionId, setSavingTablePositionId] = useState(null);
+  const tableArrangeCanvasRef = useRef(null);
   const [selectedWaiterForTables, setSelectedWaiterForTables] = useState(null);
   const [assignedTableIds, setAssignedTableIds] = useState([]);
   const [selectedQrTableId, setSelectedQrTableId] = useState(null);
   const [guestAccess, setGuestAccess] = useState(null);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isQrLoading, setIsQrLoading] = useState(false);
+  const [dailyClosingDate, setDailyClosingDate] = useState(todayDate);
+  const [dailyClosingPreview, setDailyClosingPreview] = useState(null);
+  const [dailyClosingHistory, setDailyClosingHistory] = useState([]);
+  const [isDailyClosingLoading, setIsDailyClosingLoading] = useState(false);
+  const [barName, setBarName] = useState("");
+  const [barNameDraft, setBarNameDraft] = useState("");
+  const [isEditingManagerName, setIsEditingManagerName] = useState(false);
+  const [managerNameDraft, setManagerNameDraft] = useState(
+    session.user?.fullName || "",
+  );
 
   const [editingProductId, setEditingProductId] = useState(null);
   const [productForm, setProductForm] = useState(defaultProductForm);
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [categoryForm, setCategoryForm] = useState(defaultCategoryForm);
   const [editingWaiterId, setEditingWaiterId] = useState(null);
+  const [editingTableId, setEditingTableId] = useState(null);
   const [waiterForm, setWaiterForm] = useState(defaultWaiterForm);
   const [editingIngredientId, setEditingIngredientId] = useState(null);
   const [tableForm, setTableForm] = useState(defaultTableForm);
@@ -867,6 +952,11 @@ export default function ManagerDashboard({ session, onLogout }) {
             label: "tables",
             load: () => getTables(session.token, controller.signal),
           },
+          {
+            key: "branding",
+            label: "branding",
+            load: () => getBranding(session.token, controller.signal),
+          },
         ];
         const results = await Promise.allSettled(
           requests.map((request) => request.load()),
@@ -930,6 +1020,7 @@ export default function ManagerDashboard({ session, onLogout }) {
         });
         const nextWaiters = getResultValue("waiters", []);
         const nextTables = getResultValue("tables", []);
+        const nextBranding = getResultValue("branding", null);
 
         setStats(nextStats || null);
         setTopProducts(ensureArray(nextTopProducts));
@@ -962,6 +1053,10 @@ export default function ManagerDashboard({ session, onLogout }) {
         );
         setWaiters(ensureArray(nextWaiters));
         setTables(ensureArray(nextTables));
+        if (nextBranding?.barName) {
+          setBarName(nextBranding.barName);
+          setBarNameDraft(nextBranding.barName);
+        }
 
         if (failedRequests.length) {
           const visibleLabels = failedRequests
@@ -998,6 +1093,58 @@ export default function ManagerDashboard({ session, onLogout }) {
       controller.abort();
     };
   }, [filters, onLogout, refreshTick, session.token]);
+
+  useEffect(() => {
+    if (activeSection !== "closing") {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let mounted = true;
+
+    const loadDailyClosing = async () => {
+      setIsDailyClosingLoading(true);
+
+      try {
+        const [preview, history] = await Promise.all([
+          getDailyClosingPreview(
+            session.token,
+            { date: dailyClosingDate },
+            controller.signal,
+          ),
+          getDailyClosings(session.token, {}, controller.signal),
+        ]);
+
+        if (!mounted) {
+          return;
+        }
+
+        setDailyClosingPreview(preview || null);
+        setDailyClosingHistory(ensureArray(history));
+      } catch (requestError) {
+        if (!mounted || isAbortError(requestError)) {
+          return;
+        }
+
+        if (isAuthError(requestError)) {
+          onLogout();
+          return;
+        }
+
+        setError(requestError.message || "Failed to load daily closing data.");
+      } finally {
+        if (mounted) {
+          setIsDailyClosingLoading(false);
+        }
+      }
+    };
+
+    loadDailyClosing();
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, [activeSection, dailyClosingDate, onLogout, refreshTick, session.token]);
 
   const overviewCards = useMemo(
     () => [
@@ -1074,6 +1221,30 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     return byWaiter;
   }, [tables]);
+
+  const tableArrangeLocations = useMemo(
+    () =>
+      Array.from(
+        new Set(tables.map((table) => table.location).filter(Boolean)),
+      ),
+    [tables],
+  );
+
+  const tableArrangeBindings = useMemo(() => {
+    const filteredTables =
+      arrangeLocation === "all"
+        ? tables
+        : tables.filter((table) => table.location === arrangeLocation);
+
+    return filteredTables
+      .slice()
+      .sort((left, right) => left.number - right.number)
+      .map((table, index) => ({
+        table,
+        visualId: index + 1,
+        slot: resolveTableArrangeSlot(table, index),
+      }));
+  }, [arrangeLocation, tables]);
 
   const selectedQrTable = useMemo(
     () => tables.find((table) => table.id === selectedQrTableId) || null,
@@ -1426,6 +1597,15 @@ export default function ManagerDashboard({ session, onLogout }) {
     setCategoryForm(defaultCategoryForm);
   };
 
+  const beginEditTable = (table) => {
+    setEditingTableId(table.id);
+    setTableForm({
+      number: String(table.number),
+      capacity: String(table.capacity),
+      location: table.location || TABLE_LOCATION_OPTIONS[0],
+    });
+  };
+
   const beginEditWaiter = (waiter) => {
     setEditingWaiterId(waiter.id);
     setWaiterForm({
@@ -1441,6 +1621,7 @@ export default function ManagerDashboard({ session, onLogout }) {
   };
 
   const resetTableForm = () => {
+    setEditingTableId(null);
     setTableForm(defaultTableForm);
   };
 
@@ -2279,6 +2460,27 @@ export default function ManagerDashboard({ session, onLogout }) {
       location: tableForm.location.trim(),
     };
 
+    if (editingTableId) {
+      await runAction(async () => {
+        const updatedTable = await updateTable(
+          session.token,
+          editingTableId,
+          payload,
+        );
+        setTables((current) =>
+          current
+            .map((table) =>
+              table.id === editingTableId
+                ? { ...table, ...updatedTable }
+                : table,
+            )
+            .sort((left, right) => left.number - right.number),
+        );
+        resetTableForm();
+      }, "Table updated.");
+      return;
+    }
+
     await runAction(async () => {
       const createdTable = await createTable(session.token, payload);
       setTables((current) =>
@@ -2363,6 +2565,105 @@ export default function ManagerDashboard({ session, onLogout }) {
     }, `Table ${table.number} removed.`);
   };
 
+  const clampArrangePercent = (value, max) =>
+    Math.min(Math.max(value, 0), Math.max(max, 0));
+
+  const handleTableArrangePointerDown = (event, binding) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch (captureError) {
+      // Pointer capture can fail in rare edge cases — dragging still works,
+      // just a little less smoothly if the pointer leaves the element.
+    }
+
+    setTableDragState({
+      tableId: binding.table.id,
+      pointerId: event.pointerId,
+      left: binding.slot.left,
+      top: binding.slot.top,
+      width: binding.slot.width,
+      height: binding.slot.height,
+    });
+  };
+
+  const handleTableArrangePointerMove = (event) => {
+    if (!tableDragState || event.pointerId !== tableDragState.pointerId) {
+      return;
+    }
+
+    const canvas = tableArrangeCanvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+
+    if (!rect.width || !rect.height) {
+      return;
+    }
+
+    const rawLeft = ((event.clientX - rect.left) / rect.width) * 100;
+    const rawTop = ((event.clientY - rect.top) / rect.height) * 100;
+
+    setTableDragState((current) => {
+      if (!current || current.pointerId !== event.pointerId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        left: clampArrangePercent(
+          rawLeft - current.width / 2,
+          100 - current.width,
+        ),
+        top: clampArrangePercent(
+          rawTop - current.height / 2,
+          100 - current.height,
+        ),
+      };
+    });
+  };
+
+  const handleTableArrangePointerUp = async (event) => {
+    if (!tableDragState || event.pointerId !== tableDragState.pointerId) {
+      return;
+    }
+
+    const finishedDrag = tableDragState;
+    setTableDragState(null);
+
+    const nextPositionX = Number(finishedDrag.left.toFixed(2));
+    const nextPositionY = Number(finishedDrag.top.toFixed(2));
+
+    setTables((current) =>
+      current.map((table) =>
+        table.id === finishedDrag.tableId
+          ? { ...table, positionX: nextPositionX, positionY: nextPositionY }
+          : table,
+      ),
+    );
+
+    setSavingTablePositionId(finishedDrag.tableId);
+
+    try {
+      await updateTablePosition(session.token, finishedDrag.tableId, {
+        positionX: nextPositionX,
+        positionY: nextPositionY,
+      });
+    } catch (positionError) {
+      setError(
+        positionError.message ||
+          "Could not save the table position. Please try again.",
+      );
+    } finally {
+      setSavingTablePositionId(null);
+    }
+  };
+
   const handleDownloadReportCsv = async () => {
     await runAction(
       () => downloadAdvancedReportCsv(session.token, filters),
@@ -2375,6 +2676,46 @@ export default function ManagerDashboard({ session, onLogout }) {
       () => downloadAdvancedReportPdf(session.token, filters),
       "Advanced report PDF downloaded.",
     );
+  };
+
+  const handleCreateDailyClosing = async () => {
+    await runAction(
+      () => createDailyClosing(session.token, { date: dailyClosingDate }),
+      `Mbyllja ditore e ${dailyClosingDate} u krijua.`,
+    );
+  };
+
+  const handleSaveBranding = async () => {
+    const trimmedBarName = barNameDraft.trim();
+
+    if (!trimmedBarName) {
+      setError("Emri i barit s'mund te jete bosh.");
+      return;
+    }
+
+    await runAction(
+      () => updateBranding(session.token, { barName: trimmedBarName }),
+      `Emri i barit u ndryshua ne "${trimmedBarName}".`,
+    );
+  };
+
+  const handleUpdateManagerName = async () => {
+    const trimmedName = managerNameDraft.trim();
+
+    if (!trimmedName) {
+      setError("Emri s'mund te jete bosh.");
+      return;
+    }
+
+    const result = await runAction(
+      () => updateMyProfile(session.token, { fullName: trimmedName }),
+      `Emri yt u ndryshua ne "${trimmedName}".`,
+    );
+
+    if (result?.user) {
+      updateSessionUser(result.user);
+      setIsEditingManagerName(false);
+    }
   };
 
   const handleRotateGuestQr = async () => {
@@ -2448,9 +2789,57 @@ export default function ManagerDashboard({ session, onLogout }) {
         <aside className="pos-panel-soft flex flex-col gap-3 p-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
             <span className="pos-badge">Manager</span>
-            <h2 className="mt-3 text-lg font-bold text-white">
-              {session.user?.fullName}
-            </h2>
+
+            {isEditingManagerName ? (
+              <div className="mt-3 flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={managerNameDraft}
+                  maxLength={80}
+                  autoFocus
+                  onChange={(event) => setManagerNameDraft(event.target.value)}
+                  className="rounded-lg border border-white/15 bg-pos-panelSoft px-2 py-1.5 text-sm text-white"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="pos-button pos-button-primary flex-1 rounded-lg px-2 py-1.5 text-xs"
+                    onClick={handleUpdateManagerName}
+                    disabled={isSaving}
+                  >
+                    Ruaj
+                  </button>
+                  <button
+                    type="button"
+                    className="pos-button pos-button-muted flex-1 rounded-lg px-2 py-1.5 text-xs"
+                    onClick={() => {
+                      setManagerNameDraft(session.user?.fullName || "");
+                      setIsEditingManagerName(false);
+                    }}
+                    disabled={isSaving}
+                  >
+                    Anulo
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h2 className="mt-3 text-lg font-bold text-white">
+                  {session.user?.fullName}
+                </h2>
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-medium text-pos-accent hover:underline"
+                  onClick={() => {
+                    setManagerNameDraft(session.user?.fullName || "");
+                    setIsEditingManagerName(true);
+                  }}
+                >
+                  Ndrysho emrin
+                </button>
+              </>
+            )}
+
             <p className="mt-1 text-xs uppercase tracking-wide text-pos-muted">
               {String(session.user?.role || "").toUpperCase()}
             </p>
@@ -2561,6 +2950,40 @@ export default function ManagerDashboard({ session, onLogout }) {
 
           {activeSection === "overview" ? (
             <section className="grid min-h-0 grid-cols-1 gap-4">
+              <article className="pos-panel rounded-xl p-4">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Emri i Barit
+                    </h3>
+                    <p className="mt-1 text-xs text-pos-muted">
+                      Ky emer shfaqet ne ekranin e hyrjes (Staff Login) te
+                      terminali i POS. Aktualisht: {barName || "..."}
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={barNameDraft}
+                      maxLength={60}
+                      onChange={(event) => setBarNameDraft(event.target.value)}
+                      placeholder="p.sh. BOLERO BAR"
+                      className="min-w-[220px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <button
+                      type="button"
+                      className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                      onClick={handleSaveBranding}
+                      disabled={
+                        isSaving || barNameDraft.trim() === barName.trim()
+                      }
+                    >
+                      Ruaj
+                    </button>
+                  </div>
+                </div>
+              </article>
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {overviewCards.map((card) => (
                   <article
@@ -4965,569 +5388,706 @@ export default function ManagerDashboard({ session, onLogout }) {
           ) : null}
 
           {activeSection === "employees" ? (
-            <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[340px_1fr]">
-              <div className="grid min-h-0 grid-cols-1 gap-4">
-                <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">
-                    {editingWaiterId ? "Edit Waiter" : "Add Waiter"}
-                  </h3>
-                  <p className="mt-2 text-xs text-pos-muted">
-                    Essential fields only: waiter name + PIN.
-                  </p>
-                  <form className="mt-3 grid gap-2" onSubmit={onWaiterSubmit}>
-                    <input
-                      required
-                      placeholder="Waiter name"
-                      value={waiterForm.fullName}
-                      onChange={(event) =>
-                        setWaiterForm((current) => ({
-                          ...current,
-                          fullName: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <input
-                      required={!editingWaiterId}
-                      placeholder={
-                        editingWaiterId
-                          ? "New PIN (optional)"
-                          : "PIN (4 digits)"
-                      }
-                      value={waiterForm.pin}
-                      onChange={(event) =>
-                        setWaiterForm((current) => ({
-                          ...current,
-                          pin: event.target.value
-                            .replace(/\D/g, "")
-                            .slice(0, 4),
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <select
-                      value={waiterForm.status}
-                      onChange={(event) =>
-                        setWaiterForm((current) => ({
-                          ...current,
-                          status: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    >
-                      <option value="active">active</option>
-                      <option value="inactive">inactive</option>
-                    </select>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="pos-button pos-button-primary"
-                        type="submit"
-                        disabled={isSaving}
+            <>
+              <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[340px_1fr]">
+                <div className="grid min-h-0 grid-cols-1 gap-4">
+                  <article className="pos-panel rounded-xl p-4">
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      {editingWaiterId ? "Edit Waiter" : "Add Waiter"}
+                    </h3>
+                    <p className="mt-2 text-xs text-pos-muted">
+                      Essential fields only: waiter name + PIN.
+                    </p>
+                    <form className="mt-3 grid gap-2" onSubmit={onWaiterSubmit}>
+                      <input
+                        required
+                        placeholder="Waiter name"
+                        value={waiterForm.fullName}
+                        onChange={(event) =>
+                          setWaiterForm((current) => ({
+                            ...current,
+                            fullName: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <input
+                        required={!editingWaiterId}
+                        placeholder={
+                          editingWaiterId
+                            ? "New PIN (optional)"
+                            : "PIN (4 digits)"
+                        }
+                        value={waiterForm.pin}
+                        onChange={(event) =>
+                          setWaiterForm((current) => ({
+                            ...current,
+                            pin: event.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 4),
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <select
+                        value={waiterForm.status}
+                        onChange={(event) =>
+                          setWaiterForm((current) => ({
+                            ...current,
+                            status: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
                       >
-                        {editingWaiterId ? "Update Waiter" : "Add Waiter"}
-                      </button>
-                      <button
-                        className="pos-button pos-button-muted"
-                        type="button"
-                        onClick={resetWaiterForm}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </form>
-                </article>
-
-                <article className="pos-panel rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">
-                    Table Management
-                  </h3>
-                  <p className="mt-2 text-xs text-pos-muted">
-                    Add new tables and remove old ones from the same place.
-                  </p>
-                  <form className="mt-3 grid gap-2" onSubmit={onTableSubmit}>
-                    <input
-                      required
-                      min="1"
-                      type="number"
-                      placeholder="Table number"
-                      value={tableForm.number}
-                      onChange={(event) =>
-                        setTableForm((current) => ({
-                          ...current,
-                          number: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <input
-                      required
-                      min="1"
-                      type="number"
-                      placeholder="Capacity"
-                      value={tableForm.capacity}
-                      onChange={(event) =>
-                        setTableForm((current) => ({
-                          ...current,
-                          capacity: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <input
-                      required
-                      placeholder="Location"
-                      value={tableForm.location}
-                      onChange={(event) =>
-                        setTableForm((current) => ({
-                          ...current,
-                          location: event.target.value,
-                        }))
-                      }
-                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="pos-button pos-button-primary"
-                        type="submit"
-                        disabled={isSaving}
-                      >
-                        Add Table
-                      </button>
-                      <button
-                        className="pos-button pos-button-muted"
-                        type="button"
-                        onClick={resetTableForm}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </form>
-
-                  <div className="mt-4 rounded-xl border border-white/10">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-3">
-                      <div>
-                        <h4 className="m-0 text-sm font-semibold text-white">
-                          Existing Tables
-                        </h4>
-                        <p className="m-0 mt-1 text-[11px] text-pos-muted">
-                          Delete a table here when you no longer need it.
-                        </p>
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          className="pos-button pos-button-primary"
+                          type="submit"
+                          disabled={isSaving}
+                        >
+                          {editingWaiterId ? "Update Waiter" : "Add Waiter"}
+                        </button>
+                        <button
+                          className="pos-button pos-button-muted"
+                          type="button"
+                          onClick={resetWaiterForm}
+                        >
+                          Clear
+                        </button>
                       </div>
-                      <span className="rounded-full border border-white/15 bg-white/5 px-2 py-1 text-xs text-pos-muted">
-                        {tables.length} total
-                      </span>
-                    </div>
+                    </form>
+                  </article>
 
-                    <div className="scroll-y max-h-[28vh] overflow-y-auto">
+                  <article className="pos-panel rounded-xl p-4">
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      {editingTableId ? "Edit Table" : "Table Management"}
+                    </h3>
+                    <p className="mt-2 text-xs text-pos-muted">
+                      {editingTableId
+                        ? "Change this table's number, capacity or location."
+                        : "Add new tables and remove old ones from the same place."}
+                    </p>
+                    <form className="mt-3 grid gap-2" onSubmit={onTableSubmit}>
+                      <input
+                        required
+                        min="1"
+                        type="number"
+                        placeholder="Table number"
+                        value={tableForm.number}
+                        onChange={(event) =>
+                          setTableForm((current) => ({
+                            ...current,
+                            number: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <input
+                        required
+                        min="1"
+                        type="number"
+                        placeholder="Capacity"
+                        value={tableForm.capacity}
+                        onChange={(event) =>
+                          setTableForm((current) => ({
+                            ...current,
+                            capacity: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      />
+                      <select
+                        required
+                        value={tableForm.location}
+                        onChange={(event) =>
+                          setTableForm((current) => ({
+                            ...current,
+                            location: event.target.value,
+                          }))
+                        }
+                        className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                      >
+                        {TABLE_LOCATION_OPTIONS.map((location) => (
+                          <option key={location} value={location}>
+                            {location}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          className="pos-button pos-button-primary"
+                          type="submit"
+                          disabled={isSaving}
+                        >
+                          {editingTableId ? "Update Table" : "Add Table"}
+                        </button>
+                        <button
+                          className="pos-button pos-button-muted"
+                          type="button"
+                          onClick={resetTableForm}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="mt-4 rounded-xl border border-white/10">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-3">
+                        <div>
+                          <h4 className="m-0 text-sm font-semibold text-white">
+                            Existing Tables
+                          </h4>
+                          <p className="m-0 mt-1 text-[11px] text-pos-muted">
+                            Delete a table here when you no longer need it.
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-white/15 bg-white/5 px-2 py-1 text-xs text-pos-muted">
+                          {tables.length} total
+                        </span>
+                      </div>
+
+                      <div className="scroll-y max-h-[28vh] overflow-y-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
+                            <tr>
+                              <th className="px-3 py-2">Table</th>
+                              <th className="px-3 py-2">Cap.</th>
+                              <th className="px-3 py-2">Location</th>
+                              <th className="px-3 py-2">Waiter</th>
+                              <th className="px-3 py-2 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tables.length === 0 ? (
+                              <tr className="border-t border-white/10">
+                                <td
+                                  className="px-3 py-6 text-pos-muted"
+                                  colSpan={5}
+                                >
+                                  No tables yet. Add your first table.
+                                </td>
+                              </tr>
+                            ) : (
+                              tables
+                                .slice()
+                                .sort(
+                                  (left, right) => left.number - right.number,
+                                )
+                                .map((table) => (
+                                  <tr
+                                    key={`manage-table-inline-${table.id}`}
+                                    className={`border-t border-white/10 ${
+                                      editingTableId === table.id
+                                        ? "bg-white/5"
+                                        : ""
+                                    }`}
+                                  >
+                                    <td className="px-3 py-2 text-white">
+                                      Table {table.number}
+                                    </td>
+                                    <td className="px-3 py-2 text-pos-muted">
+                                      {table.capacity}
+                                    </td>
+                                    <td className="px-3 py-2 text-pos-muted">
+                                      {table.location}
+                                    </td>
+                                    <td className="px-3 py-2 text-pos-muted">
+                                      {table.assignedWaiter?.fullName ||
+                                        "Unassigned"}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                                          type="button"
+                                          onClick={() => beginEditTable(table)}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
+                                          type="button"
+                                          onClick={() =>
+                                            handleDeleteTable(table)
+                                          }
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div className="grid min-h-0 grid-cols-1 gap-4">
+                  <article className="pos-panel min-h-0 rounded-xl p-4">
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Waiters
+                    </h3>
+                    <div className="scroll-y mt-3 max-h-[30vh] overflow-y-auto rounded-xl border border-white/10">
                       <table className="w-full text-left text-sm">
                         <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                           <tr>
-                            <th className="px-3 py-2">Table</th>
-                            <th className="px-3 py-2">Cap.</th>
-                            <th className="px-3 py-2">Waiter</th>
-                            <th className="px-3 py-2 text-right">Action</th>
+                            <th className="px-3 py-2">Name</th>
+                            <th className="px-3 py-2">Status</th>
+                            <th className="px-3 py-2">Email</th>
+                            <th className="px-3 py-2">Assigned Tables</th>
+                            <th className="px-3 py-2 text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {tables.length === 0 ? (
+                          {waiters.length === 0 ? (
                             <tr className="border-t border-white/10">
                               <td
                                 className="px-3 py-6 text-pos-muted"
-                                colSpan={4}
+                                colSpan={5}
                               >
-                                No tables yet. Add your first table.
+                                No waiters yet. Add your first waiter.
                               </td>
                             </tr>
                           ) : (
-                            tables
-                              .slice()
-                              .sort((left, right) => left.number - right.number)
-                              .map((table) => (
-                                <tr
-                                  key={`manage-table-inline-${table.id}`}
-                                  className="border-t border-white/10"
-                                >
-                                  <td className="px-3 py-2 text-white">
-                                    Table {table.number}
-                                  </td>
-                                  <td className="px-3 py-2 text-pos-muted">
-                                    {table.capacity}
-                                  </td>
-                                  <td className="px-3 py-2 text-pos-muted">
-                                    {table.assignedWaiter?.fullName ||
-                                      "Unassigned"}
-                                  </td>
-                                  <td className="px-3 py-2 text-right">
+                            waiters.map((waiter) => (
+                              <tr
+                                key={waiter.id}
+                                className="border-t border-white/10"
+                              >
+                                <td className="px-3 py-2 text-white">
+                                  {waiter.fullName}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span
+                                    className={`rounded-full border px-2 py-1 text-xs ${
+                                      waiter.status === "active"
+                                        ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
+                                        : "border-orange-400/30 bg-orange-500/15 text-orange-300"
+                                    }`}
+                                  >
+                                    {waiter.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-pos-muted">
+                                  {waiter.email}
+                                </td>
+                                <td className="px-3 py-2 text-pos-muted">
+                                  {(tablesByWaiter.get(waiter.id) || []).length}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <div className="inline-flex gap-2">
+                                    <button
+                                      className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                                      type="button"
+                                      onClick={() => beginEditWaiter(waiter)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/25"
+                                      type="button"
+                                      onClick={() =>
+                                        setSelectedWaiterForTables(waiter.id)
+                                      }
+                                    >
+                                      Assign Tables
+                                    </button>
+                                    <button
+                                      className="rounded-lg border border-orange-300/40 bg-orange-500/15 px-2 py-1 text-xs text-orange-200 hover:bg-orange-500/25"
+                                      type="button"
+                                      onClick={() =>
+                                        runAction(
+                                          () =>
+                                            updateWaiterStatus(
+                                              session.token,
+                                              waiter.id,
+                                              {
+                                                status:
+                                                  waiter.status === "active"
+                                                    ? "inactive"
+                                                    : "active",
+                                              },
+                                            ),
+                                          waiter.status === "active"
+                                            ? "Waiter disabled."
+                                            : "Waiter enabled.",
+                                        )
+                                      }
+                                    >
+                                      {waiter.status === "active"
+                                        ? "Disable"
+                                        : "Enable"}
+                                    </button>
                                     <button
                                       className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
                                       type="button"
-                                      onClick={() => handleDeleteTable(table)}
+                                      onClick={() => handleDeleteWaiter(waiter)}
                                     >
                                       Delete
                                     </button>
-                                  </td>
-                                </tr>
-                              ))
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
                           )}
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                </article>
-              </div>
+                  </article>
 
-              <div className="grid min-h-0 grid-cols-1 gap-4">
-                <article className="pos-panel min-h-0 rounded-xl p-4">
-                  <h3 className="m-0 text-base font-semibold text-white">
-                    Waiters
-                  </h3>
-                  <div className="scroll-y mt-3 max-h-[30vh] overflow-y-auto rounded-xl border border-white/10">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
-                        <tr>
-                          <th className="px-3 py-2">Name</th>
-                          <th className="px-3 py-2">Status</th>
-                          <th className="px-3 py-2">Email</th>
-                          <th className="px-3 py-2">Assigned Tables</th>
-                          <th className="px-3 py-2 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {waiters.length === 0 ? (
-                          <tr className="border-t border-white/10">
-                            <td
-                              className="px-3 py-6 text-pos-muted"
-                              colSpan={5}
-                            >
-                              No waiters yet. Add your first waiter.
-                            </td>
-                          </tr>
-                        ) : (
-                          waiters.map((waiter) => (
-                            <tr
-                              key={waiter.id}
-                              className="border-t border-white/10"
-                            >
-                              <td className="px-3 py-2 text-white">
-                                {waiter.fullName}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={`rounded-full border px-2 py-1 text-xs ${
-                                    waiter.status === "active"
-                                      ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-300"
-                                      : "border-orange-400/30 bg-orange-500/15 text-orange-300"
-                                  }`}
-                                >
-                                  {waiter.status}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-pos-muted">
-                                {waiter.email}
-                              </td>
-                              <td className="px-3 py-2 text-pos-muted">
-                                {(tablesByWaiter.get(waiter.id) || []).length}
-                              </td>
-                              <td className="px-3 py-2 text-right">
-                                <div className="inline-flex gap-2">
-                                  <button
-                                    className="rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
-                                    type="button"
-                                    onClick={() => beginEditWaiter(waiter)}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="rounded-lg border border-sky-300/40 bg-sky-500/15 px-2 py-1 text-xs text-sky-100 hover:bg-sky-500/25"
-                                    type="button"
-                                    onClick={() =>
-                                      setSelectedWaiterForTables(waiter.id)
-                                    }
-                                  >
-                                    Assign Tables
-                                  </button>
-                                  <button
-                                    className="rounded-lg border border-orange-300/40 bg-orange-500/15 px-2 py-1 text-xs text-orange-200 hover:bg-orange-500/25"
-                                    type="button"
-                                    onClick={() =>
-                                      runAction(
-                                        () =>
-                                          updateWaiterStatus(
-                                            session.token,
-                                            waiter.id,
-                                            {
-                                              status:
-                                                waiter.status === "active"
-                                                  ? "inactive"
-                                                  : "active",
-                                            },
-                                          ),
-                                        waiter.status === "active"
-                                          ? "Waiter disabled."
-                                          : "Waiter enabled.",
-                                      )
-                                    }
-                                  >
-                                    {waiter.status === "active"
-                                      ? "Disable"
-                                      : "Enable"}
-                                  </button>
-                                  <button
-                                    className="rounded-lg border border-red-300/40 bg-red-500/15 px-2 py-1 text-xs text-red-200 hover:bg-red-500/25"
-                                    type="button"
-                                    onClick={() => handleDeleteWaiter(waiter)}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-
-                <article className="pos-panel min-h-0 rounded-xl p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="m-0 text-base font-semibold text-white">
-                        Table Assignment
-                      </h3>
-                      <p className="mt-1 text-xs text-pos-muted">
-                        Select a waiter and assign/unassign tables.
-                      </p>
-                    </div>
-                    <div className="inline-flex gap-2">
-                      <button
-                        type="button"
-                        className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
-                        onClick={() => setAssignedTableIds([])}
-                        disabled={!selectedWaiterForTables || isSaving}
-                      >
-                        Clear Selection
-                      </button>
-                      <button
-                        type="button"
-                        className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
-                        onClick={saveWaiterTableAssignments}
-                        disabled={!selectedWaiterForTables || isSaving}
-                      >
-                        Save Assignments
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {waiters.map((waiter) => (
-                      <button
-                        key={waiter.id}
-                        type="button"
-                        onClick={() => setSelectedWaiterForTables(waiter.id)}
-                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
-                          selectedWaiterForTables === waiter.id
-                            ? "border-pos-accent bg-pos-accent text-slate-950"
-                            : "border-white/15 bg-white/5 text-pos-text hover:bg-white/10"
-                        }`}
-                      >
-                        {waiter.fullName}
-                      </button>
-                    ))}
-                  </div>
-
-                  <p className="mt-3 text-xs text-pos-muted">
-                    Selected waiter tables: {assignedTableIds.length}
-                  </p>
-
-                  <div className="scroll-y mt-3 grid max-h-[32vh] grid-cols-2 gap-2 overflow-y-auto pr-1 xl:grid-cols-4">
-                    {tables
-                      .slice()
-                      .sort((left, right) => left.number - right.number)
-                      .map((table) => {
-                        const isAssignedToSelected = assignedTableIds.includes(
-                          table.id,
-                        );
-                        const isAssignedToAnother =
-                          table.assignedWaiterId &&
-                          table.assignedWaiterId !== selectedWaiterForTables;
-
-                        return (
-                          <button
-                            key={table.id}
-                            type="button"
-                            onClick={() => toggleAssignedTable(table.id)}
-                            className={`rounded-xl border p-3 text-left ${
-                              isAssignedToSelected
-                                ? "border-pos-accent bg-pos-accent/20"
-                                : isAssignedToAnother
-                                  ? "border-orange-300/40 bg-orange-500/10"
-                                  : "border-white/10 bg-white/5 hover:bg-white/10"
-                            }`}
-                          >
-                            <p className="m-0 text-sm font-semibold text-white">
-                              Table {table.number}
-                            </p>
-                            <p className="m-0 mt-1 text-xs text-pos-muted">
-                              {table.location}
-                            </p>
-                            <p className="m-0 mt-1 text-xs text-pos-muted">
-                              {table.assignedWaiter?.fullName
-                                ? `Assigned: ${table.assignedWaiter.fullName}`
-                                : "Unassigned"}
-                            </p>
-                          </button>
-                        );
-                      })}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {tables
-                      .filter((table) => table.assignedWaiterId)
-                      .slice(0, 6)
-                      .map((table) => (
+                  <article className="pos-panel min-h-0 rounded-xl p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="m-0 text-base font-semibold text-white">
+                          Table Assignment
+                        </h3>
+                        <p className="mt-1 text-xs text-pos-muted">
+                          Select a waiter and assign/unassign tables.
+                        </p>
+                      </div>
+                      <div className="inline-flex gap-2">
                         <button
-                          key={`quick-${table.id}`}
                           type="button"
-                          className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-pos-muted hover:bg-white/10"
-                          onClick={() => quickAssignSingleTable(table.id, null)}
+                          className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
+                          onClick={() => setAssignedTableIds([])}
+                          disabled={!selectedWaiterForTables || isSaving}
                         >
-                          Unassign Table {table.number}
+                          Clear Selection
+                        </button>
+                        <button
+                          type="button"
+                          className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                          onClick={saveWaiterTableAssignments}
+                          disabled={!selectedWaiterForTables || isSaving}
+                        >
+                          Save Assignments
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {waiters.map((waiter) => (
+                        <button
+                          key={waiter.id}
+                          type="button"
+                          onClick={() => setSelectedWaiterForTables(waiter.id)}
+                          className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                            selectedWaiterForTables === waiter.id
+                              ? "border-pos-accent bg-pos-accent text-slate-950"
+                              : "border-white/15 bg-white/5 text-pos-text hover:bg-white/10"
+                          }`}
+                        >
+                          {waiter.fullName}
                         </button>
                       ))}
-                  </div>
-                </article>
-
-                <article className="pos-panel rounded-xl p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h3 className="m-0 text-base font-semibold text-white">
-                        Customer QR Ordering
-                      </h3>
-                      <p className="mt-1 text-xs text-pos-muted">
-                        Generate a guest order link and QR code for any table.
-                      </p>
-                    </div>
-                    <div className="inline-flex gap-2">
-                      <button
-                        type="button"
-                        className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
-                        onClick={handleCopyGuestUrl}
-                        disabled={!guestOrderUrl || isQrLoading}
-                      >
-                        Copy Link
-                      </button>
-                      <button
-                        type="button"
-                        className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
-                        onClick={handleRotateGuestQr}
-                        disabled={!selectedQrTableId || isSaving || isQrLoading}
-                      >
-                        Rotate QR
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
-                    <div className="space-y-2">
-                      <label className="block text-xs uppercase tracking-wide text-pos-muted">
-                        Table
-                      </label>
-                      <select
-                        value={selectedQrTableId || ""}
-                        onChange={(event) =>
-                          setSelectedQrTableId(Number(event.target.value))
-                        }
-                        className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                      >
-                        {tables
-                          .slice()
-                          .sort((left, right) => left.number - right.number)
-                          .map((table) => (
-                            <option key={`qr-${table.id}`} value={table.id}>
-                              Table {table.number} - {table.location}
-                            </option>
-                          ))}
-                      </select>
-
-                      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                        <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
-                          Selected Table
-                        </p>
-                        <p className="m-0 mt-2 text-lg font-semibold text-white">
-                          {selectedQrTable
-                            ? `Table ${selectedQrTable.number}`
-                            : "No table"}
-                        </p>
-                        <p className="m-0 mt-1 text-xs text-pos-muted">
-                          {selectedQrTable?.location ||
-                            "Select a table to prepare guest ordering."}
-                        </p>
-                      </div>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-[180px_1fr]">
-                      <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
-                        {guestOrderUrl ? (
-                          <PosQrCode
-                            value={guestOrderUrl}
-                            alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
-                            size={180}
-                            imageClassName="h-[180px] w-[180px] rounded-lg bg-white p-2"
-                          />
-                        ) : (
-                          <p className="text-sm text-pos-muted">
-                            {isQrLoading
-                              ? "Preparing QR..."
-                              : "QR link not ready."}
-                          </p>
-                        )}
-                      </div>
+                    <p className="mt-3 text-xs text-pos-muted">
+                      Selected waiter tables: {assignedTableIds.length}
+                    </p>
 
-                      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                        <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
-                          Guest Ordering URL
-                        </p>
-                        <p className="m-0 mt-3 break-all text-sm text-white">
-                          {guestOrderUrl || "Preparing guest ordering link..."}
-                        </p>
-                        <p className="m-0 mt-3 text-xs text-pos-muted">
-                          Guests can scan the QR code, browse ready-to-order
-                          products, and append items directly to the table
-                          ticket without staff refreshing the page.
-                        </p>
-                        <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="scroll-y mt-3 grid max-h-[32vh] grid-cols-2 gap-2 overflow-y-auto pr-1 xl:grid-cols-4">
+                      {tables
+                        .slice()
+                        .sort((left, right) => left.number - right.number)
+                        .map((table) => {
+                          const isAssignedToSelected =
+                            assignedTableIds.includes(table.id);
+                          const isAssignedToAnother =
+                            table.assignedWaiterId &&
+                            table.assignedWaiterId !== selectedWaiterForTables;
+
+                          return (
+                            <button
+                              key={table.id}
+                              type="button"
+                              onClick={() => toggleAssignedTable(table.id)}
+                              className={`rounded-xl border p-3 text-left ${
+                                isAssignedToSelected
+                                  ? "border-pos-accent bg-pos-accent/20"
+                                  : isAssignedToAnother
+                                    ? "border-orange-300/40 bg-orange-500/10"
+                                    : "border-white/10 bg-white/5 hover:bg-white/10"
+                              }`}
+                            >
+                              <p className="m-0 text-sm font-semibold text-white">
+                                Table {table.number}
+                              </p>
+                              <p className="m-0 mt-1 text-xs text-pos-muted">
+                                {table.location}
+                              </p>
+                              <p className="m-0 mt-1 text-xs text-pos-muted">
+                                {table.assignedWaiter?.fullName
+                                  ? `Assigned: ${table.assignedWaiter.fullName}`
+                                  : "Unassigned"}
+                              </p>
+                            </button>
+                          );
+                        })}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {tables
+                        .filter((table) => table.assignedWaiterId)
+                        .slice(0, 6)
+                        .map((table) => (
                           <button
+                            key={`quick-${table.id}`}
                             type="button"
-                            className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
-                            onClick={() => {
-                              if (guestOrderUrl) {
-                                window.open(
-                                  guestOrderUrl,
-                                  "_blank",
-                                  "noopener,noreferrer",
-                                );
-                              }
-                            }}
-                            disabled={!guestOrderUrl}
+                            className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-pos-muted hover:bg-white/10"
+                            onClick={() =>
+                              quickAssignSingleTable(table.id, null)
+                            }
                           >
-                            Open Guest Page
+                            Unassign Table {table.number}
                           </button>
-                          <a
-                            href="/api/system/docs"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
-                          >
-                            API Docs
-                          </a>
+                        ))}
+                    </div>
+                  </article>
+
+                  <article className="pos-panel rounded-xl p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="m-0 text-base font-semibold text-white">
+                          Customer QR Ordering
+                        </h3>
+                        <p className="mt-1 text-xs text-pos-muted">
+                          Generate a guest order link and QR code for any table.
+                        </p>
+                      </div>
+                      <div className="inline-flex gap-2">
+                        <button
+                          type="button"
+                          className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
+                          onClick={handleCopyGuestUrl}
+                          disabled={!guestOrderUrl || isQrLoading}
+                        >
+                          Copy Link
+                        </button>
+                        <button
+                          type="button"
+                          className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                          onClick={handleRotateGuestQr}
+                          disabled={
+                            !selectedQrTableId || isSaving || isQrLoading
+                          }
+                        >
+                          Rotate QR
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
+                      <div className="space-y-2">
+                        <label className="block text-xs uppercase tracking-wide text-pos-muted">
+                          Table
+                        </label>
+                        <select
+                          value={selectedQrTableId || ""}
+                          onChange={(event) =>
+                            setSelectedQrTableId(Number(event.target.value))
+                          }
+                          className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                        >
+                          {tables
+                            .slice()
+                            .sort((left, right) => left.number - right.number)
+                            .map((table) => (
+                              <option key={`qr-${table.id}`} value={table.id}>
+                                Table {table.number} - {table.location}
+                              </option>
+                            ))}
+                        </select>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                            Selected Table
+                          </p>
+                          <p className="m-0 mt-2 text-lg font-semibold text-white">
+                            {selectedQrTable
+                              ? `Table ${selectedQrTable.number}`
+                              : "No table"}
+                          </p>
+                          <p className="m-0 mt-1 text-xs text-pos-muted">
+                            {selectedQrTable?.location ||
+                              "Select a table to prepare guest ordering."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                        <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
+                          {guestOrderUrl ? (
+                            <PosQrCode
+                              value={guestOrderUrl}
+                              alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
+                              size={180}
+                              imageClassName="h-[180px] w-[180px] rounded-lg bg-white p-2"
+                            />
+                          ) : (
+                            <p className="text-sm text-pos-muted">
+                              {isQrLoading
+                                ? "Preparing QR..."
+                                : "QR link not ready."}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                          <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                            Guest Ordering URL
+                          </p>
+                          <p className="m-0 mt-3 break-all text-sm text-white">
+                            {guestOrderUrl ||
+                              "Preparing guest ordering link..."}
+                          </p>
+                          <p className="m-0 mt-3 text-xs text-pos-muted">
+                            Guests can scan the QR code, browse ready-to-order
+                            products, and append items directly to the table
+                            ticket without staff refreshing the page.
+                          </p>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                              onClick={() => {
+                                if (guestOrderUrl) {
+                                  window.open(
+                                    guestOrderUrl,
+                                    "_blank",
+                                    "noopener,noreferrer",
+                                  );
+                                }
+                              }}
+                              disabled={!guestOrderUrl}
+                            >
+                              Open Guest Page
+                            </button>
+                            <a
+                              href="/api/system/docs"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                            >
+                              API Docs
+                            </a>
+                          </div>
                         </div>
                       </div>
                     </div>
+                  </article>
+                </div>
+              </section>
+
+              <section className="pos-panel mt-4 rounded-xl p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Rregullo Tavolinat
+                    </h3>
+                    <p className="mt-1 text-xs text-pos-muted">
+                      Terhiqe nje tavoline kudo don brenda kutise poshte.
+                      Pozicioni ruhet vetvetiu dhe kamarieret e shofin njesoj ne
+                      ekranin "Tavolinat".
+                    </p>
                   </div>
-                </article>
-              </div>
-            </section>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setArrangeLocation("all")}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      arrangeLocation === "all"
+                        ? "border-pos-accent bg-pos-accent text-slate-950"
+                        : "border-white/15 bg-white/5 text-pos-text hover:bg-white/10"
+                    }`}
+                  >
+                    Te gjitha
+                  </button>
+                  {tableArrangeLocations.map((location) => (
+                    <button
+                      key={location}
+                      type="button"
+                      onClick={() => setArrangeLocation(location)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                        arrangeLocation === location
+                          ? "border-pos-accent bg-pos-accent text-slate-950"
+                          : "border-white/15 bg-white/5 text-pos-text hover:bg-white/10"
+                      }`}
+                    >
+                      {location}
+                    </button>
+                  ))}
+                </div>
+
+                {tableArrangeBindings.length === 0 ? (
+                  <p className="mt-4 text-sm text-pos-muted">
+                    Nuk ka tavolina ne kete seksion.
+                  </p>
+                ) : (
+                  <div
+                    ref={tableArrangeCanvasRef}
+                    className="relative mt-4 min-h-[440px] w-full rounded-xl border border-white/10 bg-black/20"
+                    onPointerMove={handleTableArrangePointerMove}
+                    onPointerUp={handleTableArrangePointerUp}
+                    onPointerCancel={handleTableArrangePointerUp}
+                  >
+                    {tableArrangeBindings.map((binding) => {
+                      const isDraggingThis =
+                        tableDragState?.tableId === binding.table.id;
+                      const isSavingPosition =
+                        savingTablePositionId === binding.table.id;
+                      const activeSlot = isDraggingThis
+                        ? {
+                            left: tableDragState.left,
+                            top: tableDragState.top,
+                            width: tableDragState.width,
+                            height: tableDragState.height,
+                          }
+                        : binding.slot;
+
+                      return (
+                        <button
+                          key={binding.table.id}
+                          type="button"
+                          onPointerDown={(event) =>
+                            handleTableArrangePointerDown(event, binding)
+                          }
+                          className={`absolute flex touch-none select-none cursor-grab flex-col justify-center overflow-hidden rounded-lg border px-2 py-1 text-left transition active:cursor-grabbing ${
+                            isDraggingThis
+                              ? "z-30 border-pos-accent bg-pos-accent/25 shadow-lg"
+                              : "border-white/15 bg-pos-panelSoft hover:border-pos-accent/60"
+                          }`}
+                          style={{
+                            left: `${activeSlot.left}%`,
+                            top: `${activeSlot.top}%`,
+                            width: `${activeSlot.width}%`,
+                            height: `${activeSlot.height}%`,
+                          }}
+                        >
+                          <span className="text-xs font-semibold text-white">
+                            Table {binding.table.number}
+                          </span>
+                          <span className="text-[10px] text-pos-muted">
+                            {binding.table.location}
+                          </span>
+                          {isSavingPosition ? (
+                            <span className="absolute right-1 top-1 h-[6px] w-[6px] animate-pulse rounded-full bg-pos-accent" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
           ) : null}
 
           {activeSection === "orders" ? (
@@ -5795,6 +6355,199 @@ export default function ManagerDashboard({ session, onLogout }) {
                   />
                 </article>
               </section>
+            </section>
+          ) : null}
+
+          {activeSection === "closing" ? (
+            <section className="grid min-h-0 grid-cols-1 gap-4">
+              <article className="pos-panel rounded-xl p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-base font-semibold text-white">
+                      Mbyllja Ditore
+                    </h3>
+                    <p className="mt-1 text-xs text-pos-muted">
+                      Shiko shitjet e dites dhe gjenero mbylljen ditore
+                      (Z-raport). Mbyllja ruhet vetem si dokument — nuk bllokon
+                      porosi apo te dhena te tjera te asaj date.
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={dailyClosingDate}
+                      max={todayDate}
+                      onChange={(event) =>
+                        setDailyClosingDate(event.target.value)
+                      }
+                      className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                    />
+                    <button
+                      type="button"
+                      className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                      onClick={handleCreateDailyClosing}
+                      disabled={
+                        isSaving ||
+                        isDailyClosingLoading ||
+                        Boolean(dailyClosingPreview?.alreadyClosed)
+                      }
+                    >
+                      {dailyClosingPreview?.alreadyClosed
+                        ? "Dita Eshte Mbyllur"
+                        : "Mbyll Diten"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+
+              <section className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Permbledhja e {dailyClosingDate}
+                  </h3>
+                  {dailyClosingPreview?.alreadyClosed ? (
+                    <p className="mt-2 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs text-emerald-300">
+                      Kjo dite eshte mbyllur me{" "}
+                      {formatDateTime(dailyClosingPreview.closedAt)}.
+                    </p>
+                  ) : null}
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="m-0 text-xs text-pos-muted">Te Ardhura</p>
+                      <p className="m-0 mt-1 text-xl font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.totalRevenue)} EUR
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="m-0 text-xs text-pos-muted">Shpenzimet</p>
+                      <p className="m-0 mt-1 text-xl font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.totalExpenses)} EUR
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="m-0 text-xs text-pos-muted">Neto</p>
+                      <p className="m-0 mt-1 text-xl font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.netRevenue)} EUR
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                      <p className="m-0 text-xs text-pos-muted">
+                        Porosi Te Paguara
+                      </p>
+                      <p className="m-0 mt-1 text-xl font-bold text-white">
+                        {dailyClosingPreview?.paidOrders || 0}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+
+                <article className="pos-panel rounded-xl p-4">
+                  <h3 className="m-0 text-base font-semibold text-white">
+                    Ndarja Sipas Pageses
+                  </h3>
+                  <p className="mb-3 mt-1 text-xs text-pos-muted">
+                    Ndihmon me barazu arken fizike me sistemin.
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-3">
+                      <span className="text-xs text-pos-muted">Cash</span>
+                      <span className="text-sm font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.cashTotal)} EUR
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-3">
+                      <span className="text-xs text-pos-muted">Karte</span>
+                      <span className="text-sm font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.cardTotal)} EUR
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 p-3">
+                      <span className="text-xs text-pos-muted">
+                        Tjeter / Pa Specifikuar
+                      </span>
+                      <span className="text-sm font-bold text-white">
+                        {formatMoney(dailyClosingPreview?.otherTotal)} EUR
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              </section>
+
+              <article className="pos-panel min-h-0 rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">
+                  Shitjet Sipas Produktit
+                </h3>
+                <p className="mb-3 mt-1 text-xs text-pos-muted">
+                  Sa cope nga cdo produkt jane shitur ne {dailyClosingDate}{" "}
+                  (p.sh. sa espreso jane pi sot).
+                </p>
+                <div className="scroll-y max-h-[44vh] overflow-y-auto pr-1">
+                  <BarRows
+                    rows={ensureArray(
+                      dailyClosingPreview?.productBreakdown || [],
+                    )}
+                    labelKey="productName"
+                    valueKey="quantitySold"
+                    colorClass="bg-amber-400"
+                    formatValue={(value) => `${value} cope`}
+                    getMetaText={(entry) =>
+                      `${entry.categoryName || "Uncategorized"} | ${formatMoney(entry.revenue)} EUR`
+                    }
+                  />
+                </div>
+              </article>
+
+              <article className="pos-panel min-h-0 rounded-xl p-4">
+                <h3 className="m-0 text-base font-semibold text-white">
+                  Historiku i Mbylljeve
+                </h3>
+                <div className="scroll-y mt-3 max-h-[44vh] space-y-2 overflow-y-auto pr-1">
+                  {dailyClosingHistory.length === 0 ? (
+                    <p className="m-0 text-xs text-pos-muted">
+                      Ende nuk ka mbyllje ditore te ruajtura.
+                    </p>
+                  ) : null}
+                  {dailyClosingHistory.map((closing) => (
+                    <div
+                      key={closing.id}
+                      className="rounded-xl border border-white/10 bg-black/20 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="m-0 text-sm font-semibold text-white">
+                            {String(closing.date).slice(0, 10)}
+                          </p>
+                          <p className="m-0 mt-1 text-xs text-pos-muted">
+                            Mbyllur nga {closing.closedBy?.fullName || "—"} |{" "}
+                            {formatDateTime(closing.createdAt)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="m-0 text-sm font-bold text-white">
+                            {formatMoney(closing.netRevenue)} EUR
+                          </p>
+                          <button
+                            type="button"
+                            className="mt-2 rounded-lg border border-white/20 px-2 py-1 text-xs text-pos-text hover:bg-white/10"
+                            onClick={() =>
+                              runAction(
+                                () =>
+                                  downloadDailyClosingPdf(
+                                    session.token,
+                                    closing.id,
+                                  ),
+                                `Mbyllja ditore e ${String(closing.date).slice(0, 10)} u shkarkua.`,
+                              )
+                            }
+                          >
+                            Shkarko PDF
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
             </section>
           ) : null}
         </section>

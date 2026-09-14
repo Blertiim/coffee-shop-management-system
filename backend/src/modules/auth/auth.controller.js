@@ -4,25 +4,36 @@ const jwt = require("jsonwebtoken");
 const { getJwtSecret } = require("../../config/security");
 const { logManualAuditEvent } = require("../../services/audit.service");
 const { isDatabaseUnavailableError } = require("../../services/alert.service");
-const { sendError, sendSuccess, handleControllerError } = require("../../utils/response");
+const AppError = require("../../utils/app-error");
+const {
+  sendError,
+  sendSuccess,
+  handleControllerError,
+} = require("../../utils/response");
+const { ensureRequiredString } = require("../../utils/validation");
 const {
   clearPosLoginAttemptState,
   getPosLoginBlock,
   registerFailedPosLoginAttempt,
 } = require("../../services/pos-login-guard.service");
 
+const MAX_FULL_NAME_LENGTH = 80;
+
 const POS_LOGIN_ROLES = new Set(["waiter", "manager"]);
 const INVALID_POS_LOGIN_MESSAGE = "Invalid user or PIN";
 const POS_LOGIN_LOCKED_MESSAGE =
   "Too many failed attempts. POS login is temporarily locked. Please wait and try again.";
-const POS_LOGIN_DELAY_MESSAGE = "Please wait a few seconds before trying again.";
+const POS_LOGIN_DELAY_MESSAGE =
+  "Please wait a few seconds before trying again.";
 
-const normalizeRole = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeRole = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const isActiveStatus = (value) =>
   typeof value === "string" && value.trim().toLowerCase() === "active";
 
-const isValidPin = (value) => typeof value === "string" && /^\d{4}$/.test(value.trim());
+const isValidPin = (value) =>
+  typeof value === "string" && /^\d{4}$/.test(value.trim());
 
 const mapPosProfile = (user) => ({
   id: user.id,
@@ -114,7 +125,11 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     if (isDatabaseUnavailableError(error)) {
-      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
+      return sendError(
+        res,
+        503,
+        "Database unavailable. Start MySQL and try again.",
+      );
     }
     return handleControllerError(res, error, "Register error");
   }
@@ -178,9 +193,13 @@ exports.login = async (req, res) => {
       return sendError(res, 403, "User account is not active");
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, getJwtSecret(), {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      getJwtSecret(),
+      {
+        expiresIn: "7d",
+      },
+    );
 
     await logManualAuditEvent({
       actorId: user.id,
@@ -201,7 +220,11 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     if (isDatabaseUnavailableError(error)) {
-      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
+      return sendError(
+        res,
+        503,
+        "Database unavailable. Start MySQL and try again.",
+      );
     }
     return handleControllerError(res, error, "Login error");
   }
@@ -233,7 +256,11 @@ exports.getPosStaffProfiles = async (req, res) => {
     );
   } catch (error) {
     if (isDatabaseUnavailableError(error)) {
-      return sendError(res, 503, "Database unavailable. Start MySQL and reload the POS.");
+      return sendError(
+        res,
+        503,
+        "Database unavailable. Start MySQL and reload the POS.",
+      );
     }
     return handleControllerError(res, error, "Get POS staff profiles error");
   }
@@ -243,7 +270,8 @@ exports.posLogin = async (req, res) => {
   try {
     const userId = Number(req.body && req.body.userId);
     const pin = typeof req.body?.pin === "string" ? req.body.pin.trim() : "";
-    const identifier = Number.isInteger(userId) && userId > 0 ? `user:${userId}` : "";
+    const identifier =
+      Number.isInteger(userId) && userId > 0 ? `user:${userId}` : "";
     const auditContext = getAuditContext(req);
     const ipAddress = auditContext.ipAddress;
 
@@ -252,7 +280,11 @@ exports.posLogin = async (req, res) => {
     }
 
     if (!isValidPin(pin)) {
-      return sendError(res, 400, "PIN is required and must be exactly 4 digits");
+      return sendError(
+        res,
+        400,
+        "PIN is required and must be exactly 4 digits",
+      );
     }
 
     const activeBlock = getPosLoginBlock({
@@ -261,10 +293,16 @@ exports.posLogin = async (req, res) => {
     });
 
     if (activeBlock) {
-      res.setHeader("Retry-After", String(Math.max(1, Math.ceil(activeBlock.retryAfterMs / 1000))));
+      res.setHeader(
+        "Retry-After",
+        String(Math.max(1, Math.ceil(activeBlock.retryAfterMs / 1000))),
+      );
 
       await logManualAuditEvent({
-        action: activeBlock.type === "lockout" ? "auth.pos.locked" : "auth.pos.delayed",
+        action:
+          activeBlock.type === "lockout"
+            ? "auth.pos.locked"
+            : "auth.pos.delayed",
         entityType: "auth",
         entityId: String(userId),
         statusCode: 429,
@@ -279,7 +317,9 @@ exports.posLogin = async (req, res) => {
       return sendError(
         res,
         429,
-        activeBlock.type === "lockout" ? POS_LOGIN_LOCKED_MESSAGE : POS_LOGIN_DELAY_MESSAGE,
+        activeBlock.type === "lockout"
+          ? POS_LOGIN_LOCKED_MESSAGE
+          : POS_LOGIN_DELAY_MESSAGE,
       );
     }
 
@@ -299,14 +339,18 @@ exports.posLogin = async (req, res) => {
           Math.max(
             1,
             Math.ceil(
-              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) / 1000,
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) -
+                Date.now()) /
+                1000,
             ),
           ),
         ),
       );
 
       await logManualAuditEvent({
-        action: attemptState.lockedUntil ? "auth.pos.lockout" : "auth.pos.failed",
+        action: attemptState.lockedUntil
+          ? "auth.pos.lockout"
+          : "auth.pos.failed",
         entityType: "auth",
         statusCode: attemptState.lockedUntil ? 429 : 401,
         summary: `Failed POS login for user ${userId}`,
@@ -317,7 +361,9 @@ exports.posLogin = async (req, res) => {
       return sendError(
         res,
         attemptState.lockedUntil ? 429 : 401,
-        attemptState.lockedUntil ? POS_LOGIN_LOCKED_MESSAGE : INVALID_POS_LOGIN_MESSAGE,
+        attemptState.lockedUntil
+          ? POS_LOGIN_LOCKED_MESSAGE
+          : INVALID_POS_LOGIN_MESSAGE,
       );
     }
 
@@ -351,7 +397,9 @@ exports.posLogin = async (req, res) => {
           Math.max(
             1,
             Math.ceil(
-              ((attemptState.lockedUntil || attemptState.nextAllowedAt) - Date.now()) / 1000,
+              ((attemptState.lockedUntil || attemptState.nextAllowedAt) -
+                Date.now()) /
+                1000,
             ),
           ),
         ),
@@ -361,7 +409,9 @@ exports.posLogin = async (req, res) => {
         actorId: user.id,
         actorName: user.fullName,
         actorRole: user.role,
-        action: attemptState.lockedUntil ? "auth.pos.lockout" : "auth.pos.failed",
+        action: attemptState.lockedUntil
+          ? "auth.pos.lockout"
+          : "auth.pos.failed",
         entityType: "auth",
         entityId: user.id,
         statusCode: attemptState.lockedUntil ? 429 : 401,
@@ -373,7 +423,9 @@ exports.posLogin = async (req, res) => {
       return sendError(
         res,
         attemptState.lockedUntil ? 429 : 401,
-        attemptState.lockedUntil ? POS_LOGIN_LOCKED_MESSAGE : INVALID_POS_LOGIN_MESSAGE,
+        attemptState.lockedUntil
+          ? POS_LOGIN_LOCKED_MESSAGE
+          : INVALID_POS_LOGIN_MESSAGE,
       );
     }
 
@@ -382,9 +434,13 @@ exports.posLogin = async (req, res) => {
       ipAddress,
     });
 
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, getJwtSecret(), {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      getJwtSecret(),
+      {
+        expiresIn: "7d",
+      },
+    );
 
     await logManualAuditEvent({
       actorId: user.id,
@@ -405,8 +461,59 @@ exports.posLogin = async (req, res) => {
     });
   } catch (error) {
     if (isDatabaseUnavailableError(error)) {
-      return sendError(res, 503, "Database unavailable. Start MySQL and try again.");
+      return sendError(
+        res,
+        503,
+        "Database unavailable. Start MySQL and try again.",
+      );
     }
     return handleControllerError(res, error, "POS login error");
+  }
+};
+
+// Self-service only — updates the logged-in user's own display name (e.g. a
+// manager renaming their own account, like "Meti Manager" -> "Blerti
+// Manager"). Uses req.user.id from the auth token, never a body-supplied id,
+// so nobody can rename someone else's account through this endpoint.
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const fullName = ensureRequiredString(req.body.fullName, "Full name");
+
+    if (fullName.length > MAX_FULL_NAME_LENGTH) {
+      throw new AppError(
+        `Full name must be ${MAX_FULL_NAME_LENGTH} characters or fewer`,
+      );
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { fullName },
+    });
+
+    await logManualAuditEvent({
+      actorId: updatedUser.id,
+      actorName: updatedUser.fullName,
+      actorRole: updatedUser.role,
+      action: "auth.profile.updated",
+      entityType: "user",
+      entityId: updatedUser.id,
+      statusCode: 200,
+      summary: `Profile name updated to ${fullName}`,
+      payload: { fullName },
+      ...getAuditContext(req),
+    });
+
+    return sendSuccess(res, 200, "Profile updated successfully", {
+      user: await buildUserPayload(updatedUser),
+    });
+  } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return sendError(
+        res,
+        503,
+        "Database unavailable. Start MySQL and try again.",
+      );
+    }
+    return handleControllerError(res, error, "Update profile error");
   }
 };

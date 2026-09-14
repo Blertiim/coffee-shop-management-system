@@ -84,6 +84,48 @@ export const getDailySummary = async (token, params = {}, signal) =>
     ),
   );
 
+export const getDailyClosingPreview = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(
+      `/dashboard/daily-closing/preview${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
+  );
+
+export const getDailyClosings = async (token, params = {}, signal) =>
+  unwrapApiData(
+    await apiRequest(
+      `/dashboard/daily-closing${new URLSearchParams(params).toString() ? `?${new URLSearchParams(params).toString()}` : ""}`,
+      {
+        method: "GET",
+        token,
+        signal,
+      },
+    ),
+  );
+
+export const createDailyClosing = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/dashboard/daily-closing", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+  );
+
+export const getDailyClosingById = async (token, closingId, signal) =>
+  unwrapApiData(
+    await apiRequest(`/dashboard/daily-closing/${closingId}`, {
+      method: "GET",
+      token,
+      signal,
+    }),
+  );
+
 export const getLowStockProducts = async (token, params = {}, signal) =>
   unwrapApiData(
     await apiRequest(
@@ -106,6 +148,33 @@ export const getAdvancedReport = async (token, params = {}, signal) =>
         signal,
       },
     ),
+  );
+
+export const updateMyProfile = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/auth/me", {
+      method: "PATCH",
+      token,
+      body: payload,
+    }),
+  );
+
+export const getBranding = async (token, signal) =>
+  unwrapApiData(
+    await apiRequest("/system/branding", {
+      method: "GET",
+      token,
+      signal,
+    }),
+  );
+
+export const updateBranding = async (token, payload) =>
+  unwrapApiData(
+    await apiRequest("/system/branding", {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
   );
 
 export const getSystemAlerts = async (token, params = {}, signal) =>
@@ -348,6 +417,24 @@ export const deleteTable = async (token, tableId) =>
     }),
   );
 
+export const updateTable = async (token, tableId, payload) =>
+  unwrapApiData(
+    await apiRequest(`/tables/${tableId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
+
+export const updateTablePosition = async (token, tableId, payload) =>
+  unwrapApiData(
+    await apiRequest(`/tables/${tableId}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
+  );
+
 export const createCategory = async (token, payload) =>
   unwrapApiData(
     await apiRequest("/categories", {
@@ -568,5 +655,13 @@ export const downloadAdvancedReportPdf = async (token, params = {}) => {
     token,
     `/dashboard/export/report.pdf${query ? `?${query}` : ""}`,
     "advanced-sales-report.pdf",
+  );
+};
+
+export const downloadDailyClosingPdf = async (token, closingId) => {
+  await downloadReportFile(
+    token,
+    `/dashboard/daily-closing/${closingId}/pdf`,
+    `mbyllja-ditore-${closingId}.pdf`,
   );
 };

@@ -8,6 +8,26 @@ const {
 
 const VALID_TABLE_STATUSES = ["available", "occupied", "reserved", "pending_payment", "paid"];
 
+// Floor position is stored as a percentage (0-100) of the table canvas.
+// undefined = field not sent at all, null = explicitly clear the position.
+const ensureOptionalPercent = (value, fieldName) => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (Number.isNaN(numericValue) || numericValue < 0 || numericValue > 100) {
+    throw new AppError(`${fieldName} must be a number between 0 and 100`);
+  }
+
+  return numericValue;
+};
+
 const validateCreateTablePayload = (body) => ({
   number: ensurePositiveInteger(body.number, "Table number"),
   capacity: ensurePositiveInteger(body.capacity, "Table capacity"),
@@ -20,6 +40,8 @@ const validateCreateTablePayload = (body) => ({
     body.status === undefined
       ? "available"
       : ensureEnumValue(body.status, "Table status", VALID_TABLE_STATUSES),
+  positionX: ensureOptionalPercent(body.positionX, "Table X position"),
+  positionY: ensureOptionalPercent(body.positionY, "Table Y position"),
 });
 
 const validateUpdateTablePayload = (body) => {
@@ -44,6 +66,14 @@ const validateUpdateTablePayload = (body) => {
   if (body.assignedWaiterId !== undefined) {
     data.assignedWaiterId =
       body.assignedWaiterId === null ? null : ensureId(body.assignedWaiterId, "Assigned waiter id");
+  }
+
+  if (body.positionX !== undefined) {
+    data.positionX = ensureOptionalPercent(body.positionX, "Table X position");
+  }
+
+  if (body.positionY !== undefined) {
+    data.positionY = ensureOptionalPercent(body.positionY, "Table Y position");
   }
 
   if (Object.keys(data).length === 0) {

@@ -2,11 +2,16 @@ const express = require("express");
 const path = require("path");
 
 const authMiddleware = require("../../middlewares/auth.middleware");
-const { adminOnly, adminOrManager } = require("../../middlewares/role.middleware");
+const {
+  adminOnly,
+  adminOrManager,
+} = require("../../middlewares/role.middleware");
 const systemController = require("./system.controller");
 
 const router = express.Router();
-const swaggerUiAssetPath = path.dirname(require.resolve("swagger-ui-dist/package.json"));
+const swaggerUiAssetPath = path.dirname(
+  require.resolve("swagger-ui-dist/package.json"),
+);
 
 router.use(
   "/docs/assets",
@@ -17,7 +22,11 @@ router.use(
     maxAge: "1d",
   }),
 );
-router.get("/docs", systemController.requireDocsAccess, systemController.getSwaggerUi);
+router.get(
+  "/docs",
+  systemController.requireDocsAccess,
+  systemController.getSwaggerUi,
+);
 router.get(
   "/docs/swagger-init.js",
   systemController.requireDocsAccess,
@@ -28,17 +37,49 @@ router.get(
   systemController.requireDocsAccess,
   systemController.getOpenApiSpec,
 );
-router.get("/api-catalog", systemController.requireDocsAccess, systemController.getApiCatalog);
+router.get(
+  "/api-catalog",
+  systemController.requireDocsAccess,
+  systemController.getApiCatalog,
+);
 router.get(
   "/api-catalog.css",
   systemController.requireDocsAccess,
   systemController.getApiCatalogCss,
 );
-router.get("/api-catalog.js", systemController.requireDocsAccess, systemController.getApiCatalogJs);
+router.get(
+  "/api-catalog.js",
+  systemController.requireDocsAccess,
+  systemController.getApiCatalogJs,
+);
 router.get("/realtime", systemController.streamRealtime);
 
-router.get("/alerts", authMiddleware, adminOrManager, systemController.getAlerts);
-router.get("/audit-logs", authMiddleware, adminOrManager, systemController.getAuditTrail);
-router.get("/backup/snapshot", authMiddleware, adminOnly, systemController.downloadBackupSnapshot);
+router.get(
+  "/alerts",
+  authMiddleware,
+  adminOrManager,
+  systemController.getAlerts,
+);
+router.get(
+  "/audit-logs",
+  authMiddleware,
+  adminOrManager,
+  systemController.getAuditTrail,
+);
+router.get(
+  "/backup/snapshot",
+  authMiddleware,
+  adminOnly,
+  systemController.downloadBackupSnapshot,
+);
+
+// Public — the staff PIN login screen needs the bar name before login.
+router.get("/branding", systemController.getBranding);
+router.put(
+  "/branding",
+  authMiddleware,
+  adminOrManager,
+  systemController.updateBranding,
+);
 
 module.exports = router;

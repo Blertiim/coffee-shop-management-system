@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { usePosApp } from "../../context/PosAppContext";
 import PosKeypad from "../pos/components/PosKeypad";
+import { getBranding } from "./authApi";
 import usePosLogin from "./usePosLogin";
 
 const PIN_SLOT_COUNT = 4;
+const DEFAULT_BAR_NAME = "ROSIT BAR";
 
 const initials = (name) =>
   name
@@ -22,8 +24,17 @@ const buildPinSlots = (pin) =>
 
 function SelectArrowIcon() {
   return (
-    <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 fill-none stroke-current">
-      <path d="m5 7.5 5 5 5-5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      className="h-4 w-4 fill-none stroke-current"
+    >
+      <path
+        d="m5 7.5 5 5 5-5"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -31,6 +42,7 @@ function SelectArrowIcon() {
 export default function PosLoginScreen() {
   const { loginSuccess } = usePosApp();
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
+  const [barName, setBarName] = useState(DEFAULT_BAR_NAME);
   const {
     staffProfiles,
     selectedStaff,
@@ -68,7 +80,29 @@ export default function PosLoginScreen() {
     };
   }, []);
 
-  const selectedRole = useMemo(() => selectedStaff?.roleLabel || "Cafe staff", [selectedStaff]);
+  useEffect(() => {
+    const controller = new AbortController();
+
+    getBranding(controller.signal)
+      .then((branding) => {
+        if (branding?.barName) {
+          setBarName(branding.barName);
+        }
+      })
+      .catch(() => {
+        // Keep the default bar name if the branding fetch fails — the login
+        // screen should still be usable even if this call errors out.
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  const selectedRole = useMemo(
+    () => selectedStaff?.roleLabel || "Cafe staff",
+    [selectedStaff],
+  );
   const pinSlots = useMemo(() => buildPinSlots(pin), [pin]);
   const formattedDateTime = useMemo(() => {
     const year = currentDateTime.getFullYear();
@@ -99,7 +133,7 @@ export default function PosLoginScreen() {
                 shanku
               </h1>
               <p className="m-0 mt-2 text-xs font-bold uppercase tracking-[0.34em] text-[#5c7093]">
-                # ROSIT BAR
+                # {barName}
               </p>
             </div>
           </article>
@@ -131,8 +165,14 @@ export default function PosLoginScreen() {
                 <div className="relative mt-3">
                   <select
                     value={selectedStaffId ?? ""}
-                    onChange={(event) => selectStaff(Number(event.target.value))}
-                    disabled={isSubmitting || isLoadingProfiles || staffProfiles.length === 0}
+                    onChange={(event) =>
+                      selectStaff(Number(event.target.value))
+                    }
+                    disabled={
+                      isSubmitting ||
+                      isLoadingProfiles ||
+                      staffProfiles.length === 0
+                    }
                     className="w-full appearance-none rounded-[14px] border border-[#c7dcf7] bg-white px-4 py-3 pr-11 text-sm font-semibold text-[#12213d] outline-none transition hover:border-[#8fb8ee] focus:border-[#1fa2ff] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {staffProfiles.length === 0 ? (
@@ -180,7 +220,13 @@ export default function PosLoginScreen() {
 
             <PosKeypad
               disabled={isSubmitting || isLoadingProfiles}
-              confirmLabel={isLoadingProfiles ? "Loading" : isSubmitting ? "Logging" : "Enter"}
+              confirmLabel={
+                isLoadingProfiles
+                  ? "Loading"
+                  : isSubmitting
+                    ? "Logging"
+                    : "Enter"
+              }
               staffTag={initials(selectedStaff?.name || "Waiter")}
               staffLabel={selectedRole}
               onDigit={appendDigit}

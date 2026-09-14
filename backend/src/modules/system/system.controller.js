@@ -9,7 +9,17 @@ const { getSystemAlerts } = require("../../services/alert.service");
 const { getAuditLogs } = require("../../services/audit.service");
 const { buildCacheKey, remember } = require("../../services/cache.service");
 const { registerRealtimeClient } = require("../../services/realtime.service");
-const { sendError, sendSuccess, handleControllerError } = require("../../utils/response");
+const AppError = require("../../utils/app-error");
+const {
+  sendError,
+  sendSuccess,
+  handleControllerError,
+} = require("../../utils/response");
+const { ensureRequiredString } = require("../../utils/validation");
+
+const BAR_NAME_SETTING_KEY = "barName";
+const DEFAULT_BAR_NAME = "ROSIT BAR";
+const MAX_BAR_NAME_LENGTH = 60;
 
 const parseLimit = (value, fallback = 50, max = 200) => {
   if (value === undefined || value === null || value === "") {
@@ -32,7 +42,8 @@ const isEnabledValue = (value) =>
     .trim()
     .toLowerCase() === "true";
 
-const areDocsEnabled = () => !isProductionEnv() || isEnabledValue(process.env.API_DOCS_ENABLED);
+const areDocsEnabled = () =>
+  !isProductionEnv() || isEnabledValue(process.env.API_DOCS_ENABLED);
 
 const getDocsCredentials = () => ({
   username: String(process.env.API_DOCS_USERNAME || "").trim(),
@@ -231,7 +242,9 @@ h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1; }
 `;
 
 const buildApiCatalogJs = () => {
-  const workspaceRoot = path.resolve(__dirname, "../../../..").replace(/\\/g, "/");
+  const workspaceRoot = path
+    .resolve(__dirname, "../../../..")
+    .replace(/\\/g, "/");
   const openApiUrl = "/api/system/docs/openapi.json";
 
   return `"use strict";
@@ -483,7 +496,8 @@ exports.requireDocsAccess = (req, res, next) => {
 
 exports.getAlerts = async (req, res) => {
   try {
-    const status = typeof req.query.status === "string" ? req.query.status.trim() : "open";
+    const status =
+      typeof req.query.status === "string" ? req.query.status.trim() : "open";
     const limit = parseLimit(req.query.limit, 40, 200);
     const cacheKey = buildCacheKey("system:alerts", status, limit);
 
@@ -512,7 +526,9 @@ exports.getAuditTrail = async (req, res) => {
       entityType: req.query.entityType || null,
     };
     const cacheKey = buildCacheKey("system:audit", filters);
-    const logs = await remember(cacheKey, 8 * 1000, async () => getAuditLogs(filters));
+    const logs = await remember(cacheKey, 8 * 1000, async () =>
+      getAuditLogs(filters),
+    );
 
     return sendSuccess(res, 200, "Audit logs retrieved successfully", {
       count: logs.length,
@@ -530,7 +546,9 @@ exports.streamRealtime = async (req, res) => {
     return sendError(res, 401, "Valid stream token is required");
   }
 
-  const channels = String(req.query?.channels || "dashboard,orders,alerts,tables,inventory")
+  const channels = String(
+    req.query?.channels || "dashboard,orders,alerts,tables,inventory",
+  )
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -541,37 +559,45 @@ exports.streamRealtime = async (req, res) => {
 
 exports.downloadBackupSnapshot = async (req, res) => {
   try {
-    const [users, categories, products, tables, orders, inventory, alerts, auditLogs] =
-      await Promise.all([
-        prisma.user.findMany({
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            role: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        }),
-        prisma.category.findMany(),
-        prisma.product.findMany(),
-        prisma.table.findMany(),
-        prisma.order.findMany({
-          include: {
-            items: true,
-          },
-        }),
-        prisma.inventory.findMany(),
-        prisma.systemAlert.findMany({
-          orderBy: { createdAt: "desc" },
-          take: 500,
-        }),
-        prisma.auditLog.findMany({
-          orderBy: { createdAt: "desc" },
-          take: 1000,
-        }),
-      ]);
+    const [
+      users,
+      categories,
+      products,
+      tables,
+      orders,
+      inventory,
+      alerts,
+      auditLogs,
+    ] = await Promise.all([
+      prisma.user.findMany({
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.category.findMany(),
+      prisma.product.findMany(),
+      prisma.table.findMany(),
+      prisma.order.findMany({
+        include: {
+          items: true,
+        },
+      }),
+      prisma.inventory.findMany(),
+      prisma.systemAlert.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 500,
+      }),
+      prisma.auditLog.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 1000,
+      }),
+    ]);
 
     const snapshot = {
       generatedAt: new Date().toISOString(),
@@ -594,5 +620,45 @@ exports.downloadBackupSnapshot = async (req, res) => {
     return res.status(200).send(JSON.stringify(snapshot, null, 2));
   } catch (error) {
     return handleControllerError(res, error, "Download backup snapshot error");
+  }
+};
+
+// Public on purpose — the staff PIN login screen has to show the bar's name
+// before anyone is authenticated.
+exports.getBranding = async (req, res) => {
+  try {
+    const setting = await prisma.systemSetting.findUnique({
+      where: { key: BAR_NAME_SETTING_KEY },
+    });
+
+    return sendSuccess(res, 200, "Branding retrieved successfully", {
+      barName: setting?.value || DEFAULT_BAR_NAME,
+    });
+  } catch (error) {
+    return handleControllerError(res, error, "Get branding error");
+  }
+};
+
+exports.updateBranding = async (req, res) => {
+  try {
+    const barName = ensureRequiredString(req.body.barName, "Bar name");
+
+    if (barName.length > MAX_BAR_NAME_LENGTH) {
+      throw new AppError(
+        `Bar name must be ${MAX_BAR_NAME_LENGTH} characters or fewer`,
+      );
+    }
+
+    const setting = await prisma.systemSetting.upsert({
+      where: { key: BAR_NAME_SETTING_KEY },
+      update: { value: barName },
+      create: { key: BAR_NAME_SETTING_KEY, value: barName },
+    });
+
+    return sendSuccess(res, 200, "Branding updated successfully", {
+      barName: setting.value,
+    });
+  } catch (error) {
+    return handleControllerError(res, error, "Update branding error");
   }
 };

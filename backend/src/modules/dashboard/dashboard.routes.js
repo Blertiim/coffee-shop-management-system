@@ -21,4 +21,16 @@ router.get("/advanced-report", dashboardController.getAdvancedReport);
 router.get("/export/report.csv", dashboardController.exportAdvancedReportCsv);
 router.get("/export/report.pdf", dashboardController.exportAdvancedReportPdf);
 
+router.get(
+  "/daily-closing/preview",
+  dashboardController.getDailyClosingPreview,
+);
+router.get("/daily-closing", dashboardController.getDailyClosings);
+router.post("/daily-closing", dashboardController.createDailyClosing);
+router.get(
+  "/daily-closing/:id/pdf",
+  dashboardController.downloadDailyClosingPdf,
+);
+router.get("/daily-closing/:id", dashboardController.getDailyClosingById);
+
 module.exports = router;

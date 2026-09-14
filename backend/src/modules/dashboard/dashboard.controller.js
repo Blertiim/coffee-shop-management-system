@@ -1,7 +1,12 @@
 const PDFDocument = require("pdfkit");
 const prisma = require("../../config/prisma");
 const AppError = require("../../utils/app-error");
-const { handleControllerError, sendSuccess } = require("../../utils/response");
+const {
+  handleControllerError,
+  sendError,
+  sendSuccess,
+} = require("../../utils/response");
+const { ensureId } = require("../../utils/validation");
 const { buildCacheKey, remember } = require("../../services/cache.service");
 
 const DASHBOARD_ORDER_INCLUDE = {
@@ -125,7 +130,157 @@ const buildRangeFilter = (field, range) => ({
 });
 
 const rememberDashboardResult = (segment, req, ttlMs, factory) =>
-  remember(buildCacheKey("dashboard", segment, req.query || {}), ttlMs, factory);
+  remember(
+    buildCacheKey("dashboard", segment, req.query || {}),
+    ttlMs,
+    factory,
+  );
+
+// Shared by the Daily Closing preview and the actual closing snapshot, so the
+// two always agree on what a given date's totals are. Includes a cash/card
+// breakdown (an "other" bucket catches unspecified/null payment methods) to
+// help the manager reconcile the physical cash register.
+const buildDailyTotals = async (date) => {
+  const from = toStartOfDay(date);
+  const to = toEndExclusiveDay(date);
+  const range = { from, to };
+
+  const [
+    paidAggregation,
+    totalOrders,
+    expensesAggregation,
+    paymentGroups,
+    orderLineItems,
+  ] = await Promise.all([
+    prisma.order.aggregate({
+      where: {
+        status: "paid",
+        ...buildRangeFilter("updatedAt", range),
+      },
+      _sum: { total: true },
+      _count: { id: true },
+    }),
+    prisma.order.count({
+      where: buildRangeFilter("createdAt", range),
+    }),
+    prisma.expense.aggregate({
+      where: buildRangeFilter("date", range),
+      _sum: { amount: true },
+    }),
+    prisma.order.groupBy({
+      where: {
+        status: "paid",
+        ...buildRangeFilter("updatedAt", range),
+      },
+      by: ["paymentMethod"],
+      _sum: { total: true },
+    }),
+    prisma.orderItem.findMany({
+      where: {
+        order: {
+          status: "paid",
+          ...buildRangeFilter("updatedAt", range),
+        },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        price: true,
+      },
+    }),
+  ]);
+
+  const totalRevenue = Number((paidAggregation._sum.total || 0).toFixed(2));
+  const totalExpenses = Number(
+    (expensesAggregation._sum.amount || 0).toFixed(2),
+  );
+  const paidOrders = paidAggregation._count.id || 0;
+
+  let cashTotal = 0;
+  let cardTotal = 0;
+  let otherTotal = 0;
+
+  paymentGroups.forEach((group) => {
+    const amount = Number((group._sum.total || 0).toFixed(2));
+
+    if (group.paymentMethod === "cash") {
+      cashTotal = amount;
+    } else if (group.paymentMethod === "card") {
+      cardTotal = amount;
+    } else {
+      otherTotal = Number((otherTotal + amount).toFixed(2));
+    }
+  });
+
+  // Per-product quantities/revenue for the day, e.g. "how many espressos did
+  // we sell today" — needed to reconcile the till against actual items sold,
+  // not just the total EUR figure.
+  const productSalesMap = new Map();
+
+  orderLineItems.forEach((lineItem) => {
+    const current = productSalesMap.get(lineItem.productId) || {
+      productId: lineItem.productId,
+      quantitySold: 0,
+      revenue: 0,
+    };
+
+    current.quantitySold += lineItem.quantity;
+    current.revenue = Number(
+      (current.revenue + lineItem.quantity * lineItem.price).toFixed(2),
+    );
+    productSalesMap.set(lineItem.productId, current);
+  });
+
+  const productSalesEntries = [...productSalesMap.values()].sort(
+    (left, right) =>
+      right.quantitySold - left.quantitySold || right.revenue - left.revenue,
+  );
+  const productIds = productSalesEntries.map((entry) => entry.productId);
+
+  const products = productIds.length
+    ? await prisma.product.findMany({
+        where: {
+          id: {
+            in: productIds,
+          },
+        },
+        include: {
+          category: true,
+        },
+      })
+    : [];
+
+  const productsById = new Map(
+    products.map((product) => [product.id, product]),
+  );
+
+  const productBreakdown = productSalesEntries.map((entry) => {
+    const product = productsById.get(entry.productId);
+
+    return {
+      productId: entry.productId,
+      productName: product?.name || `Product #${entry.productId}`,
+      categoryName: product?.category?.name || "Uncategorized",
+      quantitySold: entry.quantitySold,
+      revenue: entry.revenue,
+    };
+  });
+
+  return {
+    date: formatDateKey(from),
+    totalRevenue,
+    totalExpenses,
+    netRevenue: Number((totalRevenue - totalExpenses).toFixed(2)),
+    totalOrders,
+    paidOrders,
+    averagePaidOrder:
+      paidOrders > 0 ? Number((totalRevenue / paidOrders).toFixed(2)) : 0,
+    cashTotal,
+    cardTotal,
+    otherTotal,
+    productBreakdown,
+  };
+};
 
 const escapeCsv = (value) => {
   const text = String(value ?? "");
@@ -137,7 +292,8 @@ const escapeCsv = (value) => {
   return text;
 };
 
-const appendCsvSection = (rows) => rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+const appendCsvSection = (rows) =>
+  rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
 
 const buildDayBuckets = (range) => {
   const buckets = {};
@@ -167,63 +323,68 @@ const buildMonthBuckets = (range) => {
 };
 
 const buildAdvancedReportPayload = async (range) => {
-  const [paidOrders, paidAggregation, expensesAggregation, orderLineItems, employeeGroups] =
-    await Promise.all([
-      prisma.order.findMany({
-        where: {
+  const [
+    paidOrders,
+    paidAggregation,
+    expensesAggregation,
+    orderLineItems,
+    employeeGroups,
+  ] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        status: "paid",
+        ...buildRangeFilter("updatedAt", range),
+      },
+      select: {
+        id: true,
+        userId: true,
+        total: true,
+        updatedAt: true,
+      },
+      orderBy: {
+        updatedAt: "asc",
+      },
+    }),
+    prisma.order.aggregate({
+      where: {
+        status: "paid",
+        ...buildRangeFilter("updatedAt", range),
+      },
+      _sum: { total: true },
+      _count: { id: true },
+    }),
+    prisma.expense.aggregate({
+      where: buildRangeFilter("date", range),
+      _sum: { amount: true },
+    }),
+    prisma.orderItem.findMany({
+      where: {
+        order: {
           status: "paid",
           ...buildRangeFilter("updatedAt", range),
         },
-        select: {
-          id: true,
-          userId: true,
-          total: true,
-          updatedAt: true,
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        price: true,
+      },
+    }),
+    prisma.order.groupBy({
+      where: {
+        status: "paid",
+        ...buildRangeFilter("updatedAt", range),
+      },
+      by: ["userId"],
+      _sum: { total: true },
+      _count: { id: true },
+      orderBy: {
+        _sum: {
+          total: "desc",
         },
-        orderBy: {
-          updatedAt: "asc",
-        },
-      }),
-      prisma.order.aggregate({
-        where: {
-          status: "paid",
-          ...buildRangeFilter("updatedAt", range),
-        },
-        _sum: { total: true },
-        _count: { id: true },
-      }),
-      prisma.expense.aggregate({
-        where: buildRangeFilter("date", range),
-        _sum: { amount: true },
-      }),
-      prisma.orderItem.findMany({
-        where: {
-          order: {
-            status: "paid",
-            ...buildRangeFilter("updatedAt", range),
-          },
-        },
-        select: {
-          productId: true,
-          quantity: true,
-          price: true,
-        },
-      }),
-      prisma.order.groupBy({
-        where: {
-          status: "paid",
-          ...buildRangeFilter("updatedAt", range),
-        },
-        by: ["userId"],
-        _sum: { total: true },
-        _count: { id: true },
-        orderBy: {
-          _sum: {
-            total: "desc",
-          },
-        },
-      }),
-    ]);
+      },
+    }),
+  ]);
 
   const dayBuckets = buildDayBuckets(range);
   const monthBuckets = buildMonthBuckets(range);
@@ -233,7 +394,9 @@ const buildAdvancedReportPayload = async (range) => {
     const monthKey = formatMonthKey(order.updatedAt);
 
     if (dayBuckets[dayKey]) {
-      dayBuckets[dayKey].revenue = Number((dayBuckets[dayKey].revenue + order.total).toFixed(2));
+      dayBuckets[dayKey].revenue = Number(
+        (dayBuckets[dayKey].revenue + order.total).toFixed(2),
+      );
       dayBuckets[dayKey].orders += 1;
     }
 
@@ -255,12 +418,15 @@ const buildAdvancedReportPayload = async (range) => {
     };
 
     current.quantitySold += lineItem.quantity;
-    current.revenue = Number((current.revenue + lineItem.quantity * lineItem.price).toFixed(2));
+    current.revenue = Number(
+      (current.revenue + lineItem.quantity * lineItem.price).toFixed(2),
+    );
     salesByProductMap.set(lineItem.productId, current);
   });
 
   const salesByProductEntries = [...salesByProductMap.values()].sort(
-    (left, right) => right.quantitySold - left.quantitySold || right.revenue - left.revenue,
+    (left, right) =>
+      right.quantitySold - left.quantitySold || right.revenue - left.revenue,
   );
   const productIds = salesByProductEntries.map((entry) => entry.productId);
   const userIds = employeeGroups
@@ -296,10 +462,14 @@ const buildAdvancedReportPayload = async (range) => {
       : [],
   ]);
 
-  const productsById = new Map(products.map((product) => [product.id, product]));
+  const productsById = new Map(
+    products.map((product) => [product.id, product]),
+  );
   const usersById = new Map(users.map((user) => [user.id, user]));
   const totalRevenue = Number((paidAggregation._sum.total || 0).toFixed(2));
-  const totalExpenses = Number((expensesAggregation._sum.amount || 0).toFixed(2));
+  const totalExpenses = Number(
+    (expensesAggregation._sum.amount || 0).toFixed(2),
+  );
   const paidOrdersCount = paidAggregation._count.id || 0;
 
   return {
@@ -313,7 +483,9 @@ const buildAdvancedReportPayload = async (range) => {
       netRevenue: Number((totalRevenue - totalExpenses).toFixed(2)),
       paidOrders: paidOrdersCount,
       averageOrderValue:
-        paidOrdersCount > 0 ? Number((totalRevenue / paidOrdersCount).toFixed(2)) : 0,
+        paidOrdersCount > 0
+          ? Number((totalRevenue / paidOrdersCount).toFixed(2))
+          : 0,
     },
     dailySales: Object.values(dayBuckets),
     monthlySales: Object.values(monthBuckets),
@@ -340,7 +512,10 @@ const buildAdvancedReportPayload = async (range) => {
         role: user?.role || "unknown",
         totalSales,
         ordersHandled,
-        averageOrderValue: ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
+        averageOrderValue:
+          ordersHandled > 0
+            ? Number((totalSales / ordersHandled).toFixed(2))
+            : 0,
       };
     }),
   };
@@ -348,85 +523,106 @@ const buildAdvancedReportPayload = async (range) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("stats", req, 20 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 1 });
-      const openOrderStatuses = ["pending", "preparing", "served", "pending_payment"];
+    const payload = await rememberDashboardResult(
+      "stats",
+      req,
+      20 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 1 });
+        const openOrderStatuses = [
+          "pending",
+          "preparing",
+          "served",
+          "pending_payment",
+        ];
 
-      const [
-        totalProducts,
-        totalCategories,
-        totalOrders,
-        totalPendingOrders,
-        totalCompletedOrders,
-        totalRevenueAggregation,
-        activeTables,
-        periodOrders,
-        periodPaidOrders,
-        periodRevenueAggregation,
-      ] = await Promise.all([
-        prisma.product.count(),
-        prisma.category.count(),
-        prisma.order.count(),
-        prisma.order.count({
-          where: {
-            status: {
-              in: openOrderStatuses,
+        const [
+          totalProducts,
+          totalCategories,
+          totalOrders,
+          totalPendingOrders,
+          totalCompletedOrders,
+          totalRevenueAggregation,
+          activeTables,
+          periodOrders,
+          periodPaidOrders,
+          periodRevenueAggregation,
+        ] = await Promise.all([
+          prisma.product.count(),
+          prisma.category.count(),
+          prisma.order.count(),
+          prisma.order.count({
+            where: {
+              status: {
+                in: openOrderStatuses,
+              },
             },
-          },
-        }),
-        prisma.order.count({
-          where: { status: "paid" },
-        }),
-        prisma.order.aggregate({
-          where: { status: "paid" },
-          _sum: { total: true },
-        }),
-        prisma.table.count({
-          where: {
-            status: {
-              in: ["occupied", "pending_payment"],
+          }),
+          prisma.order.count({
+            where: { status: "paid" },
+          }),
+          prisma.order.aggregate({
+            where: { status: "paid" },
+            _sum: { total: true },
+          }),
+          prisma.table.count({
+            where: {
+              status: {
+                in: ["occupied", "pending_payment"],
+              },
             },
-          },
-        }),
-        prisma.order.count({
-          where: buildRangeFilter("createdAt", range),
-        }),
-        prisma.order.count({
-          where: {
-            status: "paid",
-            ...buildRangeFilter("updatedAt", range),
-          },
-        }),
-        prisma.order.aggregate({
-          where: {
-            status: "paid",
-            ...buildRangeFilter("updatedAt", range),
-          },
-          _sum: { total: true },
-        }),
-      ]);
+          }),
+          prisma.order.count({
+            where: buildRangeFilter("createdAt", range),
+          }),
+          prisma.order.count({
+            where: {
+              status: "paid",
+              ...buildRangeFilter("updatedAt", range),
+            },
+          }),
+          prisma.order.aggregate({
+            where: {
+              status: "paid",
+              ...buildRangeFilter("updatedAt", range),
+            },
+            _sum: { total: true },
+          }),
+        ]);
 
-      const periodRevenue = Number((periodRevenueAggregation._sum.total || 0).toFixed(2));
-      const averageOrderValue =
-        periodPaidOrders > 0 ? Number((periodRevenue / periodPaidOrders).toFixed(2)) : 0;
+        const periodRevenue = Number(
+          (periodRevenueAggregation._sum.total || 0).toFixed(2),
+        );
+        const averageOrderValue =
+          periodPaidOrders > 0
+            ? Number((periodRevenue / periodPaidOrders).toFixed(2))
+            : 0;
 
-      return {
-        totalProducts,
-        totalCategories,
-        totalOrders,
-        totalRevenue: Number((totalRevenueAggregation._sum.total || 0).toFixed(2)),
-        totalPendingOrders,
-        totalCompletedOrders,
-        activeTables,
-        periodStart: range.from.toISOString(),
-        periodEnd: range.to.toISOString(),
-        todayOrders: periodOrders,
-        todayRevenue: periodRevenue,
-        averageOrderValue,
-      };
-    });
+        return {
+          totalProducts,
+          totalCategories,
+          totalOrders,
+          totalRevenue: Number(
+            (totalRevenueAggregation._sum.total || 0).toFixed(2),
+          ),
+          totalPendingOrders,
+          totalCompletedOrders,
+          activeTables,
+          periodStart: range.from.toISOString(),
+          periodEnd: range.to.toISOString(),
+          todayOrders: periodOrders,
+          todayRevenue: periodRevenue,
+          averageOrderValue,
+        };
+      },
+    );
 
-    return sendSuccess(res, 200, "Dashboard statistics retrieved successfully", payload);
+    return sendSuccess(
+      res,
+      200,
+      "Dashboard statistics retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get dashboard stats error");
   }
@@ -434,61 +630,73 @@ exports.getDashboardStats = async (req, res) => {
 
 exports.getTopProducts = async (req, res) => {
   try {
-    const topProducts = await rememberDashboardResult("top-products", req, 30 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 31 });
-      const groupedItems = await prisma.orderItem.groupBy({
-        where: {
-          order: {
-            status: "paid",
-            ...buildRangeFilter("updatedAt", range),
+    const topProducts = await rememberDashboardResult(
+      "top-products",
+      req,
+      30 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 31 });
+        const groupedItems = await prisma.orderItem.groupBy({
+          where: {
+            order: {
+              status: "paid",
+              ...buildRangeFilter("updatedAt", range),
+            },
           },
-        },
-        by: ["productId"],
-        _sum: {
-          quantity: true,
-        },
-        orderBy: {
+          by: ["productId"],
           _sum: {
-            quantity: "desc",
+            quantity: true,
           },
-        },
-        take: 5,
-      });
-
-      if (groupedItems.length === 0) {
-        return [];
-      }
-
-      const products = await prisma.product.findMany({
-        where: {
-          id: {
-            in: groupedItems.map((item) => item.productId),
+          orderBy: {
+            _sum: {
+              quantity: "desc",
+            },
           },
-        },
-        include: {
-          category: true,
-        },
-      });
+          take: 5,
+        });
 
-      const productsById = new Map(products.map((product) => [product.id, product]));
+        if (groupedItems.length === 0) {
+          return [];
+        }
 
-      return groupedItems
-        .map((item) => {
-          const product = productsById.get(item.productId);
+        const products = await prisma.product.findMany({
+          where: {
+            id: {
+              in: groupedItems.map((item) => item.productId),
+            },
+          },
+          include: {
+            category: true,
+          },
+        });
 
-          if (!product) {
-            return null;
-          }
+        const productsById = new Map(
+          products.map((product) => [product.id, product]),
+        );
 
-          return {
-            product,
-            totalQuantitySold: item._sum.quantity || 0,
-          };
-        })
-        .filter(Boolean);
-    });
+        return groupedItems
+          .map((item) => {
+            const product = productsById.get(item.productId);
 
-    return sendSuccess(res, 200, "Top products retrieved successfully", topProducts);
+            if (!product) {
+              return null;
+            }
+
+            return {
+              product,
+              totalQuantitySold: item._sum.quantity || 0,
+            };
+          })
+          .filter(Boolean);
+      },
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "Top products retrieved successfully",
+      topProducts,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get top products error");
   }
@@ -496,15 +704,24 @@ exports.getTopProducts = async (req, res) => {
 
 exports.getRecentOrders = async (req, res) => {
   try {
-    const recentOrders = await rememberDashboardResult("recent-orders", req, 10 * 1000, async () =>
-      prisma.order.findMany({
-        include: DASHBOARD_ORDER_INCLUDE,
-        orderBy: { createdAt: "desc" },
-        take: 5,
-      }),
+    const recentOrders = await rememberDashboardResult(
+      "recent-orders",
+      req,
+      10 * 1000,
+      async () =>
+        prisma.order.findMany({
+          include: DASHBOARD_ORDER_INCLUDE,
+          orderBy: { createdAt: "desc" },
+          take: 5,
+        }),
     );
 
-    return sendSuccess(res, 200, "Recent orders retrieved successfully", recentOrders);
+    return sendSuccess(
+      res,
+      200,
+      "Recent orders retrieved successfully",
+      recentOrders,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get recent orders error");
   }
@@ -512,56 +729,64 @@ exports.getRecentOrders = async (req, res) => {
 
 exports.getOrdersByDate = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("orders", req, 15 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 1 });
-      const status =
-        typeof req.query.status === "string" && req.query.status.trim()
-          ? req.query.status.trim().toLowerCase()
-          : null;
-      const limit = Math.min(parsePositiveInteger(req.query.limit, 100), 300);
+    const payload = await rememberDashboardResult(
+      "orders",
+      req,
+      15 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 1 });
+        const status =
+          typeof req.query.status === "string" && req.query.status.trim()
+            ? req.query.status.trim().toLowerCase()
+            : null;
+        const limit = Math.min(parsePositiveInteger(req.query.limit, 100), 300);
 
-      const where = {
-        ...buildRangeFilter("createdAt", range),
-        ...(status ? { status } : {}),
-      };
+        const where = {
+          ...buildRangeFilter("createdAt", range),
+          ...(status ? { status } : {}),
+        };
 
-      const [orders, paidAggregation] = await Promise.all([
-        prisma.order.findMany({
-          where,
-          include: DASHBOARD_ORDER_INCLUDE,
-          orderBy: { createdAt: "desc" },
-          take: limit,
-        }),
-        prisma.order.aggregate({
-          where: {
-            ...where,
-            status: "paid",
+        const [orders, paidAggregation] = await Promise.all([
+          prisma.order.findMany({
+            where,
+            include: DASHBOARD_ORDER_INCLUDE,
+            orderBy: { createdAt: "desc" },
+            take: limit,
+          }),
+          prisma.order.aggregate({
+            where: {
+              ...where,
+              status: "paid",
+            },
+            _sum: { total: true },
+            _count: { id: true },
+          }),
+        ]);
+
+        const paidRevenue = Number(
+          (paidAggregation._sum.total || 0).toFixed(2),
+        );
+        const paidCount = paidAggregation._count.id || 0;
+        const averagePaidOrder =
+          paidCount > 0 ? Number((paidRevenue / paidCount).toFixed(2)) : 0;
+
+        return {
+          filters: {
+            from: range.from.toISOString(),
+            to: range.to.toISOString(),
+            status: status || "all",
+            limit,
           },
-          _sum: { total: true },
-          _count: { id: true },
-        }),
-      ]);
-
-      const paidRevenue = Number((paidAggregation._sum.total || 0).toFixed(2));
-      const paidCount = paidAggregation._count.id || 0;
-      const averagePaidOrder = paidCount > 0 ? Number((paidRevenue / paidCount).toFixed(2)) : 0;
-
-      return {
-        filters: {
-          from: range.from.toISOString(),
-          to: range.to.toISOString(),
-          status: status || "all",
-          limit,
-        },
-        summary: {
-          orderCount: orders.length,
-          paidRevenue,
-          paidOrders: paidCount,
-          averagePaidOrder,
-        },
-        orders,
-      };
-    });
+          summary: {
+            orderCount: orders.length,
+            paidRevenue,
+            paidOrders: paidCount,
+            averagePaidOrder,
+          },
+          orders,
+        };
+      },
+    );
 
     return sendSuccess(res, 200, "Orders retrieved successfully", payload);
   } catch (error) {
@@ -571,62 +796,80 @@ exports.getOrdersByDate = async (req, res) => {
 
 exports.getRevenueTrend = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("revenue-trend", req, 20 * 1000, async () => {
-      const hasExplicitRange = Boolean(
-        req.query.from || req.query.to || req.query.startDate || req.query.endDate,
-      );
-      const range = hasExplicitRange
-        ? buildDateRange(req.query, { defaultDays: 31 })
-        : (() => {
-            const days = Math.min(parsePositiveInteger(req.query.days, 7), 60);
-            const endDate = new Date();
-            const startDate = toStartOfDay(endDate);
-            startDate.setDate(startDate.getDate() - (days - 1));
-            return {
-              from: startDate,
-              to: toEndExclusiveDay(endDate),
-            };
-          })();
+    const payload = await rememberDashboardResult(
+      "revenue-trend",
+      req,
+      20 * 1000,
+      async () => {
+        const hasExplicitRange = Boolean(
+          req.query.from ||
+          req.query.to ||
+          req.query.startDate ||
+          req.query.endDate,
+        );
+        const range = hasExplicitRange
+          ? buildDateRange(req.query, { defaultDays: 31 })
+          : (() => {
+              const days = Math.min(
+                parsePositiveInteger(req.query.days, 7),
+                60,
+              );
+              const endDate = new Date();
+              const startDate = toStartOfDay(endDate);
+              startDate.setDate(startDate.getDate() - (days - 1));
+              return {
+                from: startDate,
+                to: toEndExclusiveDay(endDate),
+              };
+            })();
 
-      const paidOrders = await prisma.order.findMany({
-        where: {
-          status: "paid",
-          ...buildRangeFilter("updatedAt", range),
-        },
-        select: {
-          id: true,
-          total: true,
-          updatedAt: true,
-        },
-        orderBy: {
-          updatedAt: "asc",
-        },
-      });
+        const paidOrders = await prisma.order.findMany({
+          where: {
+            status: "paid",
+            ...buildRangeFilter("updatedAt", range),
+          },
+          select: {
+            id: true,
+            total: true,
+            updatedAt: true,
+          },
+          orderBy: {
+            updatedAt: "asc",
+          },
+        });
 
-      const buckets = {};
-      const cursor = new Date(range.from);
+        const buckets = {};
+        const cursor = new Date(range.from);
 
-      while (cursor < range.to) {
-        const day = new Date(cursor);
-        const key = formatDateKey(day);
-        buckets[key] = { date: key, revenue: 0, orders: 0 };
-        cursor.setDate(cursor.getDate() + 1);
-      }
-
-      paidOrders.forEach((order) => {
-        const key = formatDateKey(order.updatedAt);
-        if (!buckets[key]) {
-          return;
+        while (cursor < range.to) {
+          const day = new Date(cursor);
+          const key = formatDateKey(day);
+          buckets[key] = { date: key, revenue: 0, orders: 0 };
+          cursor.setDate(cursor.getDate() + 1);
         }
 
-        buckets[key].revenue = Number((buckets[key].revenue + order.total).toFixed(2));
-        buckets[key].orders += 1;
-      });
+        paidOrders.forEach((order) => {
+          const key = formatDateKey(order.updatedAt);
+          if (!buckets[key]) {
+            return;
+          }
 
-      return Object.values(buckets);
-    });
+          buckets[key].revenue = Number(
+            (buckets[key].revenue + order.total).toFixed(2),
+          );
+          buckets[key].orders += 1;
+        });
 
-    return sendSuccess(res, 200, "Revenue trend retrieved successfully", payload);
+        return Object.values(buckets);
+      },
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "Revenue trend retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get revenue trend error");
   }
@@ -694,7 +937,9 @@ exports.getWaiterPerformance = async (req, res) => {
             totalSales,
             ordersHandled,
             averageOrderValue:
-              ordersHandled > 0 ? Number((totalSales / ordersHandled).toFixed(2)) : 0,
+              ordersHandled > 0
+                ? Number((totalSales / ordersHandled).toFixed(2))
+                : 0,
           };
         });
 
@@ -706,7 +951,12 @@ exports.getWaiterPerformance = async (req, res) => {
       },
     );
 
-    return sendSuccess(res, 200, "Waiter performance retrieved successfully", payload);
+    return sendSuccess(
+      res,
+      200,
+      "Waiter performance retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get waiter performance error");
   }
@@ -714,36 +964,41 @@ exports.getWaiterPerformance = async (req, res) => {
 
 exports.getInvoices = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("invoices", req, 15 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 1 });
-      const limit = Math.min(parsePositiveInteger(req.query.limit, 100), 300);
+    const payload = await rememberDashboardResult(
+      "invoices",
+      req,
+      15 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 1 });
+        const limit = Math.min(parsePositiveInteger(req.query.limit, 100), 300);
 
-      const invoices = await prisma.order.findMany({
-        where: {
-          status: {
-            in: ["pending_payment", "paid"],
+        const invoices = await prisma.order.findMany({
+          where: {
+            status: {
+              in: ["pending_payment", "paid"],
+            },
+            ...buildRangeFilter("updatedAt", range),
           },
-          ...buildRangeFilter("updatedAt", range),
-        },
-        include: DASHBOARD_ORDER_INCLUDE,
-        orderBy: {
-          updatedAt: "desc",
-        },
-        take: limit,
-      });
+          include: DASHBOARD_ORDER_INCLUDE,
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: limit,
+        });
 
-      const mappedInvoices = invoices.map((order) => ({
-        ...order,
-        receiptUrl: `/api/orders/${order.id}/receipt`,
-      }));
+        const mappedInvoices = invoices.map((order) => ({
+          ...order,
+          receiptUrl: `/api/orders/${order.id}/receipt`,
+        }));
 
-      return {
-        from: range.from.toISOString(),
-        to: range.to.toISOString(),
-        count: mappedInvoices.length,
-        invoices: mappedInvoices,
-      };
-    });
+        return {
+          from: range.from.toISOString(),
+          to: range.to.toISOString(),
+          count: mappedInvoices.length,
+          invoices: mappedInvoices,
+        };
+      },
+    );
 
     return sendSuccess(res, 200, "Invoices retrieved successfully", payload);
   } catch (error) {
@@ -753,51 +1008,69 @@ exports.getInvoices = async (req, res) => {
 
 exports.getDailySummary = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("daily-summary", req, 15 * 1000, async () => {
-      const date = req.query.date ? parseDateInput(req.query.date, "date") : new Date();
-      const from = toStartOfDay(date);
-      const to = toEndExclusiveDay(date);
+    const payload = await rememberDashboardResult(
+      "daily-summary",
+      req,
+      15 * 1000,
+      async () => {
+        const date = req.query.date
+          ? parseDateInput(req.query.date, "date")
+          : new Date();
+        const from = toStartOfDay(date);
+        const to = toEndExclusiveDay(date);
 
-      const [paidAggregation, totalOrders, expensesAggregation] = await Promise.all([
-        prisma.order.aggregate({
-          where: {
-            status: "paid",
-            ...buildRangeFilter("updatedAt", { from, to }),
-          },
-          _sum: {
-            total: true,
-          },
-          _count: {
-            id: true,
-          },
-        }),
-        prisma.order.count({
-          where: buildRangeFilter("createdAt", { from, to }),
-        }),
-        prisma.expense.aggregate({
-          where: buildRangeFilter("date", { from, to }),
-          _sum: {
-            amount: true,
-          },
-        }),
-      ]);
+        const [paidAggregation, totalOrders, expensesAggregation] =
+          await Promise.all([
+            prisma.order.aggregate({
+              where: {
+                status: "paid",
+                ...buildRangeFilter("updatedAt", { from, to }),
+              },
+              _sum: {
+                total: true,
+              },
+              _count: {
+                id: true,
+              },
+            }),
+            prisma.order.count({
+              where: buildRangeFilter("createdAt", { from, to }),
+            }),
+            prisma.expense.aggregate({
+              where: buildRangeFilter("date", { from, to }),
+              _sum: {
+                amount: true,
+              },
+            }),
+          ]);
 
-      const totalRevenue = Number((paidAggregation._sum.total || 0).toFixed(2));
-      const totalExpenses = Number((expensesAggregation._sum.amount || 0).toFixed(2));
-      const paidOrders = paidAggregation._count.id || 0;
+        const totalRevenue = Number(
+          (paidAggregation._sum.total || 0).toFixed(2),
+        );
+        const totalExpenses = Number(
+          (expensesAggregation._sum.amount || 0).toFixed(2),
+        );
+        const paidOrders = paidAggregation._count.id || 0;
 
-      return {
-        date: formatDateKey(from),
-        totalRevenue,
-        totalExpenses,
-        netRevenue: Number((totalRevenue - totalExpenses).toFixed(2)),
-        totalOrders,
-        paidOrders,
-        averagePaidOrder: paidOrders > 0 ? Number((totalRevenue / paidOrders).toFixed(2)) : 0,
-      };
-    });
+        return {
+          date: formatDateKey(from),
+          totalRevenue,
+          totalExpenses,
+          netRevenue: Number((totalRevenue - totalExpenses).toFixed(2)),
+          totalOrders,
+          paidOrders,
+          averagePaidOrder:
+            paidOrders > 0 ? Number((totalRevenue / paidOrders).toFixed(2)) : 0,
+        };
+      },
+    );
 
-    return sendSuccess(res, 200, "Daily summary retrieved successfully", payload);
+    return sendSuccess(
+      res,
+      200,
+      "Daily summary retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get daily summary error");
   }
@@ -805,40 +1078,50 @@ exports.getDailySummary = async (req, res) => {
 
 exports.getLowStockProducts = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("stock-alerts", req, 15 * 1000, async () => {
-      const threshold = parsePositiveInteger(req.query.threshold, 5);
+    const payload = await rememberDashboardResult(
+      "stock-alerts",
+      req,
+      15 * 1000,
+      async () => {
+        const threshold = parsePositiveInteger(req.query.threshold, 5);
 
-      const products = await prisma.product.findMany({
-        where: {
-          stock: {
-            lte: threshold,
+        const products = await prisma.product.findMany({
+          where: {
+            stock: {
+              lte: threshold,
+            },
           },
-        },
-        include: {
-          category: true,
-        },
-        orderBy: [{ stock: "asc" }, { name: "asc" }],
-      });
-
-      const inventoryAlerts = await prisma.systemAlert.findMany({
-        where: {
-          type: {
-            in: ["inventory.low", "product.low"],
+          include: {
+            category: true,
           },
-          status: "open",
-        },
-        orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
-      });
+          orderBy: [{ stock: "asc" }, { name: "asc" }],
+        });
 
-      return {
-        threshold,
-        count: products.length,
-        products,
-        inventoryAlerts,
-      };
-    });
+        const inventoryAlerts = await prisma.systemAlert.findMany({
+          where: {
+            type: {
+              in: ["inventory.low", "product.low"],
+            },
+            status: "open",
+          },
+          orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
+        });
 
-    return sendSuccess(res, 200, "Low stock products retrieved successfully", payload);
+        return {
+          threshold,
+          count: products.length,
+          products,
+          inventoryAlerts,
+        };
+      },
+    );
+
+    return sendSuccess(
+      res,
+      200,
+      "Low stock products retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get low stock products error");
   }
@@ -846,12 +1129,22 @@ exports.getLowStockProducts = async (req, res) => {
 
 exports.getAdvancedReport = async (req, res) => {
   try {
-    const payload = await rememberDashboardResult("advanced-report", req, 20 * 1000, async () => {
-      const range = buildDateRange(req.query, { defaultDays: 31 });
-      return buildAdvancedReportPayload(range);
-    });
+    const payload = await rememberDashboardResult(
+      "advanced-report",
+      req,
+      20 * 1000,
+      async () => {
+        const range = buildDateRange(req.query, { defaultDays: 31 });
+        return buildAdvancedReportPayload(range);
+      },
+    );
 
-    return sendSuccess(res, 200, "Advanced report retrieved successfully", payload);
+    return sendSuccess(
+      res,
+      200,
+      "Advanced report retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get advanced report error");
   }
@@ -875,12 +1168,20 @@ exports.exportAdvancedReportCsv = async (req, res) => {
       "",
       appendCsvSection([
         ["Daily Sales Date", "Revenue", "Orders"],
-        ...report.dailySales.map((entry) => [entry.date, entry.revenue, entry.orders]),
+        ...report.dailySales.map((entry) => [
+          entry.date,
+          entry.revenue,
+          entry.orders,
+        ]),
       ]),
       "",
       appendCsvSection([
         ["Monthly Sales Month", "Revenue", "Orders"],
-        ...report.monthlySales.map((entry) => [entry.month, entry.revenue, entry.orders]),
+        ...report.monthlySales.map((entry) => [
+          entry.month,
+          entry.revenue,
+          entry.orders,
+        ]),
       ]),
       "",
       appendCsvSection([
@@ -916,7 +1217,11 @@ exports.exportAdvancedReportCsv = async (req, res) => {
 
     return res.status(200).send(lines.join("\n"));
   } catch (error) {
-    return handleControllerError(res, error, "Export advanced report CSV error");
+    return handleControllerError(
+      res,
+      error,
+      "Export advanced report CSV error",
+    );
   }
 };
 
@@ -957,7 +1262,9 @@ exports.exportAdvancedReportPdf = async (req, res) => {
     report.monthlySales.slice(0, 12).forEach((entry) => {
       doc
         .fontSize(10)
-        .text(`${entry.month}: ${entry.revenue} EUR from ${entry.orders} paid orders`);
+        .text(
+          `${entry.month}: ${entry.revenue} EUR from ${entry.orders} paid orders`,
+        );
     });
     doc.moveDown(0.8);
 
@@ -985,6 +1292,232 @@ exports.exportAdvancedReportPdf = async (req, res) => {
     doc.end();
     return undefined;
   } catch (error) {
-    return handleControllerError(res, error, "Export advanced report PDF error");
+    return handleControllerError(
+      res,
+      error,
+      "Export advanced report PDF error",
+    );
+  }
+};
+
+const DAILY_CLOSING_INCLUDE = {
+  closedBy: {
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+    },
+  },
+};
+
+exports.getDailyClosingPreview = async (req, res) => {
+  try {
+    const date = req.query.date
+      ? parseDateInput(req.query.date, "date")
+      : new Date();
+    const from = toStartOfDay(date);
+
+    const [totals, existingClosing] = await Promise.all([
+      buildDailyTotals(date),
+      prisma.dailyClosing.findUnique({ where: { date: from } }),
+    ]);
+
+    return sendSuccess(
+      res,
+      200,
+      "Daily closing preview retrieved successfully",
+      {
+        ...totals,
+        alreadyClosed: Boolean(existingClosing),
+        closingId: existingClosing ? existingClosing.id : null,
+        closedAt: existingClosing ? existingClosing.createdAt : null,
+      },
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Get daily closing preview error");
+  }
+};
+
+exports.createDailyClosing = async (req, res) => {
+  try {
+    const date = req.body.date
+      ? parseDateInput(req.body.date, "date")
+      : new Date();
+    const from = toStartOfDay(date);
+
+    const existingClosing = await prisma.dailyClosing.findUnique({
+      where: { date: from },
+    });
+
+    if (existingClosing) {
+      throw new AppError("This date has already been closed", 409, {
+        closingId: existingClosing.id,
+      });
+    }
+
+    const totals = await buildDailyTotals(date);
+
+    const closing = await prisma.dailyClosing.create({
+      data: {
+        date: from,
+        totalRevenue: totals.totalRevenue,
+        totalExpenses: totals.totalExpenses,
+        netRevenue: totals.netRevenue,
+        totalOrders: totals.totalOrders,
+        paidOrders: totals.paidOrders,
+        averagePaidOrder: totals.averagePaidOrder,
+        cashTotal: totals.cashTotal,
+        cardTotal: totals.cardTotal,
+        otherTotal: totals.otherTotal,
+        productBreakdown: totals.productBreakdown,
+        closedById: req.user.id,
+      },
+      include: DAILY_CLOSING_INCLUDE,
+    });
+
+    return sendSuccess(res, 201, "Daily closing created successfully", closing);
+  } catch (error) {
+    if (error && error.code === "P2002") {
+      return sendError(res, 409, "This date has already been closed");
+    }
+
+    return handleControllerError(res, error, "Create daily closing error");
+  }
+};
+
+exports.getDailyClosings = async (req, res) => {
+  try {
+    const limit = Math.min(parsePositiveInteger(req.query.limit, 60), 200);
+
+    const closings = await prisma.dailyClosing.findMany({
+      include: DAILY_CLOSING_INCLUDE,
+      orderBy: { date: "desc" },
+      take: limit,
+    });
+
+    return sendSuccess(
+      res,
+      200,
+      "Daily closings retrieved successfully",
+      closings,
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Get daily closings error");
+  }
+};
+
+exports.getDailyClosingById = async (req, res) => {
+  try {
+    const id = ensureId(req.params.id, "Daily closing id");
+
+    const closing = await prisma.dailyClosing.findUnique({
+      where: { id },
+      include: DAILY_CLOSING_INCLUDE,
+    });
+
+    if (!closing) {
+      throw new AppError("Daily closing not found", 404);
+    }
+
+    return sendSuccess(
+      res,
+      200,
+      "Daily closing retrieved successfully",
+      closing,
+    );
+  } catch (error) {
+    return handleControllerError(res, error, "Get daily closing by id error");
+  }
+};
+
+exports.downloadDailyClosingPdf = async (req, res) => {
+  try {
+    const id = ensureId(req.params.id, "Daily closing id");
+
+    const closing = await prisma.dailyClosing.findUnique({
+      where: { id },
+      include: DAILY_CLOSING_INCLUDE,
+    });
+
+    if (!closing) {
+      throw new AppError("Daily closing not found", 404);
+    }
+
+    const dateKey = closing.date.toISOString().slice(0, 10);
+    const doc = new PDFDocument({ margin: 28, size: "A5" });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="mbyllja-ditore-${dateKey}.pdf"`,
+    );
+
+    doc.pipe(res);
+    doc.fontSize(18).text("Mbyllja Ditore", { align: "center" });
+    doc.moveDown(0.3);
+    doc
+      .fontSize(11)
+      .fillColor("#555555")
+      .text(`Data: ${dateKey}`, { align: "center" });
+    doc.moveDown(1);
+
+    doc
+      .fillColor("#111111")
+      .fontSize(12)
+      .text("Permbledhje", { underline: true });
+    doc.moveDown(0.4);
+    doc.fontSize(10);
+    doc.text(`Te ardhura totale: ${closing.totalRevenue} EUR`);
+    doc.text(`Shpenzimet totale: ${closing.totalExpenses} EUR`);
+    doc.text(`Neto: ${closing.netRevenue} EUR`);
+    doc.text(`Porosi gjithsej: ${closing.totalOrders}`);
+    doc.text(`Porosi te paguara: ${closing.paidOrders}`);
+    doc.text(`Mesatarja per porosi: ${closing.averagePaidOrder} EUR`);
+    doc.moveDown(0.8);
+
+    doc.fontSize(12).text("Ndarja Sipas Pageses", { underline: true });
+    doc.moveDown(0.4);
+    doc.fontSize(10);
+    doc.text(`Cash: ${closing.cashTotal} EUR`);
+    doc.text(`Karte: ${closing.cardTotal} EUR`);
+    doc.text(`Tjeter / pa specifikuar: ${closing.otherTotal} EUR`);
+    doc.moveDown(0.8);
+
+    const productBreakdown = Array.isArray(closing.productBreakdown)
+      ? closing.productBreakdown
+      : [];
+
+    doc.fontSize(12).text("Shitjet Sipas Produktit", { underline: true });
+    doc.moveDown(0.4);
+    doc.fontSize(10);
+
+    if (productBreakdown.length === 0) {
+      doc.fillColor("#555555").text("Nuk ka produkte te shitura kete dite.");
+      doc.fillColor("#111111");
+    } else {
+      productBreakdown.forEach((entry, index) => {
+        doc.text(
+          `${index + 1}. ${entry.productName} (${entry.categoryName}) - ${entry.quantitySold} cope / ${entry.revenue} EUR`,
+        );
+      });
+    }
+    doc.moveDown(0.8);
+
+    doc
+      .fontSize(9)
+      .fillColor("#555555")
+      .text(
+        `Mbyllur nga: ${closing.closedBy ? closing.closedBy.fullName : "—"}`,
+      );
+    doc.text(`Data e mbylljes: ${closing.createdAt.toISOString()}`);
+
+    doc.end();
+    return undefined;
+  } catch (error) {
+    return handleControllerError(
+      res,
+      error,
+      "Download daily closing PDF error",
+    );
   }
 };

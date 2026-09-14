@@ -23,7 +23,12 @@ import {
 } from "./posApi";
 import useOrderCart from "./useOrderCart";
 const ORDER_EDITABLE_STATUSES = new Set(["pending", "preparing", "served"]);
-const TRANSFERABLE_ORDER_STATUSES = new Set(["pending", "preparing", "served", "pending_payment"]);
+const TRANSFERABLE_ORDER_STATUSES = new Set([
+  "pending",
+  "preparing",
+  "served",
+  "pending_payment",
+]);
 const TABLES_PATH = "/tables";
 const REALTIME_MENU_CHANNELS = ["categories", "products", "inventory"];
 const MAX_SPLIT_PARTS = 12;
@@ -40,7 +45,8 @@ const buildRealtimeStreamUrl = (token, channels = []) => {
 };
 
 const isHiddenPosCategory = (name) => {
-  const normalizedName = typeof name === "string" ? name.trim().toLowerCase() : "";
+  const normalizedName =
+    typeof name === "string" ? name.trim().toLowerCase() : "";
 
   return (
     normalizedName.includes("orders category 2026") ||
@@ -55,7 +61,8 @@ const formatPrice = (value) =>
     maximumFractionDigits: 2,
   }).format(value || 0);
 
-const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const buildTablePath = (visualTableId, fallbackTableNumber) => {
   const parsedVisualId = Number(visualTableId);
@@ -79,7 +86,10 @@ const getDisplayTableId = (table) => table?.visualId || table?.number || "-";
 
 const normalizeOrderSubtotal = (order) =>
   Number(
-    (order?.subtotal ?? Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2),
+    (
+      order?.subtotal ??
+      Number(order?.total || 0) + Number(order?.discountAmount || 0)
+    ).toFixed(2),
   );
 
 const buildDiscountConfig = (source = null) => ({
@@ -107,7 +117,10 @@ const calculateDiscountAmount = (subtotal, discountType, discountValue) => {
 
 const buildSplitShares = (total, count) => {
   const normalizedTotal = Number(total || 0);
-  const normalizedCount = Math.max(2, Math.min(MAX_SPLIT_PARTS, Number(count) || 2));
+  const normalizedCount = Math.max(
+    2,
+    Math.min(MAX_SPLIT_PARTS, Number(count) || 2),
+  );
   const totalCents = Math.max(0, Math.round(normalizedTotal * 100));
   const baseShareCents = Math.floor(totalCents / normalizedCount);
   const remainderCents = totalCents % normalizedCount;
@@ -149,7 +162,8 @@ const buildTicketSummaryItems = (items) => {
   const groupedItems = new Map();
 
   items.forEach((item, index) => {
-    const productId = item.productId || item.product?.id || `ticket-item-${index}`;
+    const productId =
+      item.productId || item.product?.id || `ticket-item-${index}`;
     const quantity = Number(item.quantity || 0);
     const price = Number(item.price || 0);
     const key = `${productId}:${price}`;
@@ -158,7 +172,9 @@ const buildTicketSummaryItems = (items) => {
 
     if (existingItem) {
       existingItem.quantity += quantity;
-      existingItem.lineTotal = Number((existingItem.lineTotal + lineTotal).toFixed(2));
+      existingItem.lineTotal = Number(
+        (existingItem.lineTotal + lineTotal).toFixed(2),
+      );
       return;
     }
 
@@ -190,7 +206,7 @@ const getFlowHint = ({
 
   if (canGenerateInvoice) {
     if (cartCount > 0) {
-      return "Confirm the pending items before sending the order to payment.";
+      return "Saving new items to the ticket...";
     }
 
     return "Send the ticket to payment when the guest is ready.";
@@ -198,8 +214,8 @@ const getFlowHint = ({
 
   if (cartCount > 0) {
     return hasActiveOrder
-      ? "Confirm the pending items to append them to the open ticket."
-      : `Confirm the order to open a ${isToGo ? "to-go" : "table"} ticket.`;
+      ? "Saving new items to the open ticket..."
+      : `Saving to open a ${isToGo ? "to-go" : "table"} ticket...`;
   }
 
   return "Tap products to build the order.";
@@ -219,6 +235,10 @@ export default function PosOrderScreen() {
   const [currentOrder, setCurrentOrder] = useState(table?.activeOrder || null);
   const [selectedCartProductId, setSelectedCartProductId] = useState(null);
   const [isToGo, setIsToGo] = useState(false);
+  // Whether Complete Payment should also generate/download the fiscal
+  // coupon (receipt PDF). Everything else about the order (totals, reports,
+  // payment status) is identical either way — this only controls the PDF.
+  const [isFiscalReceipt, setIsFiscalReceipt] = useState(true);
   const [pendingDiscount, setPendingDiscount] = useState(() =>
     buildDiscountConfig(table?.activeOrder),
   );
@@ -238,13 +258,21 @@ export default function PosOrderScreen() {
   const [selectedTransferTableId, setSelectedTransferTableId] = useState(null);
   const [isTransferringOrder, setIsTransferringOrder] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const { cart, total, itemCount, addProduct, changeQuantity, removeProduct, clearCart } =
-    useOrderCart();
+  const {
+    cart,
+    total,
+    itemCount,
+    addProduct,
+    changeQuantity,
+    removeProduct,
+    clearCart,
+  } = useOrderCart();
 
   useEffect(() => {
     setCurrentOrder(table?.activeOrder || null);
     setSelectedCartProductId(null);
     setIsToGo(false);
+    setIsFiscalReceipt(true);
     setPendingDiscount(buildDiscountConfig(table?.activeOrder));
     setIsDiscountDialogOpen(false);
     setIsSplitDialogOpen(false);
@@ -260,7 +288,9 @@ export default function PosOrderScreen() {
     }
 
     setSelectedCartProductId((current) =>
-      cart.some((item) => item.productId === current) ? current : cart[0].productId,
+      cart.some((item) => item.productId === current)
+        ? current
+        : cart[0].productId,
     );
   }, [cart]);
 
@@ -385,7 +415,9 @@ export default function PosOrderScreen() {
       return undefined;
     }
 
-    const source = new EventSource(buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS));
+    const source = new EventSource(
+      buildRealtimeStreamUrl(session.token, REALTIME_MENU_CHANNELS),
+    );
 
     const handleUpdate = (event) => {
       try {
@@ -434,9 +466,13 @@ export default function PosOrderScreen() {
 
   const backendCategories = menuData?.categories || [];
   const products = menuData?.products || [];
-  const transferTables = Array.isArray(transferTablesData) ? transferTablesData : [];
-  const employeeId = session.staffProfile?.employeeId || session.user?.employee?.id || null;
-  const waiterName = session.staffProfile?.name || session.user?.fullName || "Waiter";
+  const transferTables = Array.isArray(transferTablesData)
+    ? transferTablesData
+    : [];
+  const employeeId =
+    session.staffProfile?.employeeId || session.user?.employee?.id || null;
+  const waiterName =
+    session.staffProfile?.name || session.user?.fullName || "Waiter";
   const availableProducts = useMemo(
     () =>
       products
@@ -471,7 +507,10 @@ export default function PosOrderScreen() {
     }
 
     setSelectedCategoryId((current) => {
-      if (current && menuCategories.some((category) => String(category.id) === current)) {
+      if (
+        current &&
+        menuCategories.some((category) => String(category.id) === current)
+      ) {
         return current;
       }
 
@@ -486,7 +525,12 @@ export default function PosOrderScreen() {
 
   const tableVisualIdsById = useMemo(
     () =>
-      new Map(sortedTransferTables.map((transferTable, index) => [transferTable.id, index + 1])),
+      new Map(
+        sortedTransferTables.map((transferTable, index) => [
+          transferTable.id,
+          index + 1,
+        ]),
+      ),
     [sortedTransferTables],
   );
 
@@ -494,19 +538,25 @@ export default function PosOrderScreen() {
     () =>
       sortedTransferTables.filter(
         (transferTable) =>
-          transferTable.id !== table?.id && normalizeStatus(transferTable.status) === "available",
+          transferTable.id !== table?.id &&
+          normalizeStatus(transferTable.status) === "available",
       ),
     [sortedTransferTables, table],
   );
 
   const hasActiveOrder = Boolean(currentOrder);
   const orderStatus = normalizeStatus(currentOrder?.status);
-  const canEditOrderItems = !hasActiveOrder || ORDER_EDITABLE_STATUSES.has(orderStatus);
-  const canGenerateInvoice = hasActiveOrder && ORDER_EDITABLE_STATUSES.has(orderStatus);
-  const canCompletePayment = hasActiveOrder && orderStatus === "pending_payment";
-  const canTransferOrder = hasActiveOrder && TRANSFERABLE_ORDER_STATUSES.has(orderStatus);
+  const canEditOrderItems =
+    !hasActiveOrder || ORDER_EDITABLE_STATUSES.has(orderStatus);
+  const canGenerateInvoice =
+    hasActiveOrder && ORDER_EDITABLE_STATUSES.has(orderStatus);
+  const canCompletePayment =
+    hasActiveOrder && orderStatus === "pending_payment";
+  const canTransferOrder =
+    hasActiveOrder && TRANSFERABLE_ORDER_STATUSES.has(orderStatus);
   const canDownloadInvoice =
-    hasActiveOrder && (orderStatus === "pending_payment" || orderStatus === "paid");
+    hasActiveOrder &&
+    (orderStatus === "pending_payment" || orderStatus === "paid");
   const isBusy =
     isApplyingDiscount ||
     isSavingOrder ||
@@ -534,7 +584,9 @@ export default function PosOrderScreen() {
   }, [categoryRailItems, selectedCategoryId]);
 
   const visibleProducts = useMemo(() => {
-    const allowedCategoryIds = new Set(menuCategories.map((category) => String(category.id)));
+    const allowedCategoryIds = new Set(
+      menuCategories.map((category) => String(category.id)),
+    );
 
     return availableProducts.filter((product) => {
       const productCategoryId = String(product.categoryId);
@@ -552,7 +604,10 @@ export default function PosOrderScreen() {
   }, [menuCategories, availableProducts, selectedCategoryId]);
 
   const ticketItems = useMemo(
-    () => buildTicketSummaryItems(Array.isArray(currentOrder?.items) ? currentOrder.items : []),
+    () =>
+      buildTicketSummaryItems(
+        Array.isArray(currentOrder?.items) ? currentOrder.items : [],
+      ),
     [currentOrder],
   );
 
@@ -566,8 +621,12 @@ export default function PosOrderScreen() {
     categoryRailItems.length > 0
       ? "Tap a category once, then hit products as fast as the guest calls them."
       : "No ready-to-order products are available right now.";
-  const activeDiscountConfig = hasActiveOrder ? buildDiscountConfig(currentOrder) : pendingDiscount;
-  const currentSubtotal = hasActiveOrder ? normalizeOrderSubtotal(currentOrder) : 0;
+  const activeDiscountConfig = hasActiveOrder
+    ? buildDiscountConfig(currentOrder)
+    : pendingDiscount;
+  const currentSubtotal = hasActiveOrder
+    ? normalizeOrderSubtotal(currentOrder)
+    : 0;
   const projectedSubtotal = Number((currentSubtotal + total).toFixed(2));
   const projectedDiscountAmount = calculateDiscountAmount(
     projectedSubtotal,
@@ -578,7 +637,8 @@ export default function PosOrderScreen() {
     Math.max(projectedSubtotal - projectedDiscountAmount, 0).toFixed(2),
   );
   const serviceLabel = isToGo ? "To Go" : "Table Service";
-  const selectedCartItem = cart.find((item) => item.productId === selectedCartProductId) || null;
+  const selectedCartItem =
+    cart.find((item) => item.productId === selectedCartProductId) || null;
   const hasAppliedDiscount = projectedDiscountAmount > 0;
   const discountSummaryLabel = hasAppliedDiscount
     ? activeDiscountConfig.discountType === "percent"
@@ -603,7 +663,10 @@ export default function PosOrderScreen() {
     }
 
     setSelectedTransferTableId((current) => {
-      if (current && transferCandidates.some((candidate) => candidate.id === current)) {
+      if (
+        current &&
+        transferCandidates.some((candidate) => candidate.id === current)
+      ) {
         return current;
       }
 
@@ -613,7 +676,9 @@ export default function PosOrderScreen() {
 
   const submitItemsToOrder = async () => {
     if (!canEditOrderItems) {
-      throw new Error("This order is in payment phase. Create a new order after payment.");
+      throw new Error(
+        "This order is in payment phase. Create a new order after payment.",
+      );
     }
 
     if (cart.length === 0) {
@@ -647,29 +712,40 @@ export default function PosOrderScreen() {
     return order;
   };
 
-  const handleSaveOrder = async () => {
-    setIsSavingOrder(true);
-    setSubmitError("");
-
-    try {
-      const order = await submitItemsToOrder();
-      showNotice({
-        type: "success",
-        message: hasActiveOrder
-          ? `Items added to Order #${order.id}.`
-          : `Order #${order.id} opened as ${serviceLabel.toLowerCase()}.`,
-      });
-    } catch (requestError) {
-      if (requestError.status === 401) {
-        logout();
-        return;
-      }
-
-      setSubmitError(requestError.message || "Cannot confirm order.");
-    } finally {
-      setIsSavingOrder(false);
+  // Items in the cart save to the ticket automatically a moment after the
+  // waiter stops tapping — no separate "Confirm Order" step. A short pause
+  // (rather than saving on every single tap) lets someone adjust a
+  // quantity or remove a line before it's sent, while still requiring no
+  // manual click at all.
+  useEffect(() => {
+    if (cart.length === 0 || !canEditOrderItems) {
+      return undefined;
     }
-  };
+
+    const timeoutId = window.setTimeout(async () => {
+      setIsSavingOrder(true);
+      setSubmitError("");
+
+      try {
+        await submitItemsToOrder();
+      } catch (requestError) {
+        if (requestError.status === 401) {
+          logout();
+          return;
+        }
+
+        setSubmitError(
+          requestError.message || "Cannot save items to the order.",
+        );
+      } finally {
+        setIsSavingOrder(false);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, 900);
+
+    return () => window.clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, canEditOrderItems]);
 
   const handleGenerateInvoice = async () => {
     setIsGeneratingInvoice(true);
@@ -681,12 +757,20 @@ export default function PosOrderScreen() {
       }
 
       if (cart.length > 0) {
-        throw new Error("Confirm pending items first, then move the ticket to payment.");
+        throw new Error(
+          "Confirm pending items first, then move the ticket to payment.",
+        );
       }
 
-      const invoicedOrder = await generateOrderInvoice(session.token, currentOrder.id);
+      const invoicedOrder = await generateOrderInvoice(
+        session.token,
+        currentOrder.id,
+      );
       setCurrentOrder(invoicedOrder);
-      await downloadOrderReceipt(session.token, invoicedOrder.id);
+
+      // The fiscal coupon is generated at Complete Payment time (based on
+      // the Fiscal / Jo Fiskal choice there), not here — sending the ticket
+      // to payment no longer auto-downloads a receipt.
 
       showNotice({
         type: "success",
@@ -744,12 +828,29 @@ export default function PosOrderScreen() {
       }
 
       if (normalizeStatus(currentOrder.status) !== "pending_payment") {
-        throw new Error("Send the ticket to payment before completing payment.");
+        throw new Error(
+          "Send the ticket to payment before completing payment.",
+        );
       }
 
-      const paidOrder = await completeOrderPayment(session.token, currentOrder.id);
+      const paidOrder = await completeOrderPayment(
+        session.token,
+        currentOrder.id,
+      );
 
       setCurrentOrder(paidOrder);
+
+      // Fiscal / Jo Fiskal only controls whether the coupon PDF is
+      // generated here — payment status and totals are identical either
+      // way. If the PDF download itself fails, don't block returning to
+      // the tables screen since the payment already went through.
+      if (isFiscalReceipt) {
+        try {
+          await downloadOrderReceipt(session.token, paidOrder.id);
+        } catch (receiptError) {
+          console.error("Fiscal receipt download failed:", receiptError);
+        }
+      }
 
       handleReturnToTables({
         refresh: true,
@@ -757,7 +858,9 @@ export default function PosOrderScreen() {
           type: "success",
           message: `Payment completed (${formatPrice(
             paidOrder.total,
-          )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(table)} is available.`,
+          )} EUR) for Order #${paidOrder.id}. Table ${getDisplayTableId(table)} is available.${
+            isFiscalReceipt ? "" : " (Jo Fiskal — pa kupon)"
+          }`,
         },
       });
     } catch (requestError) {
@@ -834,10 +937,14 @@ export default function PosOrderScreen() {
 
     try {
       if (hasActiveOrder) {
-        const updatedOrder = await updateOrderDiscount(session.token, currentOrder.id, {
-          discountType,
-          discountValue,
-        });
+        const updatedOrder = await updateOrderDiscount(
+          session.token,
+          currentOrder.id,
+          {
+            discountType,
+            discountValue,
+          },
+        );
         setCurrentOrder(updatedOrder);
         setPendingDiscount(buildDiscountConfig(updatedOrder));
       } else {
@@ -873,7 +980,11 @@ export default function PosOrderScreen() {
 
     try {
       if (hasActiveOrder) {
-        const updatedOrder = await updateOrderDiscount(session.token, currentOrder.id, {});
+        const updatedOrder = await updateOrderDiscount(
+          session.token,
+          currentOrder.id,
+          {},
+        );
         setCurrentOrder(updatedOrder);
         setPendingDiscount(buildDiscountConfig(updatedOrder));
       } else {
@@ -911,7 +1022,9 @@ export default function PosOrderScreen() {
     }
 
     if (cart.length > 0) {
-      setSubmitError("Confirm or clear pending cart items before transferring the order.");
+      setSubmitError(
+        "Confirm or clear pending cart items before transferring the order.",
+      );
       return;
     }
 
@@ -939,10 +1052,12 @@ export default function PosOrderScreen() {
         currentOrder.id,
         selectedTransferTableId,
       );
-      const transferredTableId = transferredOrder.tableId || transferredOrder.table?.id;
+      const transferredTableId =
+        transferredOrder.tableId || transferredOrder.table?.id;
       const transferredTable =
-        sortedTransferTables.find((candidate) => candidate.id === transferredTableId) ||
-        transferredOrder.table;
+        sortedTransferTables.find(
+          (candidate) => candidate.id === transferredTableId,
+        ) || transferredOrder.table;
       const nextVisualId =
         tableVisualIdsById.get(transferredTableId) ||
         transferredTable?.visualId ||
@@ -1002,8 +1117,16 @@ export default function PosOrderScreen() {
   };
 
   const headerStats = [
-    { label: "Categories", value: categoryRailItems.length, accent: "text-[#12213d]" },
-    { label: "Products Ready", value: visibleProducts.length, accent: "text-[#12213d]" },
+    {
+      label: "Categories",
+      value: categoryRailItems.length,
+      accent: "text-[#12213d]",
+    },
+    {
+      label: "Products Ready",
+      value: visibleProducts.length,
+      accent: "text-[#12213d]",
+    },
     { label: "Pending Cart", value: itemCount, accent: "text-[#12213d]" },
     {
       label: "Ticket Status",
@@ -1020,7 +1143,11 @@ export default function PosOrderScreen() {
       accent: "text-[#1554a3]",
       align: "text-right",
     },
-    { label: "Ticket Items", value: activeOrderItemCount, accent: "text-[#12213d]" },
+    {
+      label: "Ticket Items",
+      value: activeOrderItemCount,
+      accent: "text-[#12213d]",
+    },
     {
       label: "Projected Total",
       value: `${formatPrice(projectedTotal)} EUR`,
@@ -1063,7 +1190,8 @@ export default function PosOrderScreen() {
                   Order Terminal
                 </h1>
                 <p className="m-0 mt-2 max-w-3xl text-sm text-[#5c7093] sm:text-[15px]">
-                  Categories on the left, products in the middle, checkout on the right.
+                  Categories on the left, products in the middle, checkout on
+                  the right.
                 </p>
               </div>
             </div>
@@ -1095,7 +1223,9 @@ export default function PosOrderScreen() {
                 <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                   {item.label}
                 </p>
-                <p className={`m-0 mt-2 text-xl font-semibold ${item.accent}`}>{item.value}</p>
+                <p className={`m-0 mt-2 text-xl font-semibold ${item.accent}`}>
+                  {item.value}
+                </p>
               </div>
             ))}
           </div>
@@ -1128,7 +1258,9 @@ export default function PosOrderScreen() {
                 <h2 className="m-0 mt-2 text-[1.55rem] font-semibold tracking-[-0.02em] text-[#12213d]">
                   {selectedCategoryName}
                 </h2>
-                <p className="m-0 mt-2 text-sm text-[#5c7093]">{selectedMenuHint}</p>
+                <p className="m-0 mt-2 text-sm text-[#5c7093]">
+                  {selectedMenuHint}
+                </p>
               </div>
 
               <div className="rounded-[8px] border border-[#e1ecfb] bg-[#f7faff] px-3 py-3 text-right">
@@ -1150,7 +1282,8 @@ export default function PosOrderScreen() {
                     No orderable categories
                   </p>
                   <p className="mt-2 text-sm text-[#5c7093]">
-                    Add products with stock and availability from the manager panel first.
+                    Add products with stock and availability from the manager
+                    panel first.
                   </p>
                 </div>
               </div>
@@ -1161,7 +1294,8 @@ export default function PosOrderScreen() {
                     No products in this category
                   </p>
                   <p className="mt-2 text-sm text-[#5c7093]">
-                    Choose another category or restock products from the manager side.
+                    Choose another category or restock products from the manager
+                    side.
                   </p>
                 </div>
               </div>
@@ -1171,7 +1305,11 @@ export default function PosOrderScreen() {
                   <ProductTile
                     key={product.id}
                     product={product}
-                    disabled={!canEditOrderItems || isBusy || Number(product.stock || 0) <= 0}
+                    disabled={
+                      !canEditOrderItems ||
+                      isBusy ||
+                      Number(product.stock || 0) <= 0
+                    }
                     onAdd={handleAddProduct}
                   />
                 ))}
@@ -1217,7 +1355,11 @@ export default function PosOrderScreen() {
                   <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                     {item.label}
                   </p>
-                  <p className={`m-0 mt-2 text-lg font-semibold ${item.accent}`}>{item.value}</p>
+                  <p
+                    className={`m-0 mt-2 text-lg font-semibold ${item.accent}`}
+                  >
+                    {item.value}
+                  </p>
                 </div>
               ))}
             </div>
@@ -1226,7 +1368,7 @@ export default function PosOrderScreen() {
               <p className="m-0 text-[10px] uppercase tracking-[0.16em] text-[#5c7093]">
                 Top Actions
               </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   aria-pressed={isToGo}
@@ -1250,18 +1392,6 @@ export default function PosOrderScreen() {
                 >
                   Discount / Coupon
                 </button>
-                <button
-                  type="button"
-                  className="inline-flex min-h-[62px] items-center justify-center rounded-[8px] border border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1554a3_100%)] px-3 text-sm font-bold text-white transition hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={isBusy || !canEditOrderItems || cart.length === 0}
-                  onClick={handleSaveOrder}
-                >
-                  {isSavingOrder
-                    ? "Confirming..."
-                    : hasActiveOrder
-                      ? "Confirm Order"
-                      : "Open Order"}
-                </button>
               </div>
             </div>
             <div className="mt-4 flex min-h-0 flex-1 flex-col rounded-[8px] border border-[#e1ecfb] bg-[#f7faff]">
@@ -1275,7 +1405,9 @@ export default function PosOrderScreen() {
                 {ticketItems.length === 0 && cart.length === 0 ? (
                   <div className="flex h-full min-h-[260px] items-center justify-center rounded-[8px] border border-dashed border-[#c7dcf7] bg-white px-4 text-center">
                     <div>
-                      <p className="m-0 text-base font-semibold text-[#12213d]">No items yet</p>
+                      <p className="m-0 text-base font-semibold text-[#12213d]">
+                        No items yet
+                      </p>
                       <p className="mt-2 text-sm text-[#5c7093]">
                         Tap product tiles to fill the order summary.
                       </p>
@@ -1295,7 +1427,11 @@ export default function PosOrderScreen() {
                         </div>
                         <div className="space-y-2">
                           {ticketItems.map((item) => (
-                            <CartItemRow key={item.key} item={item} variant="ticket" />
+                            <CartItemRow
+                              key={item.key}
+                              item={item}
+                              variant="ticket"
+                            />
                           ))}
                         </div>
                       </section>
@@ -1303,17 +1439,23 @@ export default function PosOrderScreen() {
 
                     {cart.length > 0 ? (
                       <section
-                        className={ticketItems.length > 0 ? "border-t border-[#e1ecfb] pt-4" : ""}
+                        className={
+                          ticketItems.length > 0
+                            ? "border-t border-[#e1ecfb] pt-4"
+                            : ""
+                        }
                       >
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div>
                             <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5c7093]">
-                              Ready To Confirm
+                              {isSavingOrder
+                                ? "Saving To Ticket..."
+                                : "Ready To Save"}
                             </p>
                             <p className="m-0 mt-1 text-xs text-[#5c7093]">
                               {selectedCartItem
                                 ? `${selectedCartItem.name} selected`
-                                : "Tap a pending line to edit or delete"}
+                                : "Tap a line to edit — saves to the ticket automatically"}
                             </p>
                           </div>
                           <span className="text-[11px] font-semibold text-[#12213d]">
@@ -1325,7 +1467,9 @@ export default function PosOrderScreen() {
                             <CartItemRow
                               key={item.productId}
                               item={item}
-                              selected={selectedCartProductId === item.productId}
+                              selected={
+                                selectedCartProductId === item.productId
+                              }
                               onSelect={setSelectedCartProductId}
                               onChangeQuantity={changeQuantity}
                               disabled={isBusy}
@@ -1353,7 +1497,9 @@ export default function PosOrderScreen() {
                     </div>
                     <div className="flex items-center justify-between gap-3 text-[#a15c1f]">
                       <span>{discountSummaryLabel}</span>
-                      <strong>-{formatPrice(projectedDiscountAmount)} EUR</strong>
+                      <strong>
+                        -{formatPrice(projectedDiscountAmount)} EUR
+                      </strong>
                     </div>
                   </>
                 ) : null}
@@ -1363,7 +1509,9 @@ export default function PosOrderScreen() {
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t border-[#e1ecfb] pt-2 text-base">
                   <span>Total Due</span>
-                  <strong className="text-[#1554a3]">{formatPrice(projectedTotal)} EUR</strong>
+                  <strong className="text-[#1554a3]">
+                    {formatPrice(projectedTotal)} EUR
+                  </strong>
                 </div>
               </div>
 
@@ -1422,7 +1570,9 @@ export default function PosOrderScreen() {
                   type="button"
                   className="inline-flex min-h-[58px] items-center justify-center rounded-[8px] border border-[#5c8dff] bg-[linear-gradient(180deg,#6ea3ff_0%,#3a6fd6_100%)] px-3 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={
-                    !hasActiveOrder || cart.length > 0 || Number(currentOrder?.total || 0) <= 0
+                    !hasActiveOrder ||
+                    cart.length > 0 ||
+                    Number(currentOrder?.total || 0) <= 0
                   }
                   onClick={handleOpenSplitDialog}
                 >
@@ -1438,6 +1588,35 @@ export default function PosOrderScreen() {
                 </button>
               </div>
 
+              {canCompletePayment ? (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={isFiscalReceipt}
+                    className={`inline-flex min-h-[48px] items-center justify-center rounded-[8px] border px-3 text-xs font-semibold transition active:scale-[0.99] ${
+                      isFiscalReceipt
+                        ? "border-[#1fa2ff] bg-[linear-gradient(180deg,#4f9dff_0%,#1a86e0_100%)] text-white"
+                        : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#1fa2ff]"
+                    }`}
+                    onClick={() => setIsFiscalReceipt(true)}
+                  >
+                    Kupon Fiskal
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!isFiscalReceipt}
+                    className={`inline-flex min-h-[48px] items-center justify-center rounded-[8px] border px-3 text-xs font-semibold transition active:scale-[0.99] ${
+                      !isFiscalReceipt
+                        ? "border-[#e6b657] bg-[linear-gradient(180deg,#f4b860_0%,#d6923a_100%)] text-white"
+                        : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#e6b657]"
+                    }`}
+                    onClick={() => setIsFiscalReceipt(false)}
+                  >
+                    Jo Fiskal (pa kupon)
+                  </button>
+                </div>
+              ) : null}
+
               <div className="mt-2 grid grid-cols-1 gap-2">
                 <button
                   type="button"
@@ -1445,7 +1624,13 @@ export default function PosOrderScreen() {
                   disabled={isBusy || !canCompletePayment}
                   onClick={handleCompletePayment}
                 >
-                  {isCompletingPayment ? "Processing..." : "Complete Payment"}
+                  {isCompletingPayment
+                    ? "Processing..."
+                    : canCompletePayment
+                      ? isFiscalReceipt
+                        ? "Complete Payment (Kupon Fiskal)"
+                        : "Complete Payment (Jo Fiskal)"
+                      : "Complete Payment"}
                 </button>
               </div>
             </div>
@@ -1523,7 +1708,9 @@ export default function PosOrderScreen() {
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="m-0 text-lg font-semibold">Table {candidateVisualId}</p>
+                            <p className="m-0 text-lg font-semibold">
+                              Table {candidateVisualId}
+                            </p>
                             <p className="m-0 mt-1 text-sm opacity-80">
                               {candidate.location || "Floor"}
                             </p>
@@ -1627,7 +1814,9 @@ export default function PosOrderScreen() {
                       discountValue: event.target.value,
                     }))
                   }
-                  placeholder={discountForm.discountType === "percent" ? "10" : "2.50"}
+                  placeholder={
+                    discountForm.discountType === "percent" ? "10" : "2.50"
+                  }
                 />
               </label>
             </div>
@@ -1643,7 +1832,9 @@ export default function PosOrderScreen() {
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 border-t border-[#e1ecfb] pt-2 text-base">
                 <span>Projected total</span>
-                <strong className="text-[#1554a3]">{formatPrice(projectedTotal)} EUR</strong>
+                <strong className="text-[#1554a3]">
+                  {formatPrice(projectedTotal)} EUR
+                </strong>
               </div>
             </div>
 
@@ -1711,7 +1902,10 @@ export default function PosOrderScreen() {
                     setSplitCount(
                       Math.max(
                         2,
-                        Math.min(MAX_SPLIT_PARTS, Number.isFinite(nextValue) ? nextValue : 2),
+                        Math.min(
+                          MAX_SPLIT_PARTS,
+                          Number.isFinite(nextValue) ? nextValue : 2,
+                        ),
                       ),
                     );
                   }}
@@ -1728,7 +1922,8 @@ export default function PosOrderScreen() {
                   <strong>{splitShares.length}</strong>
                 </div>
                 <p className="m-0 mt-3 text-xs text-[#5c7093]">
-                  Remainder cents are distributed automatically so the full total stays exact.
+                  Remainder cents are distributed automatically so the full
+                  total stays exact.
                 </p>
               </div>
             </div>
