@@ -1,0 +1,59 @@
+{
+  "barName": "Hotel Coffee Shop",
+
+  "staff": [
+    {
+      "fullName": "Emri i menaxherit",
+      "role": "manager",
+      "pin": "4821"
+    },
+    {
+      "fullName": "Kamarieri i pare",
+      "role": "waiter",
+      "pin": "5730"
+    },
+    {
+      "fullName": "Kamarieri i dyte",
+      "role": "waiter",
+      "pin": "6194"
+    }
+  ],
+
+  "tables": [
+    {
+      "location": "Main Hall",
+      "capacity": 4,
+      "numbers": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "location": "Terrace 1",
+      "capacity": 4,
+      "numbers": [9, 10, 11, 12, 13, 14]
+    },
+    {
+      "location": "Terrace 2",
+      "capacity": 6,
+      "numbers": [15, 16, 17, 18]
+    }
+  ],
+
+  "menu": [
+    {
+      "category": "Kafe",
+      "description": "Kafe dhe pije te ngrohta",
+      "products": [
+        { "name": "Espresso", "price": 1.0 },
+        { "name": "Macchiato", "price": 1.2 },
+        { "name": "Cappuccino", "price": 1.5 },
+        { "name": "Caj", "price": 1.0 }
+      ]
+    },
+    {
+      "category": "Pije freskuese",
+      "products": [
+        { "name": "Uje 0.5L", "price": 1.0 },
+        { "name": "Coca-Cola", "price": 1.8 }
+      ]
+    }
+  ]
+}

@@ -2,8 +2,17 @@ const PDFDocument = require("pdfkit");
 const prisma = require("../../config/prisma");
 const { syncProductStockAlert } = require("../../services/alert.service");
 const AppError = require("../../utils/app-error");
-const { handleControllerError, sendError, sendSuccess } = require("../../utils/response");
+const {
+  handleControllerError,
+  sendError,
+  sendSuccess,
+} = require("../../utils/response");
 const { normalizeRole } = require("../../middlewares/role.middleware");
+const {
+  businessDateKey,
+  endOfBusinessDayExclusive,
+  startOfBusinessDay,
+} = require("../../utils/business-day");
 const {
   consumeIngredientsForOrderItems,
   restoreIngredientsForOrderItems,
@@ -24,7 +33,12 @@ const ORDER_PROGRESS_FLOW = {
   preparing: "served",
 };
 
-const ACTIVE_ORDER_STATUSES = ["pending", "preparing", "served", "pending_payment"];
+const ACTIVE_ORDER_STATUSES = [
+  "pending",
+  "preparing",
+  "served",
+  "pending_payment",
+];
 const ITEM_EDITABLE_ORDER_STATUSES = ["pending", "preparing", "served"];
 const RECEIPT_READY_STATUSES = ["pending_payment", "paid"];
 const ARCHIVED_TABLE_STATUS = "archived";
@@ -63,10 +77,12 @@ const orderInclude = {
   },
 };
 
-const normalizeEmail = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeEmail = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const isAdmin = (req) => normalizeRole(req.user && req.user.role) === "admin";
-const isManager = (req) => normalizeRole(req.user && req.user.role) === "manager";
+const isManager = (req) =>
+  normalizeRole(req.user && req.user.role) === "manager";
 const isWaiter = (req) => normalizeRole(req.user && req.user.role) === "waiter";
 const isAdminOrManager = (req) => isAdmin(req) || isManager(req);
 const isPosStaff = (req) => isAdminOrManager(req) || isWaiter(req);
@@ -80,7 +96,8 @@ const isAssignedWaiter = (req, order) =>
   isWaiter(req) &&
   order &&
   order.employee &&
-  normalizeEmail(order.employee.email) === normalizeEmail(req.user && req.user.email);
+  normalizeEmail(order.employee.email) ===
+    normalizeEmail(req.user && req.user.email);
 
 const canAccessOrder = (req, order) => {
   const userId = req.user && req.user.id;
@@ -89,7 +106,9 @@ const canAccessOrder = (req, order) => {
     return false;
   }
 
-  return isPosStaff(req) || order.userId === userId || isAssignedWaiter(req, order);
+  return (
+    isPosStaff(req) || order.userId === userId || isAssignedWaiter(req, order)
+  );
 };
 
 const canManageOrderLifecycle = (req, order) => {
@@ -99,25 +118,38 @@ const canManageOrderLifecycle = (req, order) => {
     return false;
   }
 
-  return isPosStaff(req) || isAssignedWaiter(req, order) || order.userId === userId;
+  return (
+    isPosStaff(req) || isAssignedWaiter(req, order) || order.userId === userId
+  );
 };
 
-const normalizeStatus = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
+const normalizeStatus = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const formatMoney = (value) => MONEY_FORMATTER.format(Number(value || 0));
 
 const getOrderSubtotal = (order) => {
   const subtotal =
     order?.subtotal ??
-    Number((Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(2));
+    Number(
+      (Number(order?.total || 0) + Number(order?.discountAmount || 0)).toFixed(
+        2,
+      ),
+    );
 
   return Number(subtotal || 0);
 };
 
-const buildDiscountTotals = (subtotal, discountType = null, discountValue = null) => {
+const buildDiscountTotals = (
+  subtotal,
+  discountType = null,
+  discountValue = null,
+) => {
   const normalizedSubtotal = Number(Number(subtotal || 0).toFixed(2));
   const normalizedValue =
-    discountValue === null || discountValue === undefined ? null : Number(discountValue);
+    discountValue === null || discountValue === undefined
+      ? null
+      : Number(discountValue);
 
   if (!discountType || !normalizedValue || normalizedSubtotal <= 0) {
     return {
@@ -144,7 +176,9 @@ const buildDiscountTotals = (subtotal, discountType = null, discountValue = null
     discountType,
     discountValue: Number(normalizedValue.toFixed(2)),
     discountAmount: normalizedDiscountAmount,
-    total: Number(Math.max(normalizedSubtotal - normalizedDiscountAmount, 0).toFixed(2)),
+    total: Number(
+      Math.max(normalizedSubtotal - normalizedDiscountAmount, 0).toFixed(2),
+    ),
   };
 };
 
@@ -165,7 +199,9 @@ const streamOrderReceiptPdf = (res, order) => {
     .fontSize(10)
     .fillColor("#555555")
     .text(`Order #${order.id}`, { align: "center" })
-    .text(RECEIPT_DATE_FORMATTER.format(new Date(order.createdAt)), { align: "center" });
+    .text(RECEIPT_DATE_FORMATTER.format(new Date(order.createdAt)), {
+      align: "center",
+    });
 
   doc.moveDown(1);
   doc.fillColor("#111111").fontSize(11);
@@ -189,9 +225,12 @@ const streamOrderReceiptPdf = (res, order) => {
 
     doc
       .fontSize(10)
-      .text(`${index + 1}. ${item.product ? item.product.name : "Product"} x${item.quantity}`, {
-        continued: true,
-      })
+      .text(
+        `${index + 1}. ${item.product ? item.product.name : "Product"} x${item.quantity}`,
+        {
+          continued: true,
+        },
+      )
       .text(` ${formatMoney(lineTotal)} EUR`, { align: "right" });
   });
 
@@ -199,13 +238,19 @@ const streamOrderReceiptPdf = (res, order) => {
   const receiptSubtotal = getOrderSubtotal(order);
   const receiptDiscountAmount = Number(order.discountAmount || 0);
 
-  doc.fontSize(11).text(`SUBTOTAL: ${formatMoney(receiptSubtotal)} EUR`, { align: "right" });
+  doc
+    .fontSize(11)
+    .text(`SUBTOTAL: ${formatMoney(receiptSubtotal)} EUR`, { align: "right" });
 
   if (receiptDiscountAmount > 0) {
-    doc.text(`DISCOUNT: -${formatMoney(receiptDiscountAmount)} EUR`, { align: "right" });
+    doc.text(`DISCOUNT: -${formatMoney(receiptDiscountAmount)} EUR`, {
+      align: "right",
+    });
   }
 
-  doc.fontSize(12).text(`TOTAL: ${formatMoney(order.total)} EUR`, { align: "right" });
+  doc
+    .fontSize(12)
+    .text(`TOTAL: ${formatMoney(order.total)} EUR`, { align: "right" });
 
   doc.moveDown(1.2);
   doc
@@ -217,26 +262,37 @@ const streamOrderReceiptPdf = (res, order) => {
 };
 
 const buildOrderItems = (products, normalizedItems) => {
-  const productsById = new Map(products.map((product) => [product.id, product]));
+  const productsById = new Map(
+    products.map((product) => [product.id, product]),
+  );
   let total = 0;
 
   const orderItems = normalizedItems.map((item) => {
     const product = productsById.get(item.productId);
 
     if (!product) {
-      throw new AppError(`Product with id ${item.productId} was not found`, 404);
+      throw new AppError(
+        `Product with id ${item.productId} was not found`,
+        404,
+      );
     }
 
     if (!product.isAvailable) {
-      throw new AppError(`Product "${product.name}" is not available for ordering`);
+      throw new AppError(
+        `Product "${product.name}" is not available for ordering`,
+      );
     }
 
     const hasRecipe = Boolean(
-      product.recipe?.isActive && product.recipe.items && product.recipe.items.length,
+      product.recipe?.isActive &&
+      product.recipe.items &&
+      product.recipe.items.length,
     );
 
     if (!hasRecipe && isRecipeManagedProduct(product)) {
-      throw new AppError(`Product "${product.name}" needs a recipe before it can be sold`);
+      throw new AppError(
+        `Product "${product.name}" needs a recipe before it can be sold`,
+      );
     }
 
     if (!hasRecipe && product.stock < item.quantity) {
@@ -259,7 +315,8 @@ const buildOrderItems = (products, normalizedItems) => {
 };
 
 const isRecipeManagedProduct = (product) => {
-  const text = `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
+  const text =
+    `${product?.name || ""} ${product?.category?.name || ""}`.toLowerCase();
 
   return (
     text.includes("coffee") ||
@@ -335,7 +392,9 @@ const deductStockForOrderItems = async (tx, orderItems, options = {}) => {
     });
 
     if (updatedProduct.count === 0) {
-      throw new AppError("Stock changed while creating the order. Please try again.");
+      throw new AppError(
+        "Stock changed while creating the order. Please try again.",
+      );
     }
 
     const product = await tx.product.findUnique({
@@ -357,7 +416,13 @@ const setTableStatusForOrder = async (tx, order, status) => {
   });
 };
 
-const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus, options = {}) => {
+const applyOrderStatusTransition = async (
+  tx,
+  req,
+  existingOrder,
+  targetStatus,
+  options = {},
+) => {
   if (existingOrder.status === targetStatus) {
     throw new AppError(`Order is already ${targetStatus}`);
   }
@@ -390,7 +455,10 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus, 
 
   if (targetStatus === "pending_payment") {
     if (!canManageOrderLifecycle(req, existingOrder)) {
-      throw new AppError("Only POS staff or order owner can generate invoice", 403);
+      throw new AppError(
+        "Only POS staff or order owner can generate invoice",
+        403,
+      );
     }
 
     if (!ITEM_EDITABLE_ORDER_STATUSES.includes(existingOrder.status)) {
@@ -408,16 +476,23 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus, 
 
   if (targetStatus === "paid") {
     if (!canManageOrderLifecycle(req, existingOrder)) {
-      throw new AppError("Only POS staff or order owner can complete payment", 403);
+      throw new AppError(
+        "Only POS staff or order owner can complete payment",
+        403,
+      );
     }
 
     if (existingOrder.status !== "pending_payment") {
-      throw new AppError("Payment can only be completed after invoice generation", 400);
+      throw new AppError(
+        "Payment can only be completed after invoice generation",
+        400,
+      );
     }
 
     await setTableStatusForOrder(tx, existingOrder, "available");
 
-    const nextPaymentMethod = options.paymentMethod || existingOrder.paymentMethod || null;
+    const nextPaymentMethod =
+      options.paymentMethod || existingOrder.paymentMethod || null;
 
     return tx.order.update({
       where: { id: existingOrder.id },
@@ -430,7 +505,10 @@ const applyOrderStatusTransition = async (tx, req, existingOrder, targetStatus, 
   }
 
   if (!canManageOrderLifecycle(req, existingOrder)) {
-    throw new AppError("Only POS staff or order owner can update this order", 403);
+    throw new AppError(
+      "Only POS staff or order owner can update this order",
+      403,
+    );
   }
 
   const nextAllowedStatus = ORDER_PROGRESS_FLOW[existingOrder.status];
@@ -461,7 +539,13 @@ const runOrderStatusUpdate = async (req, id, targetStatus, options = {}) =>
       throw new AppError("Order not found", 404);
     }
 
-    return applyOrderStatusTransition(tx, req, existingOrder, targetStatus, options);
+    return applyOrderStatusTransition(
+      tx,
+      req,
+      existingOrder,
+      targetStatus,
+      options,
+    );
   });
 
 exports.createOrder = async (req, res) => {
@@ -472,8 +556,14 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 401, "Invalid authenticated user");
     }
 
-    const { items, tableId, employeeId, paymentMethod, discountType, discountValue } =
-      validateCreateOrderPayload(req.body);
+    const {
+      items,
+      tableId,
+      employeeId,
+      paymentMethod,
+      discountType,
+      discountValue,
+    } = validateCreateOrderPayload(req.body);
 
     const createdOrder = await prisma.$transaction(async (tx) => {
       const [table, products, activeOrderOnTable] = await Promise.all([
@@ -518,12 +608,18 @@ exports.createOrder = async (req, res) => {
 
       const tableStatus = normalizeStatus(table.status);
 
-      if (tableStatus === "occupied" || tableStatus === "pending_payment" || activeOrderOnTable) {
+      if (
+        tableStatus === "occupied" ||
+        tableStatus === "pending_payment" ||
+        activeOrderOnTable
+      ) {
         throw new AppError("Table is already occupied");
       }
 
       if (employee && employee.position !== "waiter") {
-        throw new AppError("Orders can only be assigned to employees with waiter position");
+        throw new AppError(
+          "Orders can only be assigned to employees with waiter position",
+        );
       }
 
       const { orderItems, total: subtotal } = buildOrderItems(products, items);
@@ -614,7 +710,12 @@ exports.getActiveOrderByTable = async (req, res) => {
       return sendError(res, 403, "Access denied");
     }
 
-    return sendSuccess(res, 200, "Active order retrieved successfully", activeOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Active order retrieved successfully",
+      activeOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get active order by table error");
   }
@@ -660,7 +761,10 @@ exports.appendItemsToOrder = async (req, res) => {
         },
       });
 
-      const { orderItems, total: addedSubtotal } = buildOrderItems(products, items);
+      const { orderItems, total: addedSubtotal } = buildOrderItems(
+        products,
+        items,
+      );
       await deductStockForOrderItems(tx, orderItems, {
         sourceId: existingOrder.id,
         actorId: req.user?.id || null,
@@ -675,7 +779,9 @@ exports.appendItemsToOrder = async (req, res) => {
         })),
       });
 
-      const nextSubtotal = Number((getOrderSubtotal(existingOrder) + addedSubtotal).toFixed(2));
+      const nextSubtotal = Number(
+        (getOrderSubtotal(existingOrder) + addedSubtotal).toFixed(2),
+      );
       const totals = buildDiscountTotals(
         nextSubtotal,
         existingOrder.discountType,
@@ -695,7 +801,12 @@ exports.appendItemsToOrder = async (req, res) => {
       });
     });
 
-    return sendSuccess(res, 200, "Items added to order successfully", updatedOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Items added to order successfully",
+      updatedOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Append order items error");
   }
@@ -725,12 +836,12 @@ exports.getMyOrders = async (req, res) => {
 
 exports.getTodayPaidTotals = async (req, res) => {
   try {
+    // "Today" is the bar's day, not the server's: on a UTC host the day would
+    // otherwise turn over at 02:00 local and the waiters' "Totali" would reset
+    // mid-shift (and carry yesterday's date).
     const now = new Date();
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+    const dayStart = startOfBusinessDay(now);
+    const dayEnd = endOfBusinessDayExclusive(now);
 
     const aggregates = await prisma.order.aggregate({
       where: {
@@ -752,10 +863,15 @@ exports.getTodayPaidTotals = async (req, res) => {
       totalPaid: Number((aggregates._sum.total || 0).toFixed(2)),
       paidOrders: aggregates._count.id || 0,
       currency: "EUR",
-      date: dayStart.toISOString().slice(0, 10),
+      date: businessDateKey(now),
     };
 
-    return sendSuccess(res, 200, "Today's paid totals retrieved successfully", payload);
+    return sendSuccess(
+      res,
+      200,
+      "Today's paid totals retrieved successfully",
+      payload,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Get today's paid totals error");
   }
@@ -820,7 +936,10 @@ exports.downloadOrderReceipt = async (req, res) => {
     }
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${buildReceiptFileName(order)}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${buildReceiptFileName(order)}"`,
+    );
 
     streamOrderReceiptPdf(res, order);
     return undefined;
@@ -835,7 +954,12 @@ exports.updateOrderStatus = async (req, res) => {
     const { status } = validateOrderStatusUpdatePayload(req.body);
     const updatedOrder = await runOrderStatusUpdate(req, id, status);
 
-    return sendSuccess(res, 200, "Order status updated successfully", updatedOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Order status updated successfully",
+      updatedOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Update order status error");
   }
@@ -846,7 +970,12 @@ exports.generateInvoice = async (req, res) => {
     const id = validateOrderId(req.params.id);
     const updatedOrder = await runOrderStatusUpdate(req, id, "pending_payment");
 
-    return sendSuccess(res, 200, "Invoice generated. Order moved to pending payment", updatedOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Invoice generated. Order moved to pending payment",
+      updatedOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Generate invoice error");
   }
@@ -868,7 +997,10 @@ exports.transferOrderToTable = async (req, res) => {
       }
 
       if (!canManageOrderLifecycle(req, existingOrder)) {
-        throw new AppError("Only POS staff or order owner can transfer this order", 403);
+        throw new AppError(
+          "Only POS staff or order owner can transfer this order",
+          403,
+        );
       }
 
       if (!existingOrder.tableId) {
@@ -900,12 +1032,18 @@ exports.transferOrderToTable = async (req, res) => {
         }),
       ]);
 
-      if (!targetTable || normalizeStatus(targetTable.status) === ARCHIVED_TABLE_STATUS) {
+      if (
+        !targetTable ||
+        normalizeStatus(targetTable.status) === ARCHIVED_TABLE_STATUS
+      ) {
         throw new AppError("Target table not found", 404);
       }
 
       if (isTableAssignedToCurrentWaiter(req, targetTable)) {
-        throw new AppError("You can only transfer orders to your assigned tables", 403);
+        throw new AppError(
+          "You can only transfer orders to your assigned tables",
+          403,
+        );
       }
 
       if (targetTable.status !== "available" || activeOrderOnTarget) {
@@ -913,7 +1051,9 @@ exports.transferOrderToTable = async (req, res) => {
       }
 
       const nextTableStatus =
-        existingOrder.status === "pending_payment" ? "pending_payment" : "occupied";
+        existingOrder.status === "pending_payment"
+          ? "pending_payment"
+          : "occupied";
 
       await tx.table.update({
         where: { id: existingOrder.tableId },
@@ -934,7 +1074,12 @@ exports.transferOrderToTable = async (req, res) => {
       });
     });
 
-    return sendSuccess(res, 200, "Order transferred successfully", updatedOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Order transferred successfully",
+      updatedOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Transfer order error");
   }
@@ -943,7 +1088,9 @@ exports.transferOrderToTable = async (req, res) => {
 exports.applyDiscount = async (req, res) => {
   try {
     const id = validateOrderId(req.params.id);
-    const { discountType, discountValue } = validateOrderDiscountPayload(req.body);
+    const { discountType, discountValue } = validateOrderDiscountPayload(
+      req.body,
+    );
 
     const updatedOrder = await prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
@@ -956,11 +1103,16 @@ exports.applyDiscount = async (req, res) => {
       }
 
       if (!canManageOrderLifecycle(req, existingOrder)) {
-        throw new AppError("Only POS staff or order owner can apply discount", 403);
+        throw new AppError(
+          "Only POS staff or order owner can apply discount",
+          403,
+        );
       }
 
       if (!ACTIVE_ORDER_STATUSES.includes(existingOrder.status)) {
-        throw new AppError("Discount can only be changed while the order is active");
+        throw new AppError(
+          "Discount can only be changed while the order is active",
+        );
       }
 
       const totals = buildDiscountTotals(
@@ -996,7 +1148,12 @@ exports.completePayment = async (req, res) => {
       paymentMethod,
     });
 
-    return sendSuccess(res, 200, "Payment completed successfully", updatedOrder);
+    return sendSuccess(
+      res,
+      200,
+      "Payment completed successfully",
+      updatedOrder,
+    );
   } catch (error) {
     return handleControllerError(res, error, "Complete payment error");
   }

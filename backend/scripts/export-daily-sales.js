@@ -9,19 +9,17 @@ const defaultOutputDir = path.resolve(__dirname, "..", "reports");
 const reportOutputDir = process.env.REPORT_OUTPUT_DIR
   ? path.resolve(process.env.REPORT_OUTPUT_DIR)
   : defaultOutputDir;
-const reportSyncDir = process.env.REPORT_SYNC_DIR ? path.resolve(process.env.REPORT_SYNC_DIR) : "";
+const reportSyncDir = process.env.REPORT_SYNC_DIR
+  ? path.resolve(process.env.REPORT_SYNC_DIR)
+  : "";
 
-const toStartOfDay = (date) => {
-  const nextDate = new Date(date);
-  nextDate.setHours(0, 0, 0, 0);
-  return nextDate;
-};
-
-const toEndOfDayExclusive = (date) => {
-  const nextDate = toStartOfDay(date);
-  nextDate.setDate(nextDate.getDate() + 1);
-  return nextDate;
-};
+// The report covers the bar's day, in the bar's timezone, whatever timezone
+// the machine running this script is set to - see src/utils/business-day.js.
+const {
+  businessDateKey,
+  endOfBusinessDayExclusive: toEndOfDayExclusive,
+  startOfBusinessDay: toStartOfDay,
+} = require("../src/utils/business-day");
 
 const ensureDir = async (dirPath) => {
   await fs.mkdir(dirPath, { recursive: true });
@@ -43,7 +41,7 @@ const run = async () => {
   const targetDate = new Date();
   const from = toStartOfDay(targetDate);
   const to = toEndOfDayExclusive(targetDate);
-  const dateKey = from.toISOString().slice(0, 10);
+  const dateKey = businessDateKey(targetDate);
 
   const paidOrders = await prisma.order.findMany({
     where: {
@@ -79,7 +77,10 @@ const run = async () => {
     },
   });
 
-  const totalRevenue = paidOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const totalRevenue = paidOrders.reduce(
+    (sum, order) => sum + Number(order.total || 0),
+    0,
+  );
   const lines = [
     ["Report Date", dateKey],
     ["Paid Orders", paidOrders.length],
@@ -92,7 +93,9 @@ const run = async () => {
       order.user?.fullName || "",
       Number(order.total || 0).toFixed(2),
       order.updatedAt.toISOString(),
-      order.items.map((item) => `${item.product?.name || "Product"} x${item.quantity}`).join(" | "),
+      order.items
+        .map((item) => `${item.product?.name || "Product"} x${item.quantity}`)
+        .join(" | "),
     ]),
   ];
 

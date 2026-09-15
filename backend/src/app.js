@@ -1,3 +1,6 @@
+const fs = require("fs");
+const path = require("path");
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -22,7 +25,10 @@ const tableRoutes = require("./modules/tables/table.routes");
 const guestRoutes = require("./modules/guest/guest.routes");
 const authMiddleware = require("./middlewares/auth.middleware");
 const requestActivityMiddleware = require("./middlewares/request-activity.middleware");
-const { globalErrorHandler, notFoundHandler } = require("./middlewares/error.middleware");
+const {
+  globalErrorHandler,
+  notFoundHandler,
+} = require("./middlewares/error.middleware");
 const { sendSuccess } = require("./utils/response");
 const { buildCorsOriginChecker } = require("./config/security");
 
@@ -56,7 +62,30 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(requestActivityMiddleware);
 
+// On a single-machine install (a PC behind the bar, waiters on tablets over
+// the wifi) the built frontend is served by this same server, so there is one
+// process to start, one port to open in the firewall, one address for the
+// tablets - and no CORS, because the page and the API share an origin.
+//
+// Build it with `npm run build` in frontend/ (with VITE_API_URL="/api"), and
+// this picks it up automatically. When there is no build - the usual setup in
+// development, where Vite serves the frontend on its own port - everything
+// below is skipped and the server stays API-only.
+const frontendDistPath = process.env.FRONTEND_DIST_PATH
+  ? path.resolve(process.env.FRONTEND_DIST_PATH)
+  : path.join(__dirname, "..", "..", "frontend", "dist");
+const frontendIndexPath = path.join(frontendDistPath, "index.html");
+const hasFrontendBuild = fs.existsSync(frontendIndexPath);
+
+if (hasFrontendBuild) {
+  app.use(express.static(frontendDistPath));
+}
+
 app.get("/", (req, res) => {
+  if (hasFrontendBuild) {
+    return res.sendFile(frontendIndexPath);
+  }
+
   return sendSuccess(res, 200, "API is running", null);
 });
 
@@ -92,6 +121,27 @@ app.get("/api/test", authMiddleware, (req, res) => {
     user: req.user,
   });
 });
+
+// The app keeps its own routes in the address bar (/tables, /table/3), so a
+// refresh or a bookmark on one of those has to be answered with the page
+// itself. Written as a plain middleware rather than a wildcard route, because
+// route patterns are the one thing that changed between Express 4 and 5 and
+// this must not be the reason the bar's POS fails to start. Registered after
+// every API route, and only for page requests outside /api, so a wrong API
+// path still returns a proper JSON 404 instead of a page full of HTML.
+if (hasFrontendBuild) {
+  app.use((req, res, next) => {
+    if (
+      (req.method !== "GET" && req.method !== "HEAD") ||
+      req.path === "/api" ||
+      req.path.startsWith("/api/")
+    ) {
+      return next();
+    }
+
+    return res.sendFile(frontendIndexPath);
+  });
+}
 
 app.use(notFoundHandler);
 app.use(globalErrorHandler);

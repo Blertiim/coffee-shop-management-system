@@ -2,4 +2,8 @@ node_modules
 # Keep environment variables out of version control
 .env
 
+# Real staff PINs in plain text - never commit this.
+# handover-setup.example.json (no real PINs) is committed instead.
+handover-setup.json
+
 /src/generated/prisma

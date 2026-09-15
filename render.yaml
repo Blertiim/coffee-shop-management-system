@@ -12,6 +12,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Render hosts run in UTC. The app works out business days from
+      # BUSINESS_TIMEZONE (see backend/src/utils/business-day.js), so reports
+      # are correct either way; TZ is set as well so log timestamps and any
+      # plain date formatting read in the bar's local time too.
+      - key: TZ
+        value: Europe/Belgrade
+      - key: BUSINESS_TIMEZONE
+        value: Europe/Belgrade
       - key: HOST
         value: 0.0.0.0
       - key: PORT

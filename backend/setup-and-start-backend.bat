@@ -50,9 +50,19 @@ if errorlevel 1 goto :dbfail
 
 echo.
 echo ------------------------------------------------
-echo Seeding demo staff/products (safe to skip errors if already seeded)...
+echo Demo data
 echo ------------------------------------------------
-call npm run seed:pos
+echo Demo staff/products are NOT installed automatically any more.
+echo The demo accounts use PINs that are written in the source code
+echo (manager 1111, waiters 1234/5678/2468), so they must never end
+echo up in a real bar's database.
+echo.
+echo   Real install:  npm run handover:prepare
+echo                  (clears test data, then creates the real staff,
+echo                   tables and menu from handover-setup.json)
+echo.
+echo   Testing only:  npm run seed:pos
+echo.
 
 echo.
 echo ============================================

@@ -8,6 +8,13 @@ const {
 } = require("../../utils/response");
 const { ensureId } = require("../../utils/validation");
 const { buildCacheKey, remember } = require("../../services/cache.service");
+const {
+  businessCalendarDate,
+  businessDateKey,
+  endOfBusinessDayExclusive,
+  parseBusinessDate,
+  startOfBusinessDay,
+} = require("../../utils/business-day");
 
 const DASHBOARD_ORDER_INCLUDE = {
   user: {
@@ -33,48 +40,34 @@ const DASHBOARD_ORDER_INCLUDE = {
   },
 };
 
-const toStartOfDay = (date) => {
-  const nextDate = new Date(date);
-  nextDate.setHours(0, 0, 0, 0);
-  return nextDate;
-};
+// Day boundaries come from the bar's timezone, not the server's clock - see
+// utils/business-day.js for why that distinction matters in production.
+const toStartOfDay = startOfBusinessDay;
+const toEndExclusiveDay = endOfBusinessDayExclusive;
 
-const toEndExclusiveDay = (date) => {
-  const nextDate = toStartOfDay(date);
-  nextDate.setDate(nextDate.getDate() + 1);
-  return nextDate;
-};
+// DailyClosing.date is a calendar date column (@db.Date), which Prisma writes
+// in UTC. A day's start instant (22:00Z the evening before, here) would store
+// the previous calendar date, so the day being closed is converted to the UTC
+// midnight that stands for the same calendar date.
+const toCalendarDate = businessCalendarDate;
 
-// DailyClosing.date is a calendar date column (@db.Date), not a moment in
-// time, and Prisma writes/reads such a column in UTC.
-//
-// toStartOfDay() above returns LOCAL midnight, which is exactly right for the
-// revenue queries (the business day runs by the clock on the wall), but wrong
-// as the value of a date column: in any timezone ahead of UTC local midnight
-// belongs to the previous UTC day, so closing 2026-09-15 here (UTC+2) stored
-// 2026-09-15T00:00+02:00 = 2026-09-14T22:00Z and the row came back - and was
-// listed, and printed on the PDF - as 2026-09-14. One day early, every time.
-//
-// This maps a local day onto the UTC midnight that stands for the same
-// calendar date, so the stored date matches the day that was actually closed.
-const toCalendarDate = (date) =>
-  new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+// Start of the business day N days before the given one. Steps day by day
+// through the bar's calendar instead of subtracting 24-hour blocks, which
+// would land an hour off once a DST change falls inside the range.
+const toStartOfDaysAgo = (date, days) => {
+  let cursor = toStartOfDay(date);
 
-const parseDateInput = (value, label) => {
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    const [year, month, day] = value.trim().split("-").map(Number);
-    const parsedLocalDate = new Date(year, month - 1, day);
-
-    if (Number.isNaN(parsedLocalDate.getTime())) {
-      throw new AppError(`${label} must be a valid date`);
-    }
-
-    return parsedLocalDate;
+  for (let step = 0; step < days; step += 1) {
+    cursor = toStartOfDay(new Date(cursor.getTime() - 12 * 60 * 60 * 1000));
   }
 
-  const parsedDate = new Date(value);
+  return cursor;
+};
 
-  if (Number.isNaN(parsedDate.getTime())) {
+const parseDateInput = (value, label) => {
+  const parsedDate = parseBusinessDate(value);
+
+  if (!parsedDate) {
     throw new AppError(`${label} must be a valid date`);
   }
 
@@ -102,10 +95,8 @@ const buildDateRange = (query, options = {}) => {
   const now = new Date();
 
   if (!fromValue && !toValue) {
-    const start = toStartOfDay(now);
-    start.setDate(start.getDate() - (defaultDays - 1));
     return {
-      from: start,
+      from: toStartOfDaysAgo(now, defaultDays - 1),
       to: toEndExclusiveDay(now),
     };
   }
@@ -122,20 +113,12 @@ const buildDateRange = (query, options = {}) => {
   return { from, to };
 };
 
-const formatDateKey = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+// Report labels and buckets are keyed by the bar's calendar day too, so an
+// order taken at 00:30 lands on the day the staff calls it, and a day's bucket
+// carries the date they expect to see on the chart.
+const formatDateKey = businessDateKey;
 
-  return `${year}-${month}-${day}`;
-};
-
-const formatMonthKey = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-
-  return `${year}-${month}`;
-};
+const formatMonthKey = (date) => businessDateKey(date).slice(0, 7);
 
 const buildRangeFilter = (field, range) => ({
   [field]: {
@@ -310,14 +293,18 @@ const escapeCsv = (value) => {
 const appendCsvSection = (rows) =>
   rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
 
+// Both bucket builders walk the bar's calendar rather than adding 24 hours at
+// a time: on the two DST weekends a day is 23 or 25 hours long, and stepping
+// by a fixed 24 hours drifts across the boundary, which shows up as a
+// duplicated or missing day (or month) in the report.
 const buildDayBuckets = (range) => {
   const buckets = {};
-  const cursor = new Date(range.from);
+  let cursor = startOfBusinessDay(range.from);
 
   while (cursor < range.to) {
     const key = formatDateKey(cursor);
     buckets[key] = { date: key, revenue: 0, orders: 0 };
-    cursor.setDate(cursor.getDate() + 1);
+    cursor = endOfBusinessDayExclusive(cursor);
   }
 
   return buckets;
@@ -325,13 +312,18 @@ const buildDayBuckets = (range) => {
 
 const buildMonthBuckets = (range) => {
   const buckets = {};
-  const cursor = new Date(range.from);
-  cursor.setDate(1);
+  let cursor = startOfBusinessDay(range.from);
 
   while (cursor < range.to) {
     const key = formatMonthKey(cursor);
     buckets[key] = { month: key, revenue: 0, orders: 0 };
-    cursor.setMonth(cursor.getMonth() + 1);
+
+    const [year, month] = key.split("-").map(Number);
+    cursor = parseBusinessDate(
+      month === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(month + 1).padStart(2, "0")}-01`,
+    );
   }
 
   return buckets;
@@ -830,10 +822,8 @@ exports.getRevenueTrend = async (req, res) => {
                 60,
               );
               const endDate = new Date();
-              const startDate = toStartOfDay(endDate);
-              startDate.setDate(startDate.getDate() - (days - 1));
               return {
-                from: startDate,
+                from: toStartOfDaysAgo(endDate, days - 1),
                 to: toEndExclusiveDay(endDate),
               };
             })();
@@ -853,15 +843,7 @@ exports.getRevenueTrend = async (req, res) => {
           },
         });
 
-        const buckets = {};
-        const cursor = new Date(range.from);
-
-        while (cursor < range.to) {
-          const day = new Date(cursor);
-          const key = formatDateKey(day);
-          buckets[key] = { date: key, revenue: 0, orders: 0 };
-          cursor.setDate(cursor.getDate() + 1);
-        }
+        const buckets = buildDayBuckets(range);
 
         paidOrders.forEach((order) => {
           const key = formatDateKey(order.updatedAt);
