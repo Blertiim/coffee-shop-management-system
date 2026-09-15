@@ -11,6 +11,7 @@
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "prod:check": "node -c src/app.js && node -c src/server.js && node -c src/startServer.js",
     "seed:pos": "node scripts/seed-pos-demo.js",
+    "fix:closing-dates": "node scripts/fix-daily-closing-dates.js",
     "backup:snapshot": "node scripts/backup-system-snapshot.js",
     "report:daily": "node scripts/export-daily-sales.js",
     "lint": "eslint .",

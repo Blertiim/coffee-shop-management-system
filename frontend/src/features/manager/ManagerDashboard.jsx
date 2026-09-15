@@ -70,6 +70,11 @@ const STOCK_INTAKE_ENABLED = true;
 // fields are hidden from the form itself (see below); a default supplier is
 // auto-selected in the background so saving still works.
 const RECEIVE_STOCK_ENABLED = true;
+// Customer QR Ordering card is temporarily hidden from the dashboard
+// (2026-09) — not needed for now, planned to come back as a feature later.
+// Flip this back to true to bring the whole card back; nothing else needs
+// to change.
+const GUEST_QR_ORDERING_ENABLED = false;
 
 const SECTIONS = [
   { key: "overview", label: "Dashboard" },
@@ -723,6 +728,16 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [tableDragState, setTableDragState] = useState(null);
   const [savingTablePositionId, setSavingTablePositionId] = useState(null);
   const tableArrangeCanvasRef = useRef(null);
+  // Dragging a table used to save it (and, through the realtime stream, reload
+  // the whole dashboard) on every single drop, which made arranging the floor
+  // plan slow and jumpy. Now the drops are collected here and written once,
+  // when the manager presses "Perfundo".
+  const [pendingTablePositions, setPendingTablePositions] = useState({});
+  const [tablePositionsBeforeArrange, setTablePositionsBeforeArrange] =
+    useState({});
+  // A ref as well, so the realtime listener can check it without being torn
+  // down and resubscribed on every drag.
+  const hasPendingTablePositionsRef = useRef(false);
   const [selectedWaiterForTables, setSelectedWaiterForTables] = useState(null);
   const [assignedTableIds, setAssignedTableIds] = useState([]);
   const [selectedQrTableId, setSelectedQrTableId] = useState(null);
@@ -739,6 +754,10 @@ export default function ManagerDashboard({ session, onLogout }) {
   const [managerNameDraft, setManagerNameDraft] = useState(
     session.user?.fullName || "",
   );
+  // Below the desktop sidebar (xl+), Refresh/Logout collapse into a small
+  // menu behind a "..." button instead of two full-width buttons, so the
+  // top bar on phone/tablet doesn't eat vertical space above the content.
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
 
   const [editingProductId, setEditingProductId] = useState(null);
   const [productForm, setProductForm] = useState(defaultProductForm);
@@ -1230,6 +1249,12 @@ export default function ManagerDashboard({ session, onLogout }) {
     [tables],
   );
 
+  const pendingTablePositionCount = Object.keys(pendingTablePositions).length;
+
+  useEffect(() => {
+    hasPendingTablePositionsRef.current = pendingTablePositionCount > 0;
+  }, [pendingTablePositionCount]);
+
   const tableArrangeBindings = useMemo(() => {
     const filteredTables =
       arrangeLocation === "all"
@@ -1509,6 +1534,14 @@ export default function ManagerDashboard({ session, onLogout }) {
 
     source.addEventListener("update", () => {
       setIsRealtimeConnected(true);
+
+      // While the floor plan has unsaved moves, a reload would come back with
+      // the old positions from the server and undo the arranging in progress.
+      // The refresh happens right after "Perfundo" instead.
+      if (hasPendingTablePositionsRef.current) {
+        return;
+      }
+
       window.clearTimeout(refreshTimeout);
       refreshTimeout = window.setTimeout(() => {
         refreshAll();
@@ -2628,7 +2661,9 @@ export default function ManagerDashboard({ session, onLogout }) {
     });
   };
 
-  const handleTableArrangePointerUp = async (event) => {
+  // A drop only moves the card and remembers the new spot - nothing is sent to
+  // the server until "Perfundo" (see handleSaveTableLayout).
+  const handleTableArrangePointerUp = (event) => {
     if (!tableDragState || event.pointerId !== tableDragState.pointerId) {
       return;
     }
@@ -2639,6 +2674,26 @@ export default function ManagerDashboard({ session, onLogout }) {
     const nextPositionX = Number(finishedDrag.left.toFixed(2));
     const nextPositionY = Number(finishedDrag.top.toFixed(2));
 
+    // Remember where this table stood before the first unsaved move, so
+    // "Anulo" can put it back without a round trip.
+    setTablePositionsBeforeArrange((current) => {
+      if (current[finishedDrag.tableId]) {
+        return current;
+      }
+
+      const original = tables.find(
+        (table) => table.id === finishedDrag.tableId,
+      );
+
+      return {
+        ...current,
+        [finishedDrag.tableId]: {
+          positionX: original?.positionX ?? null,
+          positionY: original?.positionY ?? null,
+        },
+      };
+    });
+
     setTables((current) =>
       current.map((table) =>
         table.id === finishedDrag.tableId
@@ -2647,21 +2702,76 @@ export default function ManagerDashboard({ session, onLogout }) {
       ),
     );
 
-    setSavingTablePositionId(finishedDrag.tableId);
-
-    try {
-      await updateTablePosition(session.token, finishedDrag.tableId, {
+    setPendingTablePositions((current) => ({
+      ...current,
+      [finishedDrag.tableId]: {
         positionX: nextPositionX,
         positionY: nextPositionY,
-      });
+      },
+    }));
+  };
+
+  const handleSaveTableLayout = async () => {
+    const entries = Object.entries(pendingTablePositions);
+
+    if (!entries.length) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setFeedback("");
+
+    try {
+      for (const [tableId, position] of entries) {
+        setSavingTablePositionId(Number(tableId));
+        await updateTablePosition(session.token, Number(tableId), position);
+      }
+
+      setPendingTablePositions({});
+      setTablePositionsBeforeArrange({});
+      setFeedback(
+        entries.length === 1
+          ? "Pozicioni i tavolines u ruajt."
+          : `Pozicionet e ${entries.length} tavolinave u ruajten.`,
+      );
+      // One refresh at the end, instead of one per drag.
+      refreshAll();
     } catch (positionError) {
+      if (positionError.status === 401 || positionError.status === 403) {
+        onLogout();
+        return;
+      }
+
       setError(
         positionError.message ||
-          "Could not save the table position. Please try again.",
+          "Nuk u ruajten pozicionet e tavolinave. Provo perseri.",
       );
     } finally {
       setSavingTablePositionId(null);
+      setIsSaving(false);
     }
+  };
+
+  const handleDiscardTableLayout = () => {
+    const originals = tablePositionsBeforeArrange;
+
+    setTables((current) =>
+      current.map((table) =>
+        originals[table.id]
+          ? {
+              ...table,
+              positionX: originals[table.id].positionX,
+              positionY: originals[table.id].positionY,
+            }
+          : table,
+      ),
+    );
+
+    setPendingTablePositions({});
+    setTablePositionsBeforeArrange({});
+    setError("");
+    setFeedback("");
   };
 
   const handleDownloadReportCsv = async () => {
@@ -2786,9 +2896,82 @@ export default function ManagerDashboard({ session, onLogout }) {
   return (
     <main className="pos-shell manager-shell">
       <section className="grid min-h-[calc(100vh-24px)] grid-cols-1 gap-4 xl:grid-cols-[230px_1fr]">
-        <aside className="pos-panel-soft flex flex-col gap-3 p-3">
+        <aside className="pos-panel-soft flex min-w-0 flex-col gap-3 p-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <span className="pos-badge">Manager</span>
+            <div className="flex items-start justify-between gap-2">
+              <span className="pos-badge">Manager</span>
+
+              {/* On phone/tablet (below the xl sidebar breakpoint) the whole
+                  section nav (Dashboard/Products/Categories/...) plus
+                  Refresh/Logout live behind this "..." menu instead of
+                  taking up a row of their own under the Manager card; on
+                  the desktop sidebar they're still shown normally as a
+                  vertical list (see the "hidden xl:grid" blocks). */}
+              <div className="relative xl:hidden">
+                <button
+                  type="button"
+                  aria-label="Menu"
+                  aria-expanded={isActionsMenuOpen}
+                  onClick={() => setIsActionsMenuOpen((current) => !current)}
+                  className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-3xl leading-none text-white hover:bg-white/15"
+                >
+                  ⋮
+                </button>
+
+                {isActionsMenuOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close menu"
+                      className="fixed inset-0 z-10 cursor-default"
+                      onClick={() => setIsActionsMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 top-14 z-20 grid max-h-[70vh] w-52 gap-1 overflow-y-auto rounded-lg border border-white/10 bg-pos-panelSoft p-2 shadow-lg">
+                      {SECTIONS.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => {
+                            setIsActionsMenuOpen(false);
+                            setActiveSection(item.key);
+                          }}
+                          className={`pos-button justify-start rounded-lg border px-3 py-2 text-xs ${
+                            activeSection === item.key
+                              ? "border-pos-accent bg-pos-accent text-slate-950"
+                              : "border-white/10 bg-white/5 text-pos-text hover:bg-white/10"
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+
+                      <div className="my-1 h-px bg-white/10" />
+
+                      <button
+                        type="button"
+                        className="pos-button pos-button-muted justify-start rounded-lg px-3 py-2 text-xs"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          refreshAll();
+                        }}
+                      >
+                        Refresh
+                      </button>
+                      <button
+                        type="button"
+                        className="pos-button pos-button-danger justify-start rounded-lg px-3 py-2 text-xs"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onLogout();
+                        }}
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
 
             {isEditingManagerName ? (
               <div className="mt-3 flex flex-col gap-2">
@@ -2845,7 +3028,11 @@ export default function ManagerDashboard({ session, onLogout }) {
             </p>
           </div>
 
-          <nav className="grid gap-2">
+          {/* Same section list as the "..." menu above — shown as a normal
+              vertical nav only on the desktop sidebar (xl+); on phone/tablet
+              it's reached through the menu instead, so it's not duplicated
+              here. */}
+          <nav className="hidden gap-2 xl:grid">
             {SECTIONS.map((item) => (
               <button
                 key={item.key}
@@ -2862,7 +3049,7 @@ export default function ManagerDashboard({ session, onLogout }) {
             ))}
           </nav>
 
-          <div className="mt-auto grid gap-2">
+          <div className="mt-auto hidden gap-2 xl:grid">
             <button
               className="pos-button pos-button-muted"
               type="button"
@@ -2880,7 +3067,7 @@ export default function ManagerDashboard({ session, onLogout }) {
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col gap-4">
+        <section className="flex min-w-0 min-h-0 flex-col gap-4">
           <header className="pos-panel flex flex-wrap items-end justify-between gap-3 px-4 py-4">
             <div>
               <h1 className="pos-title">Manager Dashboard</h1>
@@ -3287,34 +3474,14 @@ export default function ManagerDashboard({ session, onLogout }) {
                       cans, and snacks.
                     </span>
                   </label>
-                  <input
-                    placeholder="Image URL"
-                    value={productForm.imageUrl}
-                    onChange={(event) =>
-                      setProductForm((current) => ({
-                        ...current,
-                        imageUrl: event.target.value,
-                      }))
-                    }
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={onUploadProductImage}
-                    className="rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-xs text-pos-muted file:mr-3 file:rounded-md file:border-0 file:bg-pos-accent file:px-3 file:py-2 file:text-xs file:font-semibold file:text-slate-950"
-                  />
-                  <textarea
-                    placeholder="Description"
-                    value={productForm.description}
-                    onChange={(event) =>
-                      setProductForm((current) => ({
-                        ...current,
-                        description: event.target.value,
-                      }))
-                    }
-                    className="min-h-[78px] rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                  />
+                  {/* Image URL / file upload / description fields were removed
+                      from this form on request (2026-09) — they weren't shown
+                      anywhere else in the app (ProductTile has no image or
+                      description) and were just adding clutter, especially on
+                      phone. productForm.imageUrl / .description still exist in
+                      state and are still sent (as null) on submit, so nothing
+                      downstream broke — re-add the three inputs here (and
+                      restore onUploadProductImage's usage) to bring this back. */}
                   <label className="inline-flex items-center gap-2 text-sm text-pos-muted">
                     <input
                       type="checkbox"
@@ -3351,8 +3518,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <h3 className="m-0 text-base font-semibold text-white">
                   Products
                 </h3>
-                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
-                  <table className="w-full text-left text-sm">
+                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[640px] text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
                         <th className="px-3 py-2">Name</th>
@@ -3590,8 +3757,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                 <h3 className="m-0 text-base font-semibold text-white">
                   Categories
                 </h3>
-                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
-                  <table className="w-full text-left text-sm">
+                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[420px] text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
                         <th className="px-3 py-2">Name</th>
@@ -3686,8 +3853,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                   per-unit count (or a linked ingredient for direct-sale items).
                   Set this up in "Stock In &amp; Recipes".
                 </p>
-                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto rounded-xl border border-white/10">
-                  <table className="w-full text-left text-sm">
+                <div className="scroll-y mt-3 max-h-[58vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[480px] text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
                         <th className="px-3 py-2">Product</th>
@@ -3759,8 +3926,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                     Raw ingredients used by any saved recipe — coffee,
                     cocktails, ice cream, or a spirit poured by the shot.
                   </p>
-                  <div className="scroll-y mt-3 max-h-[32vh] overflow-y-auto rounded-xl border border-white/10">
-                    <table className="w-full text-left text-sm">
+                  <div className="scroll-y mt-3 max-h-[32vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full min-w-[420px] text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                         <tr>
                           <th className="px-3 py-2">Ingredient</th>
@@ -3990,8 +4157,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </div>
                   </form>
 
-                  <div className="scroll-y mt-4 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
-                    <table className="w-full text-left text-sm">
+                  <div className="scroll-y mt-4 max-h-[34vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full min-w-[420px] text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                         <tr>
                           <th className="px-3 py-2">Ingredient</th>
@@ -4566,8 +4733,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                   <h3 className="m-0 text-base font-semibold text-white">
                     Stock Intakes
                   </h3>
-                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
-                    <table className="w-full text-left text-sm">
+                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full min-w-[560px] text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                         <tr>
                           <th className="px-3 py-2">Invoice</th>
@@ -4639,8 +4806,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                   <p className="m-0 mt-1 text-xs text-pos-muted">
                     Every IN or OUT stock change is stored here.
                   </p>
-                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto rounded-xl border border-white/10">
-                    <table className="w-full text-left text-sm">
+                  <div className="scroll-y mt-3 max-h-[34vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                    <table className="w-full min-w-[480px] text-left text-sm">
                       <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                         <tr>
                           <th className="px-3 py-2">Type</th>
@@ -5258,8 +5425,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </p>
                   </div>
                 </div>
-                <div className="scroll-y mt-3 max-h-[64vh] overflow-y-auto rounded-xl border border-white/10">
-                  <table className="w-full text-left text-sm">
+                <div className="scroll-y mt-3 max-h-[64vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[640px] text-left text-sm">
                     <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                       <tr>
                         <th className="px-3 py-2">Invoice</th>
@@ -5549,8 +5716,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                         </span>
                       </div>
 
-                      <div className="scroll-y max-h-[28vh] overflow-y-auto">
-                        <table className="w-full text-left text-sm">
+                      <div className="scroll-y max-h-[28vh] overflow-y-auto overflow-x-auto">
+                        <table className="w-full min-w-[560px] text-left text-sm">
                           <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                             <tr>
                               <th className="px-3 py-2">Table</th>
@@ -5633,8 +5800,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                     <h3 className="m-0 text-base font-semibold text-white">
                       Waiters
                     </h3>
-                    <div className="scroll-y mt-3 max-h-[30vh] overflow-y-auto rounded-xl border border-white/10">
-                      <table className="w-full text-left text-sm">
+                    <div className="scroll-y mt-3 max-h-[30vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                      <table className="w-full min-w-[560px] text-left text-sm">
                         <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                           <tr>
                             <th className="px-3 py-2">Name</th>
@@ -5851,137 +6018,140 @@ export default function ManagerDashboard({ session, onLogout }) {
                     </div>
                   </article>
 
-                  <article className="pos-panel rounded-xl p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="m-0 text-base font-semibold text-white">
-                          Customer QR Ordering
-                        </h3>
-                        <p className="mt-1 text-xs text-pos-muted">
-                          Generate a guest order link and QR code for any table.
-                        </p>
-                      </div>
-                      <div className="inline-flex gap-2">
-                        <button
-                          type="button"
-                          className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
-                          onClick={handleCopyGuestUrl}
-                          disabled={!guestOrderUrl || isQrLoading}
-                        >
-                          Copy Link
-                        </button>
-                        <button
-                          type="button"
-                          className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
-                          onClick={handleRotateGuestQr}
-                          disabled={
-                            !selectedQrTableId || isSaving || isQrLoading
-                          }
-                        >
-                          Rotate QR
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
-                      <div className="space-y-2">
-                        <label className="block text-xs uppercase tracking-wide text-pos-muted">
-                          Table
-                        </label>
-                        <select
-                          value={selectedQrTableId || ""}
-                          onChange={(event) =>
-                            setSelectedQrTableId(Number(event.target.value))
-                          }
-                          className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
-                        >
-                          {tables
-                            .slice()
-                            .sort((left, right) => left.number - right.number)
-                            .map((table) => (
-                              <option key={`qr-${table.id}`} value={table.id}>
-                                Table {table.number} - {table.location}
-                              </option>
-                            ))}
-                        </select>
-
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                          <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
-                            Selected Table
+                  {GUEST_QR_ORDERING_ENABLED ? (
+                    <article className="pos-panel rounded-xl p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="m-0 text-base font-semibold text-white">
+                            Customer QR Ordering
+                          </h3>
+                          <p className="mt-1 text-xs text-pos-muted">
+                            Generate a guest order link and QR code for any
+                            table.
                           </p>
-                          <p className="m-0 mt-2 text-lg font-semibold text-white">
-                            {selectedQrTable
-                              ? `Table ${selectedQrTable.number}`
-                              : "No table"}
-                          </p>
-                          <p className="m-0 mt-1 text-xs text-pos-muted">
-                            {selectedQrTable?.location ||
-                              "Select a table to prepare guest ordering."}
-                          </p>
+                        </div>
+                        <div className="inline-flex gap-2">
+                          <button
+                            type="button"
+                            className="pos-button pos-button-muted min-h-[40px] rounded-lg px-3 text-xs"
+                            onClick={handleCopyGuestUrl}
+                            disabled={!guestOrderUrl || isQrLoading}
+                          >
+                            Copy Link
+                          </button>
+                          <button
+                            type="button"
+                            className="pos-button pos-button-primary min-h-[40px] rounded-lg px-3 text-xs"
+                            onClick={handleRotateGuestQr}
+                            disabled={
+                              !selectedQrTableId || isSaving || isQrLoading
+                            }
+                          >
+                            Rotate QR
+                          </button>
                         </div>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-[180px_1fr]">
-                        <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
-                          {guestOrderUrl ? (
-                            <PosQrCode
-                              value={guestOrderUrl}
-                              alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
-                              size={180}
-                              imageClassName="h-[180px] w-[180px] rounded-lg bg-white p-2"
-                            />
-                          ) : (
-                            <p className="text-sm text-pos-muted">
-                              {isQrLoading
-                                ? "Preparing QR..."
-                                : "QR link not ready."}
+                      <div className="mt-3 grid gap-4 lg:grid-cols-[240px_1fr]">
+                        <div className="space-y-2">
+                          <label className="block text-xs uppercase tracking-wide text-pos-muted">
+                            Table
+                          </label>
+                          <select
+                            value={selectedQrTableId || ""}
+                            onChange={(event) =>
+                              setSelectedQrTableId(Number(event.target.value))
+                            }
+                            className="w-full rounded-lg border border-white/15 bg-pos-panelSoft px-3 py-2 text-sm text-white"
+                          >
+                            {tables
+                              .slice()
+                              .sort((left, right) => left.number - right.number)
+                              .map((table) => (
+                                <option key={`qr-${table.id}`} value={table.id}>
+                                  Table {table.number} - {table.location}
+                                </option>
+                              ))}
+                          </select>
+
+                          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                            <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                              Selected Table
                             </p>
-                          )}
+                            <p className="m-0 mt-2 text-lg font-semibold text-white">
+                              {selectedQrTable
+                                ? `Table ${selectedQrTable.number}`
+                                : "No table"}
+                            </p>
+                            <p className="m-0 mt-1 text-xs text-pos-muted">
+                              {selectedQrTable?.location ||
+                                "Select a table to prepare guest ordering."}
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                          <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
-                            Guest Ordering URL
-                          </p>
-                          <p className="m-0 mt-3 break-all text-sm text-white">
-                            {guestOrderUrl ||
-                              "Preparing guest ordering link..."}
-                          </p>
-                          <p className="m-0 mt-3 text-xs text-pos-muted">
-                            Guests can scan the QR code, browse ready-to-order
-                            products, and append items directly to the table
-                            ticket without staff refreshing the page.
-                          </p>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
-                              onClick={() => {
-                                if (guestOrderUrl) {
-                                  window.open(
-                                    guestOrderUrl,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  );
-                                }
-                              }}
-                              disabled={!guestOrderUrl}
-                            >
-                              Open Guest Page
-                            </button>
-                            <a
-                              href="/api/system/docs"
-                              target="_blank"
-                              rel="noreferrer"
-                              className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
-                            >
-                              API Docs
-                            </a>
+                        <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+                          <div className="flex min-h-[180px] items-center justify-center rounded-xl border border-white/10 bg-black/20 p-3">
+                            {guestOrderUrl ? (
+                              <PosQrCode
+                                value={guestOrderUrl}
+                                alt={`QR code for ${selectedQrTable ? `Table ${selectedQrTable.number}` : "guest ordering"}`}
+                                size={180}
+                                imageClassName="h-[180px] w-[180px] rounded-lg bg-white p-2"
+                              />
+                            ) : (
+                              <p className="text-sm text-pos-muted">
+                                {isQrLoading
+                                  ? "Preparing QR..."
+                                  : "QR link not ready."}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                            <p className="m-0 text-xs uppercase tracking-wide text-pos-muted">
+                              Guest Ordering URL
+                            </p>
+                            <p className="m-0 mt-3 break-all text-sm text-white">
+                              {guestOrderUrl ||
+                                "Preparing guest ordering link..."}
+                            </p>
+                            <p className="m-0 mt-3 text-xs text-pos-muted">
+                              Guests can scan the QR code, browse ready-to-order
+                              products, and append items directly to the table
+                              ticket without staff refreshing the page.
+                            </p>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                                onClick={() => {
+                                  if (guestOrderUrl) {
+                                    window.open(
+                                      guestOrderUrl,
+                                      "_blank",
+                                      "noopener,noreferrer",
+                                    );
+                                  }
+                                }}
+                                disabled={!guestOrderUrl}
+                              >
+                                Open Guest Page
+                              </button>
+                              <a
+                                href="/api/system/docs"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10"
+                              >
+                                API Docs
+                              </a>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </article>
+                    </article>
+                  ) : null}
                 </div>
               </section>
 
@@ -5992,10 +6162,40 @@ export default function ManagerDashboard({ session, onLogout }) {
                       Rregullo Tavolinat
                     </h3>
                     <p className="mt-1 text-xs text-pos-muted">
-                      Terhiqe nje tavoline kudo don brenda kutise poshte.
-                      Pozicioni ruhet vetvetiu dhe kamarieret e shofin njesoj ne
-                      ekranin "Tavolinat".
+                      Terhiqe tavolinat kudo don brenda kutise poshte, sa here
+                      te duhet. Kur te kryesh, shtyp "Perfundo" — vetem atehere
+                      ruhen dhe i shofin kamarieret ne ekranin "Tavolinat".
                     </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {pendingTablePositionCount > 0 ? (
+                      <span className="rounded-lg border border-orange-300/40 bg-orange-500/15 px-3 py-2 text-xs font-semibold text-orange-200">
+                        {pendingTablePositionCount} ndryshime te paruajtura
+                      </span>
+                    ) : (
+                      <span className="text-xs text-pos-muted">
+                        Asnje ndryshim i paruajtur.
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleDiscardTableLayout}
+                      disabled={pendingTablePositionCount === 0 || isSaving}
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-pos-text hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Anulo
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveTableLayout}
+                      disabled={pendingTablePositionCount === 0 || isSaving}
+                      className="rounded-lg border border-pos-accent bg-pos-accent px-4 py-2 text-xs font-semibold text-slate-950 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isSaving ? "Po ruhet..." : "Perfundo"}
+                    </button>
                   </div>
                 </div>
 
@@ -6044,6 +6244,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                         tableDragState?.tableId === binding.table.id;
                       const isSavingPosition =
                         savingTablePositionId === binding.table.id;
+                      const hasUnsavedPosition = Boolean(
+                        pendingTablePositions[binding.table.id],
+                      );
                       const activeSlot = isDraggingThis
                         ? {
                             left: tableDragState.left,
@@ -6063,7 +6266,9 @@ export default function ManagerDashboard({ session, onLogout }) {
                           className={`absolute flex touch-none select-none cursor-grab flex-col justify-center overflow-hidden rounded-lg border px-2 py-1 text-left transition active:cursor-grabbing ${
                             isDraggingThis
                               ? "z-30 border-pos-accent bg-pos-accent/25 shadow-lg"
-                              : "border-white/15 bg-pos-panelSoft hover:border-pos-accent/60"
+                              : hasUnsavedPosition
+                                ? "border-orange-300/40 bg-orange-500/15 hover:border-pos-accent/60"
+                                : "border-white/15 bg-pos-panelSoft hover:border-pos-accent/60"
                           }`}
                           style={{
                             left: `${activeSlot.left}%`,
@@ -6080,6 +6285,11 @@ export default function ManagerDashboard({ session, onLogout }) {
                           </span>
                           {isSavingPosition ? (
                             <span className="absolute right-1 top-1 h-[6px] w-[6px] animate-pulse rounded-full bg-pos-accent" />
+                          ) : hasUnsavedPosition ? (
+                            <span
+                              className="absolute right-1 top-1 h-[6px] w-[6px] rounded-full bg-orange-300"
+                              title="E zhvendosur - ruhet kur shtyp Perfundo"
+                            />
                           ) : null}
                         </button>
                       );
@@ -6100,8 +6310,8 @@ export default function ManagerDashboard({ session, onLogout }) {
                 | Average Paid Order:{" "}
                 {formatMoney(ordersData.summary?.averagePaidOrder)} EUR
               </p>
-              <div className="scroll-y mt-3 max-h-[62vh] overflow-y-auto rounded-xl border border-white/10">
-                <table className="w-full text-left text-sm">
+              <div className="scroll-y mt-3 max-h-[62vh] overflow-y-auto overflow-x-auto rounded-xl border border-white/10">
+                <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="bg-black/20 text-xs uppercase tracking-wide text-pos-muted">
                     <tr>
                       <th className="px-3 py-2">Order</th>

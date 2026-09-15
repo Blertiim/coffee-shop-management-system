@@ -14,11 +14,51 @@
     min-height: 100dvh;
   }
 
+  html {
+    /* Safety net for phone/tablet: something deep in a flex/grid layout
+       (a form row, a filter bar, a table, etc.) can end up computing a
+       min-content width wider than the viewport, which without this
+       makes the WHOLE PAGE scroll sideways instead of just that one
+       piece of content. This clips any such overflow at the page level;
+       it does not affect the intentional per-element horizontal
+       scrolling (e.g. wide tables in "overflow-x-auto" wrappers), since
+       a nested scroll container handles its own content independently
+       of this. */
+    overflow-x: hidden;
+  }
+
+  /* Root cause of the sideways-scroll bug, fixed everywhere at once:
+     every flex/grid item defaults to "min-width: auto", which resolves
+     to the width its own content needs (a wide table, a long filter
+     row, a form...). That lets a container deep inside the page push
+     itself wider than the column it was given, even though every
+     ancestor grid/flex track is already capped to the screen width
+     (grid-cols-1, min-w-0, etc.) - which is exactly why patching one
+     nested div at a time kept missing spots and the bug kept
+     reappearing on other tabs. Resetting min-width back to 0 for every
+     element inside the POS shell removes that "grow to fit my content"
+     behavior everywhere in one go. It's safe to do broadly: elements
+     with an explicit size (w-12, the min-w-[420px] on wide tables so
+     they scroll horizontally inside their own box instead of pushing
+     the page, etc.) are unaffected, because Tailwind's utility classes
+     are loaded after this base layer and win the cascade. */
+  .pos-shell * {
+    min-width: 0;
+  }
+
   body {
     @apply m-0 font-sans text-pos-text antialiased;
     background:
-      radial-gradient(circle at 8% 2%, rgba(31, 162, 255, 0.08) 0%, transparent 30%),
-      radial-gradient(circle at 92% 95%, rgba(56, 120, 217, 0.1) 0%, transparent 34%),
+      radial-gradient(
+        circle at 8% 2%,
+        rgba(31, 162, 255, 0.08) 0%,
+        transparent 30%
+      ),
+      radial-gradient(
+        circle at 92% 95%,
+        rgba(56, 120, 217, 0.1) 0%,
+        transparent 34%
+      ),
       linear-gradient(180deg, #f5f9ff 0%, #eef5ff 48%, #e8f1fd 100%);
   }
 }
@@ -66,9 +106,21 @@
 
   .manager-shell {
     background:
-      radial-gradient(circle at 12% 14%, rgba(31, 162, 255, 0.1) 0%, transparent 24%),
-      radial-gradient(circle at 86% 18%, rgba(56, 120, 217, 0.12) 0%, transparent 28%),
-      radial-gradient(circle at 74% 82%, rgba(120, 170, 240, 0.08) 0%, transparent 30%),
+      radial-gradient(
+        circle at 12% 14%,
+        rgba(31, 162, 255, 0.1) 0%,
+        transparent 24%
+      ),
+      radial-gradient(
+        circle at 86% 18%,
+        rgba(56, 120, 217, 0.12) 0%,
+        transparent 28%
+      ),
+      radial-gradient(
+        circle at 74% 82%,
+        rgba(120, 170, 240, 0.08) 0%,
+        transparent 30%
+      ),
       linear-gradient(180deg, #f5f9ff 0%, #eef5ff 48%, #e8f1fd 100%);
   }
 

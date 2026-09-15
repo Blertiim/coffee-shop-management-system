@@ -45,6 +45,21 @@ const toEndExclusiveDay = (date) => {
   return nextDate;
 };
 
+// DailyClosing.date is a calendar date column (@db.Date), not a moment in
+// time, and Prisma writes/reads such a column in UTC.
+//
+// toStartOfDay() above returns LOCAL midnight, which is exactly right for the
+// revenue queries (the business day runs by the clock on the wall), but wrong
+// as the value of a date column: in any timezone ahead of UTC local midnight
+// belongs to the previous UTC day, so closing 2026-09-15 here (UTC+2) stored
+// 2026-09-15T00:00+02:00 = 2026-09-14T22:00Z and the row came back - and was
+// listed, and printed on the PDF - as 2026-09-14. One day early, every time.
+//
+// This maps a local day onto the UTC midnight that stands for the same
+// calendar date, so the stored date matches the day that was actually closed.
+const toCalendarDate = (date) =>
+  new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+
 const parseDateInput = (value, label) => {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
     const [year, month, day] = value.trim().split("-").map(Number);
@@ -1315,11 +1330,12 @@ exports.getDailyClosingPreview = async (req, res) => {
     const date = req.query.date
       ? parseDateInput(req.query.date, "date")
       : new Date();
-    const from = toStartOfDay(date);
 
     const [totals, existingClosing] = await Promise.all([
       buildDailyTotals(date),
-      prisma.dailyClosing.findUnique({ where: { date: from } }),
+      prisma.dailyClosing.findUnique({
+        where: { date: toCalendarDate(date) },
+      }),
     ]);
 
     return sendSuccess(
@@ -1343,10 +1359,10 @@ exports.createDailyClosing = async (req, res) => {
     const date = req.body.date
       ? parseDateInput(req.body.date, "date")
       : new Date();
-    const from = toStartOfDay(date);
+    const calendarDate = toCalendarDate(date);
 
     const existingClosing = await prisma.dailyClosing.findUnique({
-      where: { date: from },
+      where: { date: calendarDate },
     });
 
     if (existingClosing) {
@@ -1359,7 +1375,7 @@ exports.createDailyClosing = async (req, res) => {
 
     const closing = await prisma.dailyClosing.create({
       data: {
-        date: from,
+        date: calendarDate,
         totalRevenue: totals.totalRevenue,
         totalExpenses: totals.totalExpenses,
         netRevenue: totals.netRevenue,

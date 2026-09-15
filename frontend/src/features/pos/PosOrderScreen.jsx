@@ -1242,14 +1242,14 @@ export default function PosOrderScreen() {
           </div>
         ) : null}
 
-        <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:h-[calc(100vh-228px)] xl:grid-cols-[212px_minmax(0,1fr)_420px] 2xl:grid-cols-[220px_minmax(0,1fr)_440px]">
+        <section className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:h-[calc(100vh-228px)] lg:grid-cols-[180px_minmax(0,1fr)_360px] xl:grid-cols-[212px_minmax(0,1fr)_420px] 2xl:grid-cols-[220px_minmax(0,1fr)_440px]">
           <CategoryRail
             categories={categoryRailItems}
             selectedCategoryKey={selectedCategoryId}
             onSelectCategory={setSelectedCategoryId}
           />
 
-          <section className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] xl:h-full">
+          <section className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] lg:h-full">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">
@@ -1317,7 +1317,7 @@ export default function PosOrderScreen() {
             )}
           </section>
 
-          <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] xl:h-full">
+          <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-4 shadow-[0_10px_24px_rgba(20,55,110,0.08)] lg:h-full">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="m-0 text-[11px] uppercase tracking-[0.18em] text-[#5c7093]">

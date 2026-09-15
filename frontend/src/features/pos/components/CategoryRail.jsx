@@ -1,9 +1,15 @@
-export default function CategoryRail({ categories, selectedCategoryKey, onSelectCategory }) {
+export default function CategoryRail({
+  categories,
+  selectedCategoryKey,
+  onSelectCategory,
+}) {
   return (
-    <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-3 shadow-[0_10px_24px_rgba(20,55,110,0.08)] xl:h-full">
+    <aside className="flex min-h-0 flex-col rounded-[8px] border border-[#d3e3fa] bg-white p-3 shadow-[0_10px_24px_rgba(20,55,110,0.08)] lg:h-full">
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#5c7093]">Left Sidebar</p>
+          <p className="m-0 text-[10px] uppercase tracking-[0.18em] text-[#5c7093]">
+            Left Sidebar
+          </p>
           <h2 className="m-0 mt-2 text-lg font-semibold tracking-[-0.02em] text-[#12213d]">
             Categories
           </h2>

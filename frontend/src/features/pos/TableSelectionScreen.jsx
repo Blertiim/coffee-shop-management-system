@@ -104,65 +104,304 @@ const LOCATION_LABELS = {
 
 const getLocationLabel = (location) =>
   LOCATION_LABELS[location] || location || "Seksioni";
-const TABLE_MONITOR_SLOT_PRESETS = [
-  { left: 2.2, top: 6.4, width: 14.2, height: 9 },
-  { left: 17.5, top: 6.4, width: 14.2, height: 9 },
-  { left: 32.8, top: 6.4, width: 14.2, height: 9 },
-  { left: 48.1, top: 6.4, width: 14.2, height: 9 },
-  { left: 63.4, top: 6.4, width: 14.2, height: 9 },
-  { left: 78.7, top: 6.4, width: 14.2, height: 9 },
-  { left: 2.2, top: 16.6, width: 14.2, height: 9 },
-  { left: 17.5, top: 16.6, width: 14.2, height: 9 },
-  { left: 32.8, top: 16.6, width: 14.2, height: 9 },
-  { left: 48.1, top: 16.6, width: 14.2, height: 9 },
-  { left: 63.4, top: 16.6, width: 14.2, height: 9 },
-  { left: 78.7, top: 16.6, width: 14.2, height: 9 },
-  { left: 2.2, top: 26.8, width: 14.2, height: 9 },
-  { left: 17.5, top: 26.8, width: 14.2, height: 9 },
-  { left: 32.8, top: 26.8, width: 14.2, height: 9 },
-];
-
-const getFallbackMonitorSlot = (index) => {
-  const fallbackIndex = Math.max(0, index - TABLE_MONITOR_SLOT_PRESETS.length);
-  const columns = 6;
-  const column = fallbackIndex % columns;
-  const row = Math.floor(fallbackIndex / columns);
-
-  return {
-    left: 2.2 + column * 15.3,
-    top: 37 + row * 10.2,
-    width: 14.2,
-    height: 9,
-  };
+// Table cards sit on a percentage-based canvas so a manager-dragged position
+// (positionX/positionY, also a %) keeps working at any screen size. The grid
+// itself adapts its column count to the viewport — a phone gets fewer, much
+// bigger/taller cards instead of the same tiny 6-across grid designed for a
+// wide monitor. Column 6 below reproduces the original fixed monitor grid
+// exactly, so desktop/kiosk screens render pixel-identically to before.
+const TABLE_GRID_LAYOUTS = {
+  3: {
+    columns: 3,
+    marginLeft: 2.4,
+    colPitch: 31.87,
+    columnWidth: 29.5,
+    rowTopStart: 6.4,
+    rowHeight: 15,
+    rowPitch: 17,
+  },
+  4: {
+    columns: 4,
+    marginLeft: 2.3,
+    colPitch: 23.85,
+    columnWidth: 22.2,
+    rowTopStart: 6.4,
+    rowHeight: 12,
+    rowPitch: 13.6,
+  },
+  5: {
+    columns: 5,
+    marginLeft: 2.2,
+    colPitch: 19.12,
+    columnWidth: 17.8,
+    rowTopStart: 6.4,
+    rowHeight: 10,
+    rowPitch: 11.3,
+  },
+  6: {
+    columns: 6,
+    marginLeft: 2.2,
+    colPitch: 15.3,
+    columnWidth: 14.2,
+    rowTopStart: 6.4,
+    rowHeight: 9,
+    rowPitch: 10.2,
+  },
 };
 
-const getMonitorSlot = (index) =>
-  TABLE_MONITOR_SLOT_PRESETS[index] || getFallbackMonitorSlot(index);
+const getTableGridLayout = (columns) =>
+  TABLE_GRID_LAYOUTS[columns] || TABLE_GRID_LAYOUTS[6];
 
-const DEFAULT_TABLE_SLOT_SIZE = { width: 14.2, height: 9 };
+// Fewer, wider columns on narrow viewports so table cards stay big enough to
+// read and tap on a real phone; the desktop/kiosk grid (6 columns) is
+// untouched.
+const getTableColumnCount = (viewportWidth) => {
+  if (!viewportWidth) {
+    return 6;
+  }
+
+  if (viewportWidth < 480) {
+    return 3;
+  }
+
+  if (viewportWidth < 768) {
+    return 4;
+  }
+
+  if (viewportWidth < 1024) {
+    return 5;
+  }
+
+  return 6;
+};
+
+// The 5/6-column (tablet/desktop/kiosk) layouts came from a monitor that's
+// wide and comparatively short, so sizing a row as a % of the canvas HEIGHT
+// worked fine there. On a phone the canvas is tall and narrow (the section
+// buttons moved below it), so that same "% of height" row size ends up huge
+// - a card taller than it needs to be for two short lines of text, with the
+// section showing only 4-5 tables before you have to scroll for the rest.
+// For the compact (3/4-column, phone/small-tablet) layouts we instead pick
+// a fixed, comfortable card height in real pixels and convert it to a % of
+// the canvas' measured height, so the card size no longer depends on how
+// tall the canvas happens to be.
+const COMPACT_TABLE_CARD_HEIGHT_PX = 68;
+const COMPACT_TABLE_CARD_GAP_PX = 8;
+const COMPACT_TABLE_CARD_TOP_PX = 8;
+// How small a card is allowed to get when a dense saved floor plan has to be
+// squeezed onto a phone - below this the card stops being comfortably
+// tappable, so cards are allowed to sit closer together (or overlap slightly)
+// instead of shrinking further.
+const COMPACT_PLAN_MIN_CARD_WIDTH_PX = 60;
+const COMPACT_PLAN_MIN_CARD_HEIGHT_PX = 46;
+const COMPACT_PLAN_MIN_CARD_GAP_PX = 6;
+// Under this width "Tavolina - 12" no longer fits, so the card shows just the
+// table number (a little larger) rather than a clipped name.
+const COMPACT_PLAN_NAME_MIN_CARD_WIDTH_PX = 92;
+
+const getTableSlotSize = (layout) => ({
+  width: layout.columnWidth,
+  height: layout.rowHeight,
+});
+
+const getMonitorSlot = (index, layout) => {
+  const column = index % layout.columns;
+  const row = Math.floor(index / layout.columns);
+
+  return {
+    left: layout.marginLeft + column * layout.colPitch,
+    top: layout.rowTopStart + row * layout.rowPitch,
+    ...getTableSlotSize(layout),
+  };
+};
 
 const hasCustomPosition = (table) =>
   typeof table?.positionX === "number" && typeof table?.positionY === "number";
 
-// A manager-dragged position always wins; tables that were never dragged
-// fall back to the auto-generated preset grid so old data keeps working.
-const resolveTableSlot = (table, index) => {
-  if (hasCustomPosition(table)) {
+// A manager-dragged position always wins ON THE BIG SCREEN, where the
+// drag-the-floor-plan feature lives and the saved % values were recorded;
+// tables that were never dragged fall back to the auto-generated grid so old
+// data keeps working.
+//
+// On a phone/small tablet the raw values are not replayed as-is
+// (useCustomPositions = false) - see fitSavedPlanToCanvas below, which keeps
+// the same arrangement but scales it down to fit. Played back untouched, a
+// plan recorded on a wide, short monitor falls apart on a tall, narrow phone:
+// vertically the cards drift far apart (a small % of a very tall canvas is
+// still a lot of pixels) and horizontally a card saved at e.g. 75% runs
+// straight off the right edge.
+const resolveTableSlot = (table, index, layout, useCustomPositions = true) => {
+  if (useCustomPositions && hasCustomPosition(table)) {
     return {
       left: table.positionX,
       top: table.positionY,
-      width: DEFAULT_TABLE_SLOT_SIZE.width,
-      height: DEFAULT_TABLE_SLOT_SIZE.height,
+      ...getTableSlotSize(layout),
     };
   }
 
-  return getMonitorSlot(index);
+  return getMonitorSlot(index, layout);
 };
 
-const compactBindingsToMonitorSlots = (bindings) =>
+// Groups nearly-equal coordinates from the saved plan into columns (or rows):
+// the manager drags cards by hand, so a column of tables is never at exactly
+// the same X - it's 19.6, 19.6, 20, ... Values within PLAN_CLUSTER_TOLERANCE of
+// each other are treated as the same column/row.
+const PLAN_CLUSTER_TOLERANCE = 4;
+
+const clusterPositions = (values) => {
+  const sorted = [...new Set(values)].sort((first, second) => first - second);
+  const indexByValue = new Map();
+  let index = 0;
+  let previous = sorted[0];
+
+  sorted.forEach((value) => {
+    if (value - previous > PLAN_CLUSTER_TOLERANCE) {
+      index += 1;
+    }
+
+    indexByValue.set(value, index);
+    previous = value;
+  });
+
+  return { indexByValue, count: index + 1 };
+};
+
+// Replays the manager's saved floor plan on a phone/small-tablet screen.
+//
+// The raw saved coordinates can't be used directly: they are a % of a wide,
+// short monitor canvas, so on a tall, narrow phone the cards drift far apart
+// vertically and run off the right edge horizontally. Scaling them to fit
+// doesn't work either - hand-dragged positions are never perfectly aligned, so
+// a tiny 0.6% wobble between two cards forces the whole plan to shrink.
+//
+// So instead the plan is read for what it actually means: which column a table
+// is in and which row, i.e. who is left of whom and who is above whom. Those
+// columns and rows are then laid out neatly on the phone - columns spread
+// across the full width, rows at a fixed compact pitch from the top. The
+// arrangement a waiter recognises from the big screen is preserved, the cards
+// stay readable and tappable, and nothing lands off-screen or on top of
+// something else.
+//
+// Returns null when there is nothing to fit (fewer than two saved positions, or
+// the canvas has not been measured yet) so the caller falls back to the grid.
+const fitSavedPlanToCanvas = (bindings, layout, canvasSize) => {
+  if (!canvasSize?.width || !canvasSize?.height) {
+    return null;
+  }
+
+  const positioned = bindings.filter(({ table }) => hasCustomPosition(table));
+
+  if (positioned.length < 2) {
+    return null;
+  }
+
+  const columns = clusterPositions(
+    positioned.map(({ table }) => table.positionX),
+  );
+  const rows = clusterPositions(positioned.map(({ table }) => table.positionY));
+
+  const cardWidthPx = Math.max(
+    Math.min(
+      (getTableSlotSize(layout).width / 100) * canvasSize.width,
+      (canvasSize.width - (columns.count - 1) * COMPACT_PLAN_MIN_CARD_GAP_PX) /
+        columns.count,
+    ),
+    COMPACT_PLAN_MIN_CARD_WIDTH_PX,
+  );
+  const cardHeightPx = Math.max(
+    Math.min(
+      COMPACT_TABLE_CARD_HEIGHT_PX,
+      (canvasSize.height -
+        COMPACT_TABLE_CARD_TOP_PX -
+        (rows.count - 1) * COMPACT_TABLE_CARD_GAP_PX) /
+        rows.count,
+    ),
+    COMPACT_PLAN_MIN_CARD_HEIGHT_PX,
+  );
+
+  const columnPitchPx =
+    columns.count > 1
+      ? (canvasSize.width - cardWidthPx) / (columns.count - 1)
+      : 0;
+  const rowPitchPx = cardHeightPx + COMPACT_TABLE_CARD_GAP_PX;
+  const singleColumnLeftPx =
+    columns.count > 1 ? 0 : Math.max((canvasSize.width - cardWidthPx) / 2, 0);
+
+  // Two tables the manager stacked on the same spot would land in the same
+  // cell; the second one moves to the next free cell instead of hiding under
+  // the first. Walking the plan in reading order keeps that stable.
+  const takenCells = new Set();
+  const cellByTableId = new Map();
+  const readingOrder = [...positioned].sort((first, second) => {
+    const rowDifference =
+      rows.indexByValue.get(first.table.positionY) -
+      rows.indexByValue.get(second.table.positionY);
+
+    if (rowDifference !== 0) {
+      return rowDifference;
+    }
+
+    return (
+      columns.indexByValue.get(first.table.positionX) -
+      columns.indexByValue.get(second.table.positionX)
+    );
+  });
+
+  readingOrder.forEach(({ table }) => {
+    let row = rows.indexByValue.get(table.positionY);
+    let column = columns.indexByValue.get(table.positionX);
+
+    while (takenCells.has(`${row}:${column}`)) {
+      column += 1;
+
+      if (column >= columns.count) {
+        column = 0;
+        row += 1;
+      }
+    }
+
+    takenCells.add(`${row}:${column}`);
+    cellByTableId.set(table.id, { row, column });
+  });
+
+  const size = {
+    width: (cardWidthPx / canvasSize.width) * 100,
+    height: (cardHeightPx / canvasSize.height) * 100,
+  };
+
+  return bindings.map((binding, index) => {
+    const cell = cellByTableId.get(binding.table.id);
+
+    if (!cell) {
+      return {
+        ...binding,
+        slot: getMonitorSlot(index, layout),
+      };
+    }
+
+    const leftPx =
+      columns.count > 1 ? cell.column * columnPitchPx : singleColumnLeftPx;
+    const topPx = COMPACT_TABLE_CARD_TOP_PX + cell.row * rowPitchPx;
+
+    return {
+      ...binding,
+      slot: {
+        left: (leftPx / canvasSize.width) * 100,
+        top: (topPx / canvasSize.height) * 100,
+        ...size,
+      },
+    };
+  });
+};
+
+const compactBindingsToMonitorSlots = (
+  bindings,
+  layout,
+  useCustomPositions = true,
+) =>
   bindings.map((binding, index) => ({
     ...binding,
-    slot: resolveTableSlot(binding.table, index),
+    slot: resolveTableSlot(binding.table, index, layout, useCustomPositions),
   }));
 
 const buildTableBindings = (tables) =>
@@ -171,7 +410,7 @@ const buildTableBindings = (tables) =>
     .map((table, index) => ({
       table,
       visualId: index + 1,
-      slot: resolveTableSlot(table, index),
+      slot: resolveTableSlot(table, index, TABLE_GRID_LAYOUTS[6]),
     }));
 
 const getTableCardTheme = (status, isOpening) => {
@@ -246,6 +485,7 @@ export default function TableSelectionScreen() {
   );
   const [openingTableId, setOpeningTableId] = useState(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [isArrangeMode, setIsArrangeMode] = useState(false);
   const [dragState, setDragState] = useState(null);
   const [savingPositionTableId, setSavingPositionTableId] = useState(null);
@@ -364,6 +604,38 @@ export default function TableSelectionScreen() {
     [visibleTables],
   );
 
+  const tableColumns = useMemo(
+    () => getTableColumnCount(viewport.width),
+    [viewport.width],
+  );
+  // A phone or narrow tablet portrait gets fewer, bigger table cards — reuse
+  // that same threshold to bump up the tiny kiosk-monitor font sizes on the
+  // table cards themselves so the table number stays readable.
+  const isCompactTableLayout = tableColumns <= 4;
+
+  // On phone/small-tablet, replace the row height/pitch that came from the
+  // monitor layout (a % of the canvas height, which blows up huge once the
+  // canvas is tall instead of wide) with a fixed, comfortable pixel height
+  // converted to a % of the *actual measured* canvas height. Desktop/kiosk
+  // (5-6 columns) keeps the original numbers untouched.
+  const effectiveTableLayout = useMemo(() => {
+    const baseLayout = getTableGridLayout(tableColumns);
+
+    if (!isCompactTableLayout || !canvasSize.height) {
+      return baseLayout;
+    }
+
+    return {
+      ...baseLayout,
+      rowTopStart: (COMPACT_TABLE_CARD_TOP_PX / canvasSize.height) * 100,
+      rowHeight: (COMPACT_TABLE_CARD_HEIGHT_PX / canvasSize.height) * 100,
+      rowPitch:
+        ((COMPACT_TABLE_CARD_HEIGHT_PX + COMPACT_TABLE_CARD_GAP_PX) /
+          canvasSize.height) *
+        100,
+    };
+  }, [canvasSize.height, isCompactTableLayout, tableColumns]);
+
   const displayedBindings = useMemo(() => {
     const filteredBindings =
       selectedLocation === "all"
@@ -372,8 +644,73 @@ export default function TableSelectionScreen() {
             ({ table }) => table.location === selectedLocation,
           );
 
-    return compactBindingsToMonitorSlots(filteredBindings);
-  }, [selectedLocation, tableBindings]);
+    // On phone/small tablet the manager's saved floor plan is kept, but scaled
+    // down to fit the screen instead of replayed at its monitor coordinates
+    // (which scattered the cards and pushed a whole column off the right
+    // edge). Falls through to the plain grid when there's no plan to fit.
+    if (isCompactTableLayout) {
+      const fittedPlan = fitSavedPlanToCanvas(
+        filteredBindings,
+        effectiveTableLayout,
+        canvasSize,
+      );
+
+      if (fittedPlan) {
+        return fittedPlan;
+      }
+    }
+
+    return compactBindingsToMonitorSlots(
+      filteredBindings,
+      effectiveTableLayout,
+      !isCompactTableLayout,
+    );
+  }, [
+    selectedLocation,
+    tableBindings,
+    effectiveTableLayout,
+    isCompactTableLayout,
+    canvasSize,
+  ]);
+
+  // Measures the actual table canvas (not just the window) so the compact
+  // row height above can be based on real available space instead of a
+  // guessed percentage. Re-runs whenever the canvas element appears/
+  // disappears (loading finishes, section changes to one with/without
+  // tables), since the canvas is only mounted when there's something to
+  // show.
+  useEffect(() => {
+    const node = canvasRef.current;
+
+    if (!node || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const applySize = (width, height) => {
+      setCanvasSize((current) =>
+        Math.round(current.width) === Math.round(width) &&
+        Math.round(current.height) === Math.round(height)
+          ? current
+          : { width, height },
+      );
+    };
+
+    const rect = node.getBoundingClientRect();
+    applySize(rect.width, rect.height);
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+
+      if (entry) {
+        applySize(entry.contentRect.width, entry.contentRect.height);
+      }
+    });
+
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, [isLoading, displayedBindings.length]);
+
   const latestGuestOrderTable = useMemo(() => {
     const guestOrderBindings = tableBindings
       .filter(({ table }) => table.activeGuestOrder)
@@ -632,11 +969,15 @@ export default function TableSelectionScreen() {
     [dragState, logout, session.token, setTableData, showNotice],
   );
 
+  // Arranging the floor plan is a big-screen feature: the dragged positions
+  // are saved as a % of a wide monitor canvas and are not used on phone/small
+  // tablet (see resolveTableSlot), so letting someone drag there would look
+  // like the card "snaps back" for no reason.
   useEffect(() => {
-    if (!canManageLayout && isArrangeMode) {
+    if ((!canManageLayout || isCompactTableLayout) && isArrangeMode) {
       setIsArrangeMode(false);
     }
-  }, [canManageLayout, isArrangeMode]);
+  }, [canManageLayout, isArrangeMode, isCompactTableLayout]);
 
   useEffect(() => {
     if (typeof window === "undefined" || isLoading || openingTableId !== null) {
@@ -717,23 +1058,23 @@ export default function TableSelectionScreen() {
     <main className="min-h-[100dvh] bg-[linear-gradient(180deg,#f5f9ff_0%,#eef5ff_48%,#e8f1fd_100%)] p-0">
       <section className="flex min-h-[100dvh] rounded-none border-0 bg-[radial-gradient(circle_at_18%_18%,rgba(31,162,255,0.08)_0%,transparent_24%),radial-gradient(circle_at_82%_78%,rgba(56,120,217,0.08)_0%,transparent_28%),linear-gradient(180deg,#f5f9ff_0%,#eef5ff_48%,#e8f1fd_100%)] p-0">
         <div
-          className={`grid min-h-full w-full rounded-none border-0 bg-[#d3e3fa] p-0 ${
+          className={`grid min-h-full w-full min-w-0 rounded-none border-0 bg-[#d3e3fa] p-0 ${
             isTabletLayout
-              ? "grid-rows-[minmax(0,1fr)_auto] gap-px"
+              ? "grid-cols-1 grid-rows-[minmax(0,1fr)_auto] gap-px"
               : "grid-cols-[minmax(0,1fr)_84px] gap-px sm:grid-cols-[minmax(0,1fr)_104px] sm:gap-px"
           }`}
         >
-          <div className="relative min-h-0 overflow-hidden rounded-none border-0 bg-[linear-gradient(180deg,#ffffff_0%,#f7faff_48%,#f3f8ff_100%)]">
+          <div className="relative min-h-0 min-w-0 overflow-hidden rounded-none border-0 bg-[linear-gradient(180deg,#ffffff_0%,#f7faff_48%,#f3f8ff_100%)]">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_21%_18%,rgba(31,162,255,0.05)_0%,transparent_22%),radial-gradient(circle_at_70%_48%,rgba(31,162,255,0.07)_0%,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.5)_0%,transparent_24%,transparent_100%)]" />
 
             <div className="relative z-10 flex h-full min-h-0 flex-col">
-              <div className="flex items-center justify-between border-b border-[#e1ecfb] px-[5px] py-[4px] text-[8px] font-medium tracking-[0.08em] text-[#5c7093] sm:px-[6px] sm:text-[9px]">
+              <div className="flex items-center justify-between border-b border-[#e1ecfb] px-[5px] py-[4px] text-[9px] font-medium tracking-[0.08em] text-[#5c7093] sm:px-[6px] sm:text-[10px]">
                 <span>{getLocationLabel(selectedLocation)}</span>
-                {canManageLayout ? (
+                {canManageLayout && !isCompactTableLayout ? (
                   <button
                     type="button"
                     onClick={() => setIsArrangeMode((current) => !current)}
-                    className={`rounded-[2px] border px-[6px] py-[2px] text-[7px] font-semibold uppercase tracking-[0.08em] transition sm:text-[8px] ${
+                    className={`rounded-[2px] border px-[6px] py-[2px] text-[8px] font-semibold uppercase tracking-[0.08em] transition sm:text-[9px] ${
                       isArrangeMode
                         ? "border-[#0f6bb8] bg-[#0f6bb8] text-white"
                         : "border-[#8fb8ee] bg-white text-[#0f6bb8] hover:bg-[#eef5ff]"
@@ -749,13 +1090,13 @@ export default function TableSelectionScreen() {
               </div>
 
               {isArrangeMode ? (
-                <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#8fb8ee] bg-[#eef5ff] px-2 py-1 text-[8px] text-[#0f6bb8] sm:text-[9px]">
+                <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#8fb8ee] bg-[#eef5ff] px-2 py-1 text-[9px] text-[#0f6bb8] sm:text-[10px]">
                   Terhiqe nje tavoline kudo don. Ruhet vet automatikisht.
                 </div>
               ) : null}
 
               {error ? (
-                <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#f3c3c9] bg-[#fdedef] px-2 py-1 text-[9px] text-[#b3364a] sm:text-[10px]">
+                <div className="mx-[6px] mt-[6px] rounded-[2px] border border-[#f3c3c9] bg-[#fdedef] px-2 py-1 text-[10px] text-[#b3364a] sm:text-[11px]">
                   {error}
                 </div>
               ) : null}
@@ -766,11 +1107,11 @@ export default function TableSelectionScreen() {
                     <PosScreenLoader label="Loading tables..." />
                   </div>
                 ) : visibleTables.length === 0 ? (
-                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#5c7093] sm:text-[11px]">
+                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[11px] text-[#5c7093] sm:text-[12px]">
                     Nuk ka asnje tavoline te krijuar ende.
                   </div>
                 ) : displayedBindings.length === 0 ? (
-                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[10px] text-[#5c7093] sm:text-[11px]">
+                  <div className="flex h-full items-center justify-center px-6 py-4 text-center text-[11px] text-[#5c7093] sm:text-[12px]">
                     Nuk ka tavolina ne kete seksion.
                   </div>
                 ) : (
@@ -803,6 +1144,14 @@ export default function TableSelectionScreen() {
                               height: dragState.height,
                             }
                           : slot;
+                        // A dense saved floor plan can squeeze the cards
+                        // narrower than the full "Tavolina - 12" fits; those
+                        // show just the number instead of a clipped name.
+                        const showShortLabel =
+                          isCompactTableLayout &&
+                          canvasSize.width > 0 &&
+                          (activeSlot.width / 100) * canvasSize.width <
+                            COMPACT_PLAN_NAME_MIN_CARD_WIDTH_PX;
 
                         return (
                           <button
@@ -848,11 +1197,25 @@ export default function TableSelectionScreen() {
                             <span
                               className={`absolute inset-y-0 left-0 w-[3px] ${theme.stripeClass}`}
                             />
-                            <span className="pl-[5px] text-[9px] font-medium tracking-[0.01em] text-[#12213d]">
-                              Tavolina - {visualId}
+                            <span
+                              className={`pl-[5px] font-medium tracking-[0.01em] text-[#12213d] ${
+                                showShortLabel
+                                  ? "text-[15px] font-semibold"
+                                  : isCompactTableLayout
+                                    ? "text-[12px]"
+                                    : "text-[9px]"
+                              }`}
+                            >
+                              {showShortLabel
+                                ? visualId
+                                : `Tavolina - ${visualId}`}
                             </span>
                             <span
-                              className={`mt-[3px] pl-[5px] text-[8px] font-medium leading-tight ${theme.metaTextClass}`}
+                              className={`mt-[3px] pl-[5px] font-medium leading-tight ${theme.metaTextClass} ${
+                                isCompactTableLayout
+                                  ? "text-[10px]"
+                                  : "text-[8px]"
+                              }`}
                             >
                               {showMeta ? theme.label : "\u00A0"}
                             </span>
@@ -886,7 +1249,7 @@ export default function TableSelectionScreen() {
                     key={section.key}
                     type="button"
                     onClick={() => setSelectedLocation(section.key)}
-                    className={`min-h-[56px] border px-1 text-center text-[8px] font-medium tracking-[0.04em] transition ${
+                    className={`min-h-[56px] border px-1 text-center text-[9px] font-medium tracking-[0.04em] transition ${
                       isActive
                         ? "border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] text-white"
                         : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#8fb8ee]"
@@ -898,27 +1261,27 @@ export default function TableSelectionScreen() {
               })}
 
               <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#5fb46a] bg-[linear-gradient(180deg,#5fc26c_0%,#2f8f45_100%)] px-1 text-center text-white">
-                <span className="text-[7px] uppercase tracking-[0.16em]">
+                <span className="text-[8px] uppercase tracking-[0.16em]">
                   Totali
                 </span>
-                <span className="mt-1 text-[9px] font-semibold">
+                <span className="mt-1 text-[10px] font-semibold">
                   {formatPrice(dailyPaidTotals.totalPaid)}
                 </span>
               </div>
 
               <button
                 type="button"
-                className="min-h-[54px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99]"
+                className="min-h-[54px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[8px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99]"
                 onClick={logout}
               >
                 Logout
               </button>
 
               <div className="flex min-h-[54px] flex-col items-center justify-center border border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] px-1 text-center text-white">
-                <span className="text-[7px] uppercase tracking-[0.16em]">
+                <span className="text-[8px] uppercase tracking-[0.16em]">
                   Open
                 </span>
-                <span className="mt-1 text-[9px] font-bold">
+                <span className="mt-1 text-[10px] font-bold">
                   {openTablesCount}
                 </span>
               </div>
@@ -933,7 +1296,7 @@ export default function TableSelectionScreen() {
                     key={section.key}
                     type="button"
                     onClick={() => setSelectedLocation(section.key)}
-                    className={`flex-1 rounded-[2px] border px-1 text-center text-[8px] font-medium tracking-[0.04em] transition min-h-[82px] sm:min-h-[98px] sm:text-[9px] ${
+                    className={`flex-1 rounded-[2px] border px-1 text-center text-[9px] font-medium tracking-[0.04em] transition min-h-[82px] sm:min-h-[98px] sm:text-[10px] ${
                       isActive
                         ? "border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] text-white"
                         : "border-[#d3e3fa] bg-[#f7faff] text-[#12213d] hover:border-[#8fb8ee]"
@@ -947,23 +1310,23 @@ export default function TableSelectionScreen() {
               <div className="relative flex-[1.15] overflow-hidden rounded-[2px] border border-[#e1ecfb] bg-[linear-gradient(180deg,#ffffff_0%,#f3f8ff_100%)] min-h-[146px]">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(31,162,255,0.06)_0%,transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.5)_0%,transparent_35%,rgba(18,33,61,0.02)_100%)]" />
                 <div className="relative flex h-full min-h-[146px] flex-col items-center justify-center px-2 py-3 text-center">
-                  <p className="m-0 text-[7px] uppercase tracking-[0.24em] text-[#5c7093]">
+                  <p className="m-0 text-[8px] uppercase tracking-[0.24em] text-[#5c7093]">
                     Terminal
                   </p>
-                  <p className="m-0 mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0f6bb8] sm:text-[11px]">
+                  <p className="m-0 mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0f6bb8] sm:text-[12px]">
                     {barName}
                   </p>
-                  <p className="m-0 mt-2 text-[7px] uppercase tracking-[0.18em] text-[#5c7093]">
+                  <p className="m-0 mt-2 text-[8px] uppercase tracking-[0.18em] text-[#5c7093]">
                     Table Control
                   </p>
                 </div>
               </div>
 
               <div className="rounded-[2px] border border-[#5fb46a] bg-[linear-gradient(180deg,#5fc26c_0%,#2f8f45_100%)] px-1 py-3 text-center text-white sm:py-4">
-                <p className="m-0 text-[7px] uppercase tracking-[0.16em]">
+                <p className="m-0 text-[8px] uppercase tracking-[0.16em]">
                   Totali
                 </p>
-                <p className="m-0 mt-1 text-[9px] font-semibold sm:text-[10px]">
+                <p className="m-0 mt-1 text-[10px] font-semibold sm:text-[11px]">
                   {formatPrice(dailyPaidTotals.totalPaid)}
                 </p>
               </div>
@@ -971,17 +1334,17 @@ export default function TableSelectionScreen() {
               <div className="grid grid-cols-2 gap-[4px]">
                 <button
                   type="button"
-                  className="min-h-[58px] rounded-[2px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[7px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99] sm:min-h-[64px] sm:text-[8px]"
+                  className="min-h-[58px] rounded-[2px] border border-[#e3607a] bg-[linear-gradient(180deg,#eb5a6b_0%,#c23a52_100%)] px-1 text-center text-[8px] font-semibold tracking-[0.06em] text-white transition hover:brightness-105 active:scale-[0.99] sm:min-h-[64px] sm:text-[9px]"
                   onClick={logout}
                 >
                   Logout
                 </button>
 
                 <div className="flex min-h-[58px] flex-col items-center justify-center rounded-[2px] border border-[#e6b657] bg-[linear-gradient(180deg,#f2c977_0%,#c48f3e_100%)] px-1 text-center text-white sm:min-h-[64px]">
-                  <span className="text-[7px] uppercase tracking-[0.16em]">
+                  <span className="text-[8px] uppercase tracking-[0.16em]">
                     Open
                   </span>
-                  <span className="mt-1 text-[9px] font-bold sm:text-[10px]">
+                  <span className="mt-1 text-[10px] font-bold sm:text-[11px]">
                     {openTablesCount}
                   </span>
                 </div>
